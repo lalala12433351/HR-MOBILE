@@ -64,7 +64,10 @@ jobs:
           java-version: 21
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          # Google no longer publishes the legacy `tools` package; v4 defaults to platform-tools only.
+          packages: platform-tools
 
       - name: Install npm dependencies
         run: npm ci
