@@ -22,6 +22,7 @@ import { Employee, DepartmentName, Role } from '@/types';
 import { api } from '@/services/apiClient';
 import { saveStoredState } from '@/services/store';
 import { inferApiRoleFromDesignation } from '@/utils/roleMapping';
+import { getCurrentPosition } from '@/lib/native';
 
 interface TempOffice {
   id: string;
@@ -212,21 +213,17 @@ export const WorkspaceSetupWizard: React.FC = () => {
   const [officeError, setOfficeError] = useState('');
   const [editingOfficeId, setEditingOfficeId] = useState<string | null>(initialOfficesList[0]?.id || null);
 
-  // Geolocation detection on mount
+  // Geolocation detection on mount (Capacitor on device, browser API on web)
   useEffect(() => {
-    if (typeof window !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setOfficeLatitude(pos.coords.latitude);
-          setOfficeLongitude(pos.coords.longitude);
-        },
-        () => {
-          setOfficeLatitude(DEFAULT_GEO_COORDINATES.latitude);
-          setOfficeLongitude(DEFAULT_GEO_COORDINATES.longitude);
-        },
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    }
+    void getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 })
+      .then((pos) => {
+        setOfficeLatitude(pos.latitude);
+        setOfficeLongitude(pos.longitude);
+      })
+      .catch(() => {
+        setOfficeLatitude(DEFAULT_GEO_COORDINATES.latitude);
+        setOfficeLongitude(DEFAULT_GEO_COORDINATES.longitude);
+      });
   }, []);
 
   // STEP 2: Departments

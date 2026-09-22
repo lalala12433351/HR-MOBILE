@@ -8,6 +8,7 @@ import {
   MAX_GEOFENCE_LIMIT_METERS,
   MIN_GEOFENCE_LIMIT_METERS,
 } from '@/config/constants';
+import { getCurrentPosition } from '@/lib/native';
 
 export interface OfficeModalData {
   id?: string;
@@ -65,22 +66,15 @@ export const AddOfficeModal: React.FC<AddOfficeModalProps> = ({
         setGeofencingStatus('Active');
         setClockingDevices('Desktop, Mobile');
         setPolicyDescription('Not allow clock in/out outside the office');
-        if (typeof window !== 'undefined' && navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              setLatitude(pos.coords.latitude);
-              setLongitude(pos.coords.longitude);
-            },
-            () => {
-              setLatitude(DEFAULT_GEO_COORDINATES.latitude);
-              setLongitude(DEFAULT_GEO_COORDINATES.longitude);
-            },
-            { enableHighAccuracy: true, timeout: 6000 }
-          );
-        } else {
-          setLatitude(DEFAULT_GEO_COORDINATES.latitude);
-          setLongitude(DEFAULT_GEO_COORDINATES.longitude);
-        }
+        void getCurrentPosition({ enableHighAccuracy: true, timeout: 6000 })
+          .then((pos) => {
+            setLatitude(pos.latitude);
+            setLongitude(pos.longitude);
+          })
+          .catch(() => {
+            setLatitude(DEFAULT_GEO_COORDINATES.latitude);
+            setLongitude(DEFAULT_GEO_COORDINATES.longitude);
+          });
       }
     }
   }, [isOpen, initialData]);

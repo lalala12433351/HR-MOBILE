@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { openExternalUrl } from '@/lib/native';
 import { useRouter } from 'next/navigation';
 import { Calendar, ChevronDown, Check, ArrowRight, Video, ExternalLink } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
@@ -186,9 +187,11 @@ export const SchedulesCard: React.FC = () => {
                   {ts.meetingLink && (
                     <a
                       href={ts.meetingLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void openExternalUrl(String(ts.meetingLink));
+                      }}
                       className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#1a73e8] hover:underline shrink-0"
                       title="Open meeting link"
                     >

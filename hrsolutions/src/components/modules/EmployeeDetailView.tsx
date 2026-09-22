@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { downloadBlob } from '@/lib/native';
 import { useRouter } from 'next/navigation';
 import {
   ChevronLeft,
@@ -4018,11 +4019,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           <button
                             onClick={() => {
                               const blob = new Blob([`Official Record: ${doc.name}\nBelonging to: ${employee.name}`], { type: 'text/plain' });
-                              const url = URL.createObjectURL(blob);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = doc.name;
-                              a.click();
+                              void downloadBlob(blob, doc.name);
                             }}
                             className="p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-white transition-colors cursor-pointer"
                             title="Download Document"
@@ -4566,11 +4563,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     ],
                     { type: 'text/plain' }
                   );
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = previewPayslip.name;
-                  a.click();
+                  void downloadBlob(blob, previewPayslip.name);
                 }}
                 className="px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
               >

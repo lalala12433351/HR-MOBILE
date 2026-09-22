@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { downloadBlob } from '@/lib/native';
 import Link from 'next/link';
 import { AppState } from '../../services/store';
 import {

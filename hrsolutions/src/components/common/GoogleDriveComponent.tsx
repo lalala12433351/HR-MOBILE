@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { openExternalUrl } from '@/lib/native';
 import {
   HardDrive,
   FileText,
@@ -544,9 +545,12 @@ export const GoogleDriveComponent: React.FC<GoogleDriveComponentProps> = ({
                     {f.webViewLink ? (
                       <a
                         href={f.webViewLink}
-                        target="_blank"
                         rel="noreferrer"
                         className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          void openExternalUrl(String(f.webViewLink));
+                        }}
                       >
                         <ExternalLink className="h-3.5 w-3.5" /> Open
                       </a>

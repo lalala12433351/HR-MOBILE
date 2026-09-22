@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { DEFAULT_GEO_COORDINATES } from '@/config/constants';
+import { getCurrentPosition } from '@/lib/native';
 
 interface SearchResultItem {
   name: string;
@@ -201,32 +202,28 @@ export const OfficeLocationPickerMap: React.FC<OfficeLocationPickerMapProps> = (
     setSearchQuery('');
   };
 
-  const handleUseCurrentGPS = () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.');
-      return;
-    }
-
+  const handleUseCurrentGPS = async () => {
     setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
+    try {
+      const pos = await getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10000,
+      });
+      const lat = pos.latitude;
+      const lng = pos.longitude;
 
-        if (mapInstanceRef.current && markerRef.current) {
-          markerRef.current.setLatLng([lat, lng]);
-          mapInstanceRef.current.flyTo([lat, lng], 17, { duration: 0.8 });
-        }
+      if (mapInstanceRef.current && markerRef.current) {
+        markerRef.current.setLatLng([lat, lng]);
+        mapInstanceRef.current.flyTo([lat, lng], 17, { duration: 0.8 });
+      }
 
-        reverseGeocode(lat, lng);
-        setIsLocating(false);
-      },
-      (err) => {
-        console.warn('GPS location error:', err);
-        setIsLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+      reverseGeocode(lat, lng);
+    } catch (err) {
+      console.warn('GPS location error:', err);
+      alert('Unable to get your current location. Please allow location access and try again.');
+    } finally {
+      setIsLocating(false);
+    }
   };
 
   return (

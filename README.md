@@ -1,42 +1,46 @@
 # Enterprise BOS / HR Solutions Platform
 
-A complete multi-tenant Business Operating System & HRMS platform consisting of:
+Frontend HRMS (Pixbe) with Capacitor Android/iOS shells. The UI lives in `hrsolutions/`; connect any existing backend via env (`NEXT_PUBLIC_BACKEND_URL`).
 
 ```text
-solutions/
-├── hrsolutions/     # Frontend Web Application (React / Next.js / TailwindCSS)
-├── app/             # Multi-Tenant Node.js Backend (PostgreSQL, Prisma, Cognito, S3)
-└── .github/         # CI/CD Workflows (Amazon ECR & ECS Automated Deployment)
+HR-Solutions-Moblie/
+├── hrsolutions/     # Next.js UI + Capacitor (android/ ios/)
+└── .github/         # Android APK & iOS IPA workflows
 ```
 
 ---
 
-## 📁 Projects
+## Frontend (`hrsolutions/`)
 
-### 1. Frontend (`hrsolutions/`)
-The React/TypeScript frontend application containing the full suite of HRMS dashboards, geofenced attendance tracking, employee directory, leave management, payroll review, and admin controls.
-
-To run the frontend locally:
 ```bash
 cd hrsolutions
 npm install
 npm run dev
 ```
 
-### 2. Backend (`app/`)
-Enterprise-grade Node.js 20 (TypeScript) backend with schema-per-tenant PostgreSQL isolation, AWS Cognito JWT authentication, AWS S3 KMS presigned storage, and full REST API services.
+### Mobile (Capacitor)
 
-To run the backend locally:
+The native apps load the hosted UI (`https://app.pixbe.in` by default) so all web features stay intact.
+
 ```bash
-cd app
+cd hrsolutions
 npm install
-cp .env.example .env
-npm run dev
+npx cap sync
+npm run cap:android   # Android Studio
+npm run cap:ios       # Xcode (Mac)
 ```
+
+Full guide: [hrsolutions/MOBILE.md](hrsolutions/MOBILE.md)
 
 ---
 
-## 🚀 CI/CD & Deployment
+## CI/CD (GitHub Actions)
 
-- **Amazon ECR & ECS Pipeline**: See the full setup guide in [DEPLOYMENT_ECR.md](DEPLOYMENT_ECR.md) for configuring GitHub Actions OIDC and deploying container images to Amazon ECR.
-- **Workflow File**: [`.github/workflows/backend-deploy.yml`](.github/workflows/backend-deploy.yml)
+After you connect this project to a GitHub repo, these workflows run from the root:
+
+| Workflow | File | What it does |
+|----------|------|----------------|
+| Android APK | [`.github/workflows/android-build.yml`](.github/workflows/android-build.yml) | Debug APK on push; signed release via `workflow_dispatch` + keystore secrets |
+| iOS IPA | [`.github/workflows/ios-build.yml`](.github/workflows/ios-build.yml) | Manual IPA build; optional TestFlight |
+
+Secrets and steps are documented in [hrsolutions/MOBILE.md](hrsolutions/MOBILE.md).

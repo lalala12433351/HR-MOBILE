@@ -4,6 +4,18 @@ const isVercel = Boolean(process.env.VERCEL);
 const nextConfig = {
   ...(isVercel ? {} : { output: 'standalone' }),
   reactStrictMode: true,
+  transpilePackages: [
+    '@capacitor/core',
+    '@capacitor/app',
+    '@capacitor/browser',
+    '@capacitor/camera',
+    '@capacitor/filesystem',
+    '@capacitor/geolocation',
+    '@capacitor/keyboard',
+    '@capacitor/share',
+    '@capacitor/splash-screen',
+    '@capacitor/status-bar',
+  ],
   images: {
     remotePatterns: [
       {

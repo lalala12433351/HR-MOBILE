@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import { downloadBlob } from '@/lib/native';
 import { AppState } from '@/services/store';
 import {
   BarChart3,

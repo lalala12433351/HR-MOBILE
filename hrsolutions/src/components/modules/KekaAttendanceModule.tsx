@@ -83,6 +83,7 @@ import { UserAvatar } from '../common/UserAvatar';
 import { PunchLocationLeafletMap } from '../common/PunchLocationLeafletMap';
 import { api } from '../../services/apiClient';
 import { isInstitutionMode } from '@/utils/organizationMode';
+import { getCurrentPosition, getSelfieStream, captureSelfiePhoto, isNativePlatform } from '@/lib/native';
 
 import {
   isExecutiveOrAdmin,
@@ -2682,21 +2683,26 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   // Real Geolocation Fetcher & Validator
   const fetchCurrentLocation = useCallback(() => {
-    if (typeof window === 'undefined' || !navigator.geolocation) {
+    if (typeof window === 'undefined') {
       setGpsStatus('denied');
       setIsLocating(false);
-      setPunchAddress('Geolocation is not supported by your browser.');
+      setPunchAddress('Geolocation is not supported.');
       return;
     }
 
     setIsLocating(true);
     setGpsStatus('locating');
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const userLat = position.coords.latitude;
-        const userLng = position.coords.longitude;
-        const accuracy = position.coords.accuracy || 5;
+    void (async () => {
+      try {
+        const position = await getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        });
+        const userLat = position.latitude;
+        const userLng = position.longitude;
+        const accuracy = position.accuracy || 5;
 
         setCurrentLat(userLat);
         setCurrentLng(userLng);
@@ -2705,7 +2711,6 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         setGpsStatus('granted');
         setIsLocating(false);
 
-        // Compute distance to the active physical office
         if (selectedLocation === 'wfh' || isGeofenceOptional) {
           setGeofenceDistanceMeters(0);
           setSimulatedDistance(0);
@@ -2722,7 +2727,6 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           setIsInsideRadius(inRadius);
         }
 
-        // Reverse-geocode device GPS to real street address
         try {
           const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${userLat}&lon=${userLng}`,
@@ -2737,8 +2741,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         } catch {
           setPunchAddress(`${userLat.toFixed(5)}, ${userLng.toFixed(5)}`);
         }
-      },
-      (error) => {
+      } catch (error) {
         console.warn('Geolocation error:', error);
         setIsLocating(false);
         setGpsStatus(isGeofenceOptional ? 'granted' : 'denied');
@@ -2746,18 +2749,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         if (isGeofenceOptional) {
           setIsInsideRadius(true);
         }
+        const message = error instanceof Error ? error.message : '';
         setPunchAddress(
-          error.code === error.PERMISSION_DENIED
-            ? 'Browser location permission denied. Please enable GPS location.'
+          /denied|permission/i.test(message)
+            ? 'Location permission denied. Please enable GPS location.'
             : 'Unable to retrieve your current location.'
         );
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
       }
-    );
+    })();
   }, [activeOfficeLat, activeOfficeLng, configuredGeofenceRadius, selectedLocation, hasConfiguredOfficeCoords, isGeofenceOptional]);
 
   // Handle GPS Refresh Ping with real device geolocation
@@ -2850,14 +2849,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           streamRef.current = null;
         }
 
-        if (!navigator?.mediaDevices?.getUserMedia) {
-          throw new Error('Camera device API not supported by browser');
-        }
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: false,
-        });
+        const { stream } = await getSelfieStream();
 
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
@@ -2894,10 +2886,25 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       } catch (err: any) {
         if (!cancelled) {
           console.error('Camera stream error:', err);
+          // On native shells, fall back to the Capacitor Camera plugin (no live preview).
+          if (isNativePlatform()) {
+            try {
+              const dataUrl = await captureSelfiePhoto();
+              if (!cancelled) {
+                setCapturedSelfie(dataUrl);
+                setCameraError(null);
+                setIsCameraLoading(false);
+                setIsCameraReady(false);
+              }
+              return;
+            } catch (nativeErr) {
+              console.error('Native camera capture error:', nativeErr);
+            }
+          }
           const isDenied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
           setCameraError(
             isDenied
-              ? 'Camera access is blocked. Please allow camera permissions in your browser address bar and click Retry Camera.'
+              ? 'Camera access is blocked. Please allow camera permissions and click Retry Camera.'
               : 'Camera device unavailable. Please ensure your camera is connected and click Retry Camera.'
           );
           setIsCameraLoading(false);
@@ -2951,6 +2958,23 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     setIsCameraReady(false);
     stopCameraStream();
     setCameraAttempt((prev) => prev + 1);
+  };
+
+  /** Native-only: open system camera when live WebView stream is unavailable. */
+  const handleNativeCameraCapture = async () => {
+    if (!isNativePlatform()) return;
+    setIsCameraLoading(true);
+    setCameraError(null);
+    try {
+      const dataUrl = await captureSelfiePhoto();
+      setCapturedSelfie(dataUrl);
+      setIsCameraReady(false);
+    } catch (err) {
+      console.error('Native camera capture error:', err);
+      setCameraError('Unable to open the device camera. Please allow camera permission and try again.');
+    } finally {
+      setIsCameraLoading(false);
+    }
   };
 
   // Retake: clear captured photo and restart camera
@@ -5824,8 +5848,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 </div>
 
                 <div className="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-3 text-xs text-slate-400 space-y-1 text-left leading-relaxed">
-                  <p>1. Allow camera permissions in your browser address bar.</p>
+                  <p>1. Allow camera permissions when prompted.</p>
                   <p>2. Click Retry Camera below to reconnect.</p>
+                  {isNativePlatform() && <p>3. Or use Use Device Camera to open the system camera.</p>}
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full pt-1">
@@ -5837,6 +5862,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   >
                     {isCameraLoading ? 'Connecting Camera...' : 'Retry Camera'}
                   </button>
+                  {isNativePlatform() && (
+                    <button
+                      type="button"
+                      onClick={() => void handleNativeCameraCapture()}
+                      disabled={isCameraLoading}
+                      className="w-full py-2.5 px-4 rounded-lg bg-slate-700 hover:bg-slate-600 active:bg-slate-800 text-xs font-bold text-white transition-all cursor-pointer disabled:opacity-50 border border-slate-600"
+                    >
+                      Use Device Camera
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleFinalConfirmPunch(selfieAsRemote, null)}

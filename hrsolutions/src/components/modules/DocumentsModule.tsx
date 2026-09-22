@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { downloadBlob } from '@/lib/native';
 import { FileText, Folder, Upload, Download, Share2, CheckCircle2, Search, Plus, Trash2, HardDrive } from 'lucide-react';
 import { AppState } from '../../services/store';
 import { DriveItem } from '../../types';
