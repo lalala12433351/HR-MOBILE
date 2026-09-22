@@ -1,0 +1,56 @@
+{
+  "name": "enterprise-bos-backend",
+  "version": "1.0.5",
+  "description": "Production-grade Multi-Tenant Enterprise BOS/HRMS Backend with Schema-per-Tenant PostgreSQL Isolation and AWS Cognito Integration",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "postinstall": "prisma generate",
+    "build": "prisma generate && tsc && node -e \"const fs=require('fs'); fs.mkdirSync('dist/db/migrations',{recursive:true}); fs.cpSync('src/db/migrations','dist/db/migrations',{recursive:true});\"",
+    "start": "node dist/server.js",
+    "migrate": "tsx src/db/migrator.ts",
+    "migrate:tenants": "tsx src/db/migrator.ts",
+    "seed": "tsx src/db/seed.ts",
+    "db:reset": "tsx src/db/resetDatabase.ts",
+    "cognito:clear": "tsx src/scripts/clearCognitoUsers.ts",
+    "congito:clear": "tsx src/scripts/clearCognitoUsers.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "test": "npm run test:e2e --prefix ../hrsolutions"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1130.0",
+    "@aws-sdk/client-s3": "^3.540.0",
+    "@aws-sdk/s3-request-presigner": "^3.540.0",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "aws-jwt-verify": "^4.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "pg": "^8.11.5",
+    "pino": "^8.20.0",
+    "pino-http": "^9.0.0",
+    "pino-pretty": "^11.0.0",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.30",
+    "@types/pg": "^8.11.4",
+    "@types/pino-http": "^5.8.4",
+    "@types/uuid": "^9.0.8",
+    "prisma": "^7.10.0",
+    "tsx": "^4.7.1",
+    "typescript": "^5.4.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

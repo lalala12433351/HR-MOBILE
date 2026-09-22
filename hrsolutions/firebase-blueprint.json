@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "Workspace task item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 300 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string" },
+        "priority": { "type": "string" },
+        "projectName": { "type": "string" },
+        "assigneeName": { "type": "string" },
+        "dueDate": { "type": "string" }
+      },
+      "required": ["id", "title"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Workspace project entity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 200 },
+        "code": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string" },
+        "progress": { "type": "number" },
+        "leadName": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Workspace communication message",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "channelId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string", "maxLength": 2000 },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "text"]
+    },
+    "GmailMessage": {
+      "title": "GmailMessage",
+      "description": "Cached or local Gmail message log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "threadId": { "type": "string" },
+        "sender": { "type": "string" },
+        "recipient": { "type": "string" },
+        "subject": { "type": "string", "maxLength": 500 },
+        "snippet": { "type": "string", "maxLength": 1000 },
+        "date": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "isStarred": { "type": "boolean" },
+        "labels": { "type": "string" }
+      },
+      "required": ["id", "subject"]
+    }
+  },
+  "firestore": {
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Collection of tasks"
+    },
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "Collection of projects"
+    },
+    "/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Collection of communication messages"
+    },
+    "/emails/{emailId}": {
+      "schema": "GmailMessage",
+      "description": "Collection of workspace emails"
+    }
+  }
+}

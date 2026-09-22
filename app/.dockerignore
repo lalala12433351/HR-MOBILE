@@ -1,0 +1,16 @@
+node_modules
+dist
+.env
+.env.*
+.git
+.gitignore
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+Dockerfile
+docker-compose*.yml
+tests
+.coverage
+.DS_Store
+Thumbs.db

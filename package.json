@@ -1,0 +1,28 @@
+{
+  "name": "enterprise-bos-workspace",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"const { spawn } = require('child_process'); spawn('npm', ['run', 'dev:backend'], { stdio: 'inherit', shell: true }); spawn('npm', ['run', 'dev:frontend'], { stdio: 'inherit', shell: true });\"",
+    "dev:frontend": "npm run dev --prefix hrsolutions",
+    "dev:backend": "npm run dev --prefix app",
+    "frontend": "npm run dev:frontend",
+    "backend": "npm run dev:backend",
+    "build:frontend": "npm run build --prefix hrsolutions",
+    "build:backend": "npm run build --prefix app",
+    "db:migrate": "npm run migrate --prefix app",
+    "db:migrate:tenants": "npm run migrate:tenants --prefix app",
+    "db:push": "npm run prisma:push --prefix app",
+    "db:reset": "npm run db:reset --prefix app",
+    "cognito:clear": "npm run cognito:clear --prefix app",
+    "congito:clear": "npm run cognito:clear --prefix app",
+    "test:frontend": "npm run test:e2e --prefix hrsolutions",
+    "test:e2e": "npm run test:e2e --prefix hrsolutions",
+    "test:e2e:ui": "npm run test:e2e:ui --prefix hrsolutions",
+    "test": "npm run test:e2e"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3"
+  }
+}

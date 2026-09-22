@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Database Service (PostgreSQL with Multi-tenant Schema Isolation)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: hr_solutions_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgresadmin
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: enterprise_bos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgresadmin -d enterprise_bos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app_network
+
+  # ---------------------------------------------------------------------------
+  # Backend API Service (Node.js / Express / Multi-Tenant Isolation)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: hr_solutions_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: enterprise_bos
+      DB_USER: postgresadmin
+      DB_PASSWORD: postgres
+      DB_SSL: "false"
+      ALLOWED_ORIGINS: "*"
+      COGNITO_USER_POOL_ID: "us-east-1_examplepool"
+      COGNITO_CLIENT_ID: "exampleclientid12345"
+      AWS_REGION: "us-east-1"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - app_network
+
+  # ---------------------------------------------------------------------------
+  # Frontend Application Service (Next.js 16 Standalone / React 19)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./hrsolutions
+      dockerfile: Dockerfile
+    container_name: hr_solutions_frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: "0.0.0.0"
+      BACKEND_INTERNAL_URL: "http://backend:8080"
+      NEXT_PUBLIC_BACKEND_URL: "http://localhost:8080"
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - app_network
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  app_network:
+    driver: bridge

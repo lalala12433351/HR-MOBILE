@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['id', 'title'])
+        && data.id is string
+        && data.title is string && data.title.size() <= 300;
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['id', 'name'])
+        && data.id is string
+        && data.name is string && data.name.size() <= 200;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['id', 'text'])
+        && data.id is string
+        && data.text is string && data.text.size() <= 2000;
+    }
+
+    function isValidEmail(data) {
+      return data.keys().hasAll(['id', 'subject'])
+        && data.id is string
+        && data.subject is string && data.subject.size() <= 500;
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Tasks collection
+    match /tasks/{taskId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(taskId) && isValidTask(incoming());
+      allow delete: if isSignedIn() && isValidId(taskId);
+    }
+
+    // Projects collection
+    match /projects/{projectId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(projectId) && isValidProject(incoming());
+      allow delete: if isSignedIn() && isValidId(projectId);
+    }
+
+    // Messages collection
+    match /messages/{messageId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(messageId) && isValidMessage(incoming());
+      allow delete: if isSignedIn() && isValidId(messageId);
+    }
+
+    // Emails collection
+    match /emails/{emailId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(emailId) && isValidEmail(incoming());
+      allow delete: if isSignedIn() && isValidId(emailId);
+    }
+  }
+}

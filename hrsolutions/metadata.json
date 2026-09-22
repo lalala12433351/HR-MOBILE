@@ -1,0 +1,6 @@
+{
+  "name": "Unified Business Operating System",
+  "description": "Multi-tenant Business Operating System & Zoho One Alternative unifying HRMS, CRM, Projects, Finance, Support, Communication, Documents, Workflows, and AI Assistant.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
