@@ -1,0 +1,155 @@
+name: Sync from HR-Solutions
+
+# Opens a PR in this repo whenever HR-Solutions notifies us
+# (repository_dispatch) or when run manually (workflow_dispatch).
+#
+# Required secret (this repo):
+#   HR_SOLUTIONS_SYNC_TOKEN — PAT with read access to lalala12433351/HR-Solutions
+#
+# Optional secret (this repo):
+#   MOBILE_SYNC_PAT — PAT with repo scope on this repo so the opened PR
+#                     can trigger other workflows (GITHUB_TOKEN cannot)
+
+on:
+  repository_dispatch:
+    types: [hr-solutions-sync]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, or SHA from HR-Solutions to sync
+        required: false
+        default: main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-from-hr-solutions
+  cancel-in-progress: true
+
+env:
+  SOURCE_REPO: lalala12433351/HR-Solutions
+
+jobs:
+  sync:
+    name: Sync and open PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          # Prefer a PAT so the PR can trigger CI workflows after creation.
+          token: ${{ secrets.MOBILE_SYNC_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Resolve source ref
+        id: source
+        run: |
+          REF="${{ github.event.client_payload.ref || inputs.source_ref || 'main' }}"
+          SHA="${{ github.event.client_payload.sha || '' }}"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Syncing from $SOURCE_REPO @$REF ${SHA:+($SHA)}"
+
+      - name: Checkout HR-Solutions
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ steps.source.outputs.ref }}
+          path: .sync-source
+          token: ${{ secrets.HR_SOLUTIONS_SYNC_TOKEN }}
+
+      - name: Snapshot Capacitor package.json entries
+        run: git show HEAD:hrsolutions/package.json > /tmp/mobile-package.json
+
+      - name: Sync tree (preserve mobile-only paths)
+        run: |
+          set -euo pipefail
+
+          # Keep Capacitor / mobile CI bits out of the overwrite.
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude '.sync-source/' \
+            --exclude 'node_modules/' \
+            --exclude 'app/node_modules/' \
+            --exclude 'hrsolutions/node_modules/' \
+            --exclude 'hrsolutions/.next/' \
+            --exclude 'hrsolutions/android/' \
+            --exclude 'hrsolutions/ios/' \
+            --exclude 'hrsolutions/www/' \
+            --exclude 'hrsolutions/capacitor.config.ts' \
+            --exclude 'hrsolutions/MOBILE.md' \
+            --exclude 'hrsolutions/.gitignore' \
+            --exclude '.github/workflows/android-build.yml' \
+            --exclude '.github/workflows/ios-build.yml' \
+            --exclude '.github/workflows/sync-from-hr-solutions.yml' \
+            --exclude 'README.md' \
+            .sync-source/ ./
+
+          rm -rf .sync-source
+
+      - name: Re-apply Capacitor package.json entries
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const mobile = JSON.parse(fs.readFileSync('/tmp/mobile-package.json', 'utf8'));
+          const synced = JSON.parse(fs.readFileSync('hrsolutions/package.json', 'utf8'));
+          const isCap = (k) => k.startsWith('@capacitor/');
+          const isCapScript = (k) => k.startsWith('cap:');
+
+          synced.dependencies = synced.dependencies || {};
+          synced.devDependencies = synced.devDependencies || {};
+          synced.scripts = synced.scripts || {};
+
+          for (const [k, v] of Object.entries(mobile.dependencies || {})) {
+            if (isCap(k)) synced.dependencies[k] = v;
+          }
+          for (const [k, v] of Object.entries(mobile.devDependencies || {})) {
+            if (isCap(k)) synced.devDependencies[k] = v;
+          }
+          for (const [k, v] of Object.entries(mobile.scripts || {})) {
+            if (isCapScript(k)) synced.scripts[k] = v;
+          }
+
+          fs.writeFileSync('hrsolutions/package.json', JSON.stringify(synced, null, 2) + '\n');
+          console.log('Preserved Capacitor dependencies and cap:* scripts');
+          EOF
+
+      - name: Refresh hrsolutions package-lock
+        working-directory: hrsolutions
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Create or update Pull Request
+        id: cpr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.MOBILE_SYNC_PAT || secrets.GITHUB_TOKEN }}
+          commit-message: |
+            chore: sync from HR-Solutions (${{ steps.source.outputs.ref }})
+
+            Source: ${{ env.SOURCE_REPO }}@${{ steps.source.outputs.sha || steps.source.outputs.ref }}
+          title: 'chore: sync from HR-Solutions (${{ steps.source.outputs.ref }})'
+          body: |
+            Automated sync from [`${{ env.SOURCE_REPO }}`](https://github.com/${{ env.SOURCE_REPO }}).
+
+            | | |
+            |---|---|
+            | Source ref | `${{ steps.source.outputs.ref }}` |
+            | Source SHA | `${{ steps.source.outputs.sha || 'n/a (manual run)' }}` |
+            | Trigger | `${{ github.event_name }}` |
+
+            **Preserved on this side (not overwritten):**
+            - `hrsolutions/android/`, `hrsolutions/ios/`, `hrsolutions/www/`
+            - `hrsolutions/capacitor.config.ts`, `hrsolutions/MOBILE.md`
+            - Capacitor deps / `cap:*` scripts in `hrsolutions/package.json`
+            - Mobile CI workflows (`android-build`, `ios-build`, this sync workflow)
+            - Root `README.md`
+          branch: sync/hr-solutions
+          delete-branch: true
+
+      - name: Summary
+        run: |
+          echo "### Sync from HR-Solutions" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source: \`${{ env.SOURCE_REPO }}@${{ steps.source.outputs.ref }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- PR: ${{ steps.cpr.outputs.pull-request-url || 'no changes (already up to date)' }}" >> "$GITHUB_STEP_SUMMARY"
