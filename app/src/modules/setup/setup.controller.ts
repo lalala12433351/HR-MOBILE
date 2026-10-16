@@ -10,13 +10,20 @@ import {
 } from '../identity/employeeProvisionRepair.js';
 import { withTenantContext } from '../../db/queryRunner.js';
 import { log } from '../../utils/logger.js';
-import { inferAuthRoleFromDesignation, promoteEmployeeToManager } from '../../utils/roles.js';
+import { authRoleFromJobLevel, inferAuthRoleFromDesignation } from '../../utils/roles.js';
+import { syncReportingHierarchy } from '../../utils/reportingHierarchy.js';
+import { setDepartmentLeads, setTeamLeads } from '../../utils/orgLeads.js';
+import { ensureOwnerOrgDefaults } from '../../utils/orgDefaults.js';
+import { ensureDepartmentByName, ensureTeamByName } from '../../utils/orgUpsert.js';
+import { LicenseError, assertCanAddEmployees } from '../licenses/license.service.js';
 
 type TenantQuery = NonNullable<Request['tenantQuery']>;
 
 type SetupAssignment = {
   department?: string;
+  team?: string;
   managerEmail?: string;
+  managerEmails?: string[];
   leadEmail?: string;
   memberEmails?: string[];
 };
@@ -30,9 +37,13 @@ async function applySetupAssignments(query: TenantQuery, assignments: SetupAssig
     const departmentName = String(raw.department || '').trim();
     if (!departmentName) continue;
 
-    const managerEmail = String(raw.managerEmail || raw.leadEmail || '')
-      .trim()
-      .toLowerCase();
+    const managerEmails = Array.from(
+      new Set(
+        [...(Array.isArray(raw.managerEmails) ? raw.managerEmails : []), raw.managerEmail, raw.leadEmail]
+          .map((e) => String(e || '').trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
     const memberEmails = Array.from(
       new Set(
         (raw.memberEmails || [])
@@ -41,77 +52,39 @@ async function applySetupAssignments(query: TenantQuery, assignments: SetupAssig
       )
     );
 
-    const deptRes = await query(
-      `SELECT id FROM departments WHERE name ILIKE $1 LIMIT 1`,
-      [departmentName]
-    );
-    let departmentId = deptRes.rows[0]?.id as string | undefined;
-    if (!departmentId) {
-      const code =
-        departmentName.slice(0, 4).toUpperCase().replace(/[^A-Z0-9]/g, '') +
-        String(Math.floor(10 + Math.random() * 90));
-      const created = await query(
-        `INSERT INTO departments (name, code) VALUES ($1, $2)
-         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
-         RETURNING id`,
-        [departmentName, code]
-      );
-      departmentId = created.rows[0]?.id;
-    }
+    const departmentId = (await ensureDepartmentByName(query, departmentName))?.id as string | undefined;
     if (!departmentId) continue;
 
-    let managerId: string | null = null;
-    if (managerEmail) {
+    const managerIds: string[] = [];
+    for (const email of managerEmails) {
       const mgrRes = await query(
         `SELECT id FROM employees WHERE LOWER(email) = $1 LIMIT 1`,
-        [managerEmail]
+        [email]
       );
-      managerId = mgrRes.rows[0]?.id ? String(mgrRes.rows[0].id) : null;
+      if (mgrRes.rows[0]?.id) managerIds.push(String(mgrRes.rows[0].id));
     }
+    const managerId = managerIds[0] || null;
 
-    if (managerId) {
-      await query(`UPDATE departments SET lead_employee_id = $1 WHERE id = $2`, [
-        managerId,
-        departmentId,
-      ]);
-    }
+    await setDepartmentLeads(query, departmentId, managerIds);
 
-    const teamName = `${departmentName} Team`;
-    const existingTeam = await query(
-      `SELECT id FROM teams WHERE department_id = $1 AND name ILIKE $2 LIMIT 1`,
-      [departmentId, teamName]
-    );
-    let teamId = existingTeam.rows[0]?.id as string | undefined;
-    if (teamId) {
-      await query(
-        `UPDATE teams SET lead_employee_id = COALESCE($2, lead_employee_id) WHERE id = $1`,
-        [teamId, managerId]
-      );
-    } else {
-      const createdTeam = await query(
-        `INSERT INTO teams (department_id, name, lead_employee_id)
-         VALUES ($1, $2, $3)
-         RETURNING id`,
-        [departmentId, teamName, managerId]
-      );
-      teamId = createdTeam.rows[0]?.id;
-    }
+    const teamName = String(raw.team || '').trim() || `${departmentName} Team`;
+    const teamId = (await ensureTeamByName(query, departmentId, teamName, managerId))?.id as string | undefined;
     if (!teamId) continue;
 
-    if (managerId) {
-      await promoteEmployeeToManager(query, managerId);
+    await setTeamLeads(query, teamId, managerIds);
+    if (managerIds.length) {
       await query(
         `UPDATE employees
          SET department_id = $2,
              team_id = $3,
              reporting_manager_id = NULL
-         WHERE id = $1`,
-        [managerId, departmentId, teamId]
+         WHERE id = ANY($1::uuid[])`,
+        [managerIds, departmentId, teamId]
       );
     }
 
     for (const email of memberEmails) {
-      if (managerEmail && email === managerEmail) continue;
+      if (managerEmails.includes(email)) continue;
       await query(
         `UPDATE employees
          SET department_id = $2,
@@ -123,6 +96,8 @@ async function applySetupAssignments(query: TenantQuery, assignments: SetupAssig
       );
     }
   }
+
+  await syncReportingHierarchy(query);
 }
 
 const SETTINGS_KEYS = [
@@ -131,6 +106,7 @@ const SETTINGS_KEYS = [
   'general',
   'payroll',
   'attendance',
+  'id-card-templates',
 ] as const;
 
 async function upsertTenantSetting(query: TenantQuery, key: string, value: unknown) {
@@ -157,14 +133,52 @@ function settingsHandler(key: (typeof SETTINGS_KEYS)[number]) {
   };
 }
 
-export const saveEmploymentTypes = settingsHandler('employment-types');
+export const saveEmploymentTypes = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const row = await upsertTenantSetting(req.tenantQuery!, 'employment-types', req.body || {});
+    const query = req.tenantQuery!;
+    const owner = await query(
+      `SELECT onboarding_status FROM employees WHERE role = 'super_admin' ORDER BY created_at ASC LIMIT 1`
+    );
+    const status = String(owner.rows[0]?.onboarding_status || '').toUpperCase();
+    if (status && status !== 'COMPLETED' && status !== 'TEAM_SETUP') {
+      await advanceOnboardingStatus(
+        'WORK_PATTERNS_SETUP',
+        (req as any).user?.sub,
+        query,
+        (req as any).user?.email
+      );
+    }
+    res.status(200).json({ success: true, data: row?.value ?? req.body });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+};
 export const saveOnboardingFields = settingsHandler('onboarding-fields');
 export const saveGeneralSettings = settingsHandler('general');
 export const savePayrollSettings = settingsHandler('payroll');
 export const saveAttendanceSettings = settingsHandler('attendance');
 
+export async function saveIdCardTemplates(req: Request, res: Response): Promise<void> {
+  const { templates, defaults } = req.body || {};
+  if (!Array.isArray(templates) || (defaults != null && typeof defaults !== 'object')) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Expected { templates: [], defaults: {} }.' },
+    });
+    return;
+  }
+  try {
+    const row = await upsertTenantSetting(req.tenantQuery!, 'id-card-templates', { templates, defaults: defaults || {} });
+    res.status(200).json({ success: true, data: row?.value });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
 export async function getSettings(req: Request, res: Response): Promise<void> {
   try {
+    await ensureOwnerOrgDefaults(req.tenantQuery!);
     const result = await req.tenantQuery!(
       `SELECT key, value FROM tenant_settings WHERE key = ANY($1::text[])`,
       [SETTINGS_KEYS as unknown as string[]]
@@ -208,11 +222,27 @@ function authContext(req: Request) {
 
 export async function setupOffice(req: Request, res: Response): Promise<void> {
   try {
-    const { name, code, address, latitude, longitude, geofenceRadiusMeters = 100, timezone = 'UTC' } = req.body;
-    const latNum = Number(latitude) || 12.9279;
-    const lngNum = Number(longitude) || 77.6271;
-    const radiusNum = Math.round(Number(geofenceRadiusMeters)) || 100;
-    const cleanCode = (code || (name || 'OFF').slice(0, 4).toUpperCase() + Math.floor(10 + Math.random() * 90)).toUpperCase().trim();
+    const { name, code, address, latitude, longitude, geofenceRadiusMeters = 100, timezone = 'UTC' } = req.body || {};
+    const cleanName = typeof name === 'string' ? name.trim() : '';
+    const cleanAddress = typeof address === 'string' ? address.trim() : '';
+    const cleanTimezone = typeof timezone === 'string' ? timezone.trim() : '';
+    const latNum = latitude === null || latitude === undefined || latitude === '' ? NaN : Number(latitude);
+    const lngNum = longitude === null || longitude === undefined || longitude === '' ? NaN : Number(longitude);
+    const radiusNum = Number(geofenceRadiusMeters);
+    const validTimezone = (() => {
+      try { new Intl.DateTimeFormat('en', { timeZone: cleanTimezone }); return true; }
+      catch { return false; }
+    })();
+    if (cleanName.length < 2 || cleanName.length > 128 || !/\p{L}/u.test(cleanName) || cleanAddress.length < 5 || !Number.isFinite(latNum) ||
+        latNum < -90 || latNum > 90 || !Number.isFinite(lngNum) || lngNum < -180 || lngNum > 180 ||
+        !Number.isInteger(radiusNum) || radiusNum < 20 || radiusNum > 1000 || !validTimezone) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_WORKPLACE', message: 'Enter a workplace name and address, choose a map location, and select a valid time zone and radius (20–1000 m).' },
+      });
+      return;
+    }
+    const cleanCode = (code || cleanName.slice(0, 4).toUpperCase() + Math.floor(10 + Math.random() * 90)).toUpperCase().trim();
 
     const userSub = (req as any).user?.sub;
     const userEmail = (req as any).user?.email;
@@ -232,7 +262,7 @@ export async function setupOffice(req: Request, res: Response): Promise<void> {
          is_active = true,
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
-      [name, cleanCode, address || name, latNum, lngNum, radiusNum, timezone]
+      [cleanName, cleanCode, cleanAddress, latNum, lngNum, radiusNum, cleanTimezone]
     );
 
     // Advance Status
@@ -243,11 +273,36 @@ export async function setupOffice(req: Request, res: Response): Promise<void> {
   }
 }
 
+export async function setupWorkplaceMode(req: Request, res: Response): Promise<void> {
+  try {
+    const mode = req.body?.mode;
+    if (!['remote', 'onsite', 'hybrid'].includes(mode)) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_WORKPLACE_MODE', message: 'Choose remote, on-site, or hybrid work.' } });
+      return;
+    }
+    const query = req.tenantQuery!;
+    if (mode !== 'remote') {
+      const offices = await query('SELECT COUNT(*)::int AS count FROM offices WHERE is_active = true');
+      if (!Number(offices.rows[0]?.count)) {
+        res.status(400).json({ success: false, error: { code: 'WORKPLACE_REQUIRED', message: 'Add a workplace with a selected map location before continuing.' } });
+        return;
+      }
+    }
+    await upsertTenantSetting(query, 'general', { workplaceMode: mode });
+    await advanceOnboardingStatus('OFFICE_SETUP', (req as any).user?.sub, query, (req as any).user?.email);
+    res.json({ success: true, data: { mode } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
 export async function setupDepartments(req: Request, res: Response): Promise<void> {
   try {
-    const { departments } = req.body; // Array of { name, code }
-    if (!Array.isArray(departments)) {
-      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'departments must be an array' } });
+    const { departments } = req.body || {};
+    if (!Array.isArray(departments) || departments.length > 50 ||
+        departments.some((item: any) => typeof item?.name !== 'string' || item.name.trim().length < 2 ||
+          item.name.trim().length > 80 || !/\p{L}/u.test(item.name))) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_DEPARTMENTS', message: 'Enter department names of 2–80 characters. Each name must contain a letter.' } });
       return;
     }
     const userSub = (req as any).user?.sub;
@@ -256,17 +311,7 @@ export async function setupDepartments(req: Request, res: Response): Promise<voi
     
     const results = [];
     for (const dept of departments) {
-      const { name, code } = dept;
-      const cleanCode = (code || (name || 'DEP').slice(0, 4).toUpperCase() + Math.floor(10 + Math.random() * 90)).toUpperCase().trim();
-
-      const result = await query(
-        `INSERT INTO departments (name, code)
-         VALUES ($1, $2)
-         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
-         RETURNING *`,
-        [name, cleanCode]
-      );
-      results.push(result.rows[0]);
+      results.push(await ensureDepartmentByName(query, dept.name, dept.code));
     }
 
     await advanceOnboardingStatus('DEPARTMENTS_SETUP', userSub, query, userEmail);
@@ -278,9 +323,11 @@ export async function setupDepartments(req: Request, res: Response): Promise<voi
 
 export async function setupRoles(req: Request, res: Response): Promise<void> {
   try {
-    const { roles } = req.body; // Array of { title, code, departmentId, level }
-    if (!Array.isArray(roles)) {
-      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'roles must be an array' } });
+    const { roles } = req.body || {};
+    if (!Array.isArray(roles) || roles.length > 100 ||
+        roles.some((item: any) => typeof item?.title !== 'string' || item.title.trim().length < 2 ||
+          item.title.trim().length > 80 || !/\p{L}/u.test(item.title))) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_ROLES', message: 'Enter job titles of 2–80 characters. Each title must contain a letter.' } });
       return;
     }
     const userSub = (req as any).user?.sub;
@@ -289,7 +336,8 @@ export async function setupRoles(req: Request, res: Response): Promise<void> {
     
     const results = [];
     for (const role of roles) {
-      const { title, code, departmentId, level = 'L1' } = role;
+      const { code, departmentId, level = 'L1' } = role;
+      const title = role.title.trim();
       const cleanCode = (code || (title || 'ROLE').slice(0, 4).toUpperCase() + Math.floor(10 + Math.random() * 90)).toUpperCase().trim();
 
       const result = await query(
@@ -314,9 +362,12 @@ export async function setupRoles(req: Request, res: Response): Promise<void> {
 
 export async function setupTeam(req: Request, res: Response): Promise<void> {
   try {
-    const { employees, completeOnboarding = false, assignments } = req.body;
-    if (!Array.isArray(employees)) {
-      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'employees must be an array' } });
+    const { employees, completeOnboarding = false, assignments } = req.body || {};
+    if (!Array.isArray(employees) || employees.length > 500 ||
+        employees.some((item: any) => typeof item?.firstName !== 'string' || !/\p{L}/u.test(item.firstName) ||
+          typeof item?.lastName !== 'string' || !/\p{L}/u.test(item.lastName) ||
+          typeof item?.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.email))) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_TEAM', message: 'Each person needs a first name, last name, and valid email address.' } });
       return;
     }
 
@@ -333,11 +384,32 @@ export async function setupTeam(req: Request, res: Response): Promise<void> {
     const userEmail = (req as any).user?.email;
     const actorEmail = (userEmail || '').trim().toLowerCase();
     const ctx = authContext(req);
+    const inboundCount = employees.filter((emp: any) => {
+      const cleanEmail = (emp.email || '').trim().toLowerCase();
+      return !(actorEmail && cleanEmail && cleanEmail === actorEmail);
+    }).length;
+    if (inboundCount > 0) {
+      try {
+        await assertCanAddEmployees(ctx.tenantId || req.tenant?.id || req.user?.tenant_id || '', inboundCount);
+      } catch (licenseErr: any) {
+        if (licenseErr instanceof LicenseError) {
+          res.status(licenseErr.httpStatus).json({
+            success: false,
+            error: { code: licenseErr.code, message: licenseErr.message },
+          });
+          return;
+        }
+        throw licenseErr;
+      }
+    }
 
     // DB inserts + onboarding advance are atomic. Cognito runs after COMMIT.
     const inserted = await withTenantContext(schema, async (client, query) => {
       await client.query('BEGIN');
       try {
+        try {
+          await query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_type VARCHAR(64) DEFAULT 'Full-time'`);
+        } catch (_) {}
         const inbound = employees.filter((emp: any) => {
           const cleanEmail = (emp.email || '').trim().toLowerCase();
           return !(actorEmail && cleanEmail && cleanEmail === actorEmail);
@@ -359,6 +431,7 @@ export async function setupTeam(req: Request, res: Response): Promise<void> {
             jobRoleId,
             designation,
             dateOfJoining,
+            employmentType,
             role: rawRole,
           } = emp;
 
@@ -366,8 +439,6 @@ export async function setupTeam(req: Request, res: Response): Promise<void> {
           if (actorEmail && cleanEmail && cleanEmail === actorEmail) continue;
 
           const employeeCode = codes[codeIdx++] || (await allocateOneEmployeeCode(query));
-          const resolvedRole = inferAuthRoleFromDesignation(designation, rawRole);
-
           let resolvedOfficeId = officeId || null;
           let resolvedDepartmentId = departmentId || null;
           let resolvedJobRoleId = jobRoleId || null;
@@ -381,9 +452,17 @@ export async function setupTeam(req: Request, res: Response): Promise<void> {
             resolvedDepartmentId = departmentResult.rows[0]?.id || null;
           }
           if (!resolvedJobRoleId && designation) {
-            const jobRole = await query('SELECT id FROM job_roles WHERE title ILIKE $1 LIMIT 1', [designation]);
+            const jobRole = await query('SELECT id, level FROM job_roles WHERE title ILIKE $1 LIMIT 1', [designation]);
             resolvedJobRoleId = jobRole.rows[0]?.id || null;
           }
+
+          let levelFromJob: string | null = null;
+          if (resolvedJobRoleId) {
+            const jobLevel = await query('SELECT level FROM job_roles WHERE id = $1 LIMIT 1', [resolvedJobRoleId]);
+            levelFromJob = jobLevel.rows[0]?.level || null;
+          }
+          const resolvedRole =
+            authRoleFromJobLevel(levelFromJob) || inferAuthRoleFromDesignation(designation, rawRole);
 
           if (cleanEmail) {
             const existingAdmin = await query(
@@ -395,20 +474,23 @@ export async function setupTeam(req: Request, res: Response): Promise<void> {
             if (existingAdmin.rows[0]) continue;
           }
 
+          const cleanEmploymentType = String(employmentType || 'Full-time').trim() || 'Full-time';
+
           const result = await query(
             `INSERT INTO employees (
                employee_code, first_name, last_name, email, phone,
                office_id, department_id, job_role_id, role, employment_status, account_status,
-               date_of_joining, has_completed_profile, onboarding_progress
+               date_of_joining, has_completed_profile, onboarding_progress, employment_type
              ) VALUES (
                $1, $2, $3, $4, $5,
                $6, $7, $8, $9, 'active', 'Not Activated',
-               COALESCE($10::date, CURRENT_DATE), false, 0
+               COALESCE($10::date, CURRENT_DATE), false, 0, $11
              )
              ON CONFLICT (email) DO UPDATE SET
                office_id = EXCLUDED.office_id,
                department_id = EXCLUDED.department_id,
                job_role_id = EXCLUDED.job_role_id,
+               employment_type = EXCLUDED.employment_type,
                role = CASE
                  WHEN employees.role = 'super_admin' THEN employees.role
                  ELSE EXCLUDED.role
@@ -431,6 +513,7 @@ export async function setupTeam(req: Request, res: Response): Promise<void> {
               resolvedJobRoleId,
               resolvedRole,
               dateOfJoining || null,
+              cleanEmploymentType,
             ]
           );
           if (result.rows[0]) rows.push(result.rows[0]);
@@ -481,10 +564,13 @@ export async function setupTeam(req: Request, res: Response): Promise<void> {
               tenantId: ctx.tenantId,
               tenantSlug: ctx.tenantSlug,
               schemaName: ctx.schemaName,
+              sendInvite: true,
+              invitedBy: (req as any).user?.name,
               tenantQuery: req.tenantQuery!,
             });
             created.cognito_sub = auth.cognitoSub;
-            created.temporary_password = auth.temporaryPassword;
+            created.invite_sent = auth.inviteSent;
+            if (auth.inviteSent) created.account_status = 'Invited';
           }
         } catch (authErr: any) {
           log.warn(`Employee ${created.email} saved but Cognito provisioning failed`, authErr);

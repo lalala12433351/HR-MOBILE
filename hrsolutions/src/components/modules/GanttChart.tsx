@@ -368,6 +368,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
         status: editingTask.status,
         priority: editingTask.priority,
         assignedToEmployeeId: editingTask.assigneeId || undefined,
+        assignedToEmployeeIds: editingTask.assigneeIds?.length ? editingTask.assigneeIds : editingTask.assigneeId ? [editingTask.assigneeId] : undefined,
         dueDate: editingTask.dueDate || undefined,
       });
       updateTaskInMemory(editingTask.id, editingTask);

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   recordPunch,
   getPunches,
+  getOfficeQrToken,
   requestLeave,
   getLeaves,
   decideLeave,
@@ -17,6 +18,7 @@ import {
   updateRegularizationStatus,
   updateAttendanceRecord,
   toggleBreak,
+  verifyWorkplaceLocation,
 } from './attendance.controller.js';
 import {
   recordPunchSchema,
@@ -29,6 +31,7 @@ import {
   regularizationStatusSchema,
   updateAttendanceRecordSchema,
   toggleBreakSchema,
+  workplaceLocationCheckSchema,
 } from './attendance.schema.js';
 import { validateRequest } from '../../middleware/validateRequest.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
@@ -41,7 +44,17 @@ attendanceRoutes.use(authenticateToken);
 attendanceRoutes.use(requireTenantContext);
 
 attendanceRoutes.post('/punches', validateRequest({ body: recordPunchSchema }), recordPunch);
+attendanceRoutes.post(
+  '/location-check',
+  validateRequest({ body: workplaceLocationCheckSchema }),
+  verifyWorkplaceLocation
+);
 attendanceRoutes.get('/punches', getPunches);
+attendanceRoutes.get(
+  '/qr-token',
+  requireRole(['super_admin', 'hr_manager', 'manager', 'faculty']),
+  getOfficeQrToken
+);
 
 attendanceRoutes.get('/leaves', getLeaves);
 attendanceRoutes.post('/leaves', validateRequest({ body: requestLeaveSchema }), requestLeave);
@@ -80,7 +93,6 @@ attendanceRoutes.post(
 );
 attendanceRoutes.put(
   '/regularizations/:id/status',
-  requireRole(['super_admin', 'hr_manager', 'manager']),
   validateRequest({ body: regularizationStatusSchema }),
   updateRegularizationStatus
 );

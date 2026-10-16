@@ -38,7 +38,7 @@ export interface TenantRecord {
   name: string;
   schema_name: string;
   status: 'active' | 'suspended' | 'provisioning' | 'decommissioned';
-  plan: 'starter' | 'professional' | 'enterprise';
+  plan: string;
   admin_email: string;
   contact_phone?: string;
   created_at: string;

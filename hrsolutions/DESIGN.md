@@ -1,378 +1,223 @@
 ---
-name: Modern Corporate Blue
+name: Pixbe Workspace Design System
+description: Cool, precise, trustworthy product UI for the Pixbe business operating system.
 colors:
-  canvas-bg: '#f3f3f9'
-  canvas-bg-alt: '#f8fafc'
-  surface-card: '#ffffff'
-  surface-subtle: '#f1f5f9'
-  surface-recessed: '#f8fafc'
-  border-slate: '#e2e8f0'
-  border-slate-soft: '#f1f5f9'
-  border-slate-muted: '#e2e8f0'
-  text-primary: '#0f172a'
-  text-secondary: '#475569'
-  text-muted: '#64748b'
-  text-faint: '#94a3b8'
-  primary: '#2563eb'
-  primary-hover: '#1d4ed8'
-  primary-soft: '#eff6ff'
-  primary-ring: '#93c5fd'
-  brand-navy: '#0f172a'
-  brand-sky: '#38bdf8'
-  ice-blue: '#eff6ff'
-  ice-blue-container: '#e0f2fe'
-  required-asterisk: '#f43f5e'
-  status-success-text: '#047857'
-  status-success-bg: '#d1fae5'
-  status-warning-text: '#b45309'
-  status-warning-bg: '#fef3c7'
-  status-error-text: '#b91c1c'
-  status-error-bg: '#fee2e2'
-  status-absent-bg: '#0f172a'
-  status-leave-bg: '#f1f5f9'
-  status-leave-text: '#475569'
-  overlay-scrim: 'rgba(0, 0, 0, 0.40)'
-  overlay-scrim-strong: 'rgba(0, 0, 0, 0.60)'
-  dark-canvas: '#0f0f12'
-  dark-surface: '#121214'
-  dark-surface-subtle: '#18181d'
-  dark-border: '#282830'
-  dark-text-secondary: '#9e9ea7'
+  ink: "#172234"
+  navy: "#17324e"
+  navy-hover: "#285275"
+  blue-action: "#2d628e"
+  blue-selected: "#f8fbfe"
+  blue-focus: "#d8e8f2"
+  paper: "#f3f5f7"
+  surface: "#ffffff"
+  surface-tinted: "#e8eef2"
+  border: "#dde4e9"
+  field-border: "#c5d0d8"
+  text-secondary: "#5e6c7b"
+  text-muted: "#687789"
+  sage: "#53886b"
+  sage-surface: "#eaf1ee"
+  error: "#8b3133"
+  error-surface: "#faeeee"
 typography:
-  display-kpi:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 32px
-    fontWeight: '700'
-    lineHeight: 38px
-    letterSpacing: -0.02em
-  display-kpi-mobile:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 26px
-    fontWeight: '700'
-    lineHeight: 32px
-    letterSpacing: -0.01em
+  headline:
+    fontFamily: "Plus Jakarta Sans, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "clamp(20px, 2vw, 26px)"
+    fontWeight: 760
+    lineHeight: 1.2
+    letterSpacing: "-.028em"
   page-title:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 20px
-    fontWeight: '700'
-    lineHeight: 28px
-    letterSpacing: -0.02em
-  page-title-lg:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 24px
-    fontWeight: '700'
-    lineHeight: 32px
-    letterSpacing: -0.02em
-  card-title:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 16px
-    fontWeight: '700'
-    lineHeight: 24px
-  body-md:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 14px
-    fontWeight: '400'
-    lineHeight: 20px
-  body-sm:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 13px
-    fontWeight: '400'
-    lineHeight: 18px
-  label-md:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 12px
-    fontWeight: '600'
-    lineHeight: 16px
-  label-sm:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 11px
-    fontWeight: '700'
-    lineHeight: 14px
-    letterSpacing: 0.06em
-  micro-caption:
-    fontFamily: Plus Jakarta Sans
-    fontSize: 10px
-    fontWeight: '700'
-    lineHeight: 12px
-  mono:
-    fontFamily: JetBrains Mono
-    fontSize: 13px
-    fontWeight: '500'
+    fontFamily: "Plus Jakarta Sans, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "clamp(16px, 1.5vw, 20px)"
+    fontWeight: 750
+    lineHeight: 1.3
+    letterSpacing: "-.02em"
+  section-title:
+    fontFamily: "Plus Jakarta Sans, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "15px"
+    fontWeight: 750
+    lineHeight: 1.3
+    letterSpacing: "-.02em"
+  body:
+    fontFamily: "Plus Jakarta Sans, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.5
+  label:
+    fontFamily: "Plus Jakarta Sans, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 650
 rounded:
-  sm: 0.5rem
-  DEFAULT: 0.75rem
-  md: 0.75rem
-  lg: 0.75rem
-  xl: 0.75rem
-  2xl: 1rem
-  full: 9999px
+  control: "7px"
+  list-item: "8px"
+  panel: "9px"
+  card: "12px"
 spacing:
-  space-2xs: 0.25rem
-  space-xs: 0.5rem
-  space-sm: 0.75rem
-  space-md: 1rem
-  space-lg: 1.25rem
-  space-xl: 1.5rem
-  space-2xl: 2rem
-  sidebar-width: 4.25rem
-  card-padding: 1.25rem
-  drawer-padding-x: 2rem
-  drawer-padding-y: 1.5rem
-  gutter-grid: 1rem
-  module-gap: 1.5rem
-shadows:
-  card: '0 1px 3px 0 rgba(0, 0, 0, 0.05)'
-  card-hover: '0 1px 3px 0 rgba(15, 23, 42, 0.08)'
-  drawer: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
-  primary-cta: '0 4px 6px -1px rgba(37, 99, 235, 0.20)'
-  popover: '0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04)'
+  xs: "4px"
+  sm: "8px"
+  md: "10px"
+  lg: "14px"
+  xl: "20px"
+  section: "20px"
+  chapter: "32px"
+components:
+  button-primary:
+    backgroundColor: "{colors.navy}"
+    textColor: "{colors.surface}"
+    rounded: "{rounded.control}"
+    height: "36px"
+    padding: "8px 14px"
+  button-primary-hover:
+    backgroundColor: "{colors.navy-hover}"
+  button-secondary:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.navy}"
+    rounded: "{rounded.control}"
+    height: "36px"
+    padding: "8px 14px"
+  input:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    height: "36px"
+    padding: "0 12px"
+  card:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.card}"
 ---
 
-## Brand & Style
+# Pixbe Workspace Design System
 
-This design system documents the **shipped** HR / people-ops UI: a cool-toned corporate blue product on a soft lavender-slate canvas, white elevated cards, and slate structural chrome. It is optimized for dense operational surfaces—attendance, projects, dashboards, and approval workflows—without decorative noise.
+## Overview
 
-### Core Philosophy
-- **Operational clarity over ornament:** White cards, thin slate borders, and sapphire CTAs carry hierarchy. Avoid purple glow themes, cream/serif editorial looks, and dashboard clutter in hero regions.
-- **Cool-tone ergonomics:** Canvas `#f3f3f9` / `#f8fafc`, slate borders `#e2e8f0`, and ice-blue active fills (`#eff6ff`) keep long sessions readable.
-- **One primary action per toolbar:** Page headers pair a segmented view switcher with at most one solid sapphire CTA (e.g. **Add Task**) and optional outlined secondary actions (**Add Project**).
-- **Text-first status:** Status is communicated with typography + tinted pill backgrounds. Prefer clean labels over decorative dots, pulsing pips, or stacked micro-tags. (Count badges on sub-nav tabs are functional, not decorative status dots.)
-- **Drawer-first create/edit:** Creating or editing operational records (tasks, projects, regularizations, attendance edits) uses a **right slide-over drawer**, not a centered dialog—unless the flow needs a large interactive surface (maps, confirmations).
+**Creative North Star: “The Working Studio.”** Pixbe should feel like a thoughtfully arranged place to get work done: a quiet cool canvas, white working surfaces, crisp ink, and a small number of purposeful color accents. The interface is professional without feeling sterile, confident without being loud.
 
-### Visual Style
-Corporate modernism: soft app canvas → white modules → slate hairlines → sapphire interaction. Depth comes from borders + restrained shadows (`shadow-xs` / `shadow-card`), not heavy elevation stacks. Icons are Lucide, typically `h-4 w-4` / `h-5 w-5` with stroke weight `1.8`–`2.2`.
+This is the app-wide direction chosen after the company setup redesign. The company setup flow is the **implemented reference**, not evidence that every existing Pixbe screen already follows it. The dashboard, institute experience, dark theme, and older modules still need gradual migration. Preserve their functionality while adopting this visual language. Workspace screens share setup’s cool palette and control language at a slightly tighter operational scale: readable type, clear section breaks, no wasted chrome. Do not copy the setup wizard's centered column onto data-heavy screens, and do not pack those screens into a dense dashboard.
 
----
+**Key Characteristics:**
+
+- Cool mist canvas and white working surfaces, with deep navy typography.
+- Clear editorial hierarchy: an assertive task heading, then direct controls. No lede or subtitle under the title.
+- Restrained blue interaction states and sage confirmation; semantic red only for errors.
+- Custom, consistent line illustrations for meaningful choices; utility icons only where they speed scanning.
+- Explicit state and validation: a selection, save, invitation, or launch must never look complete before it is.
+
+**Implementation reference:** Light-theme color lives in `src/app/globals.css` (`:root` / `[data-theme="light"]`). The dashboard on Quiet Mist + Clean Sheet is the approved canvas pairing. Setup layout and illustration still live in `src/components/modules/setup/workspace-setup.css`, `SetupWorkplaceStep.tsx`, `WorkspaceSetupWizard.tsx`, and `public/pixbe-workspace-plan.png`.
+
+**CSS tokens:** `--bg-app` = Quiet Mist, `--bg-surface` = Clean Sheet, `--bg-surface-subtle` / `--bg-surface-hover` = Tinted Panel, `--border-color` / `--border-strong` = Structure.
 
 ## Colors
 
-### Brand & Interactive
-| Token | Value | Usage |
-|---|---|---|
-| Primary Sapphire | `#2563eb` (`blue-600`) | Primary buttons, active sub-nav pills, active nav icons, links, selected calendar days |
-| Primary Hover | `#1d4ed8` (`blue-700`) | Hover / pressed primary CTAs |
-| Primary Soft | `#eff6ff` | Active sidebar nav fill, ice callouts, soft selected states |
-| Deep Navy | `#0f172a` | Page titles, KPI numerals, Absent pills, Full-Time bar segment |
-| Sky Accent | `#38bdf8` | Secondary chart / employment segments |
+The palette is cool-neutral first. Blue marks actions and selection, not every card or label. Warm beige, linen, cream sheets, and optical-white-on-ivory are rejected: they read dated against this product.
 
-### Surfaces & Neutrals
-| Token | Value | Usage |
-|---|---|---|
-| Canvas | `#f3f3f9` (body) / `#f8fafc` (light theme override) | App background behind cards |
-| Card | `#ffffff` | Modules, drawers, tables, filter bars |
-| Recessed | `#f8fafc` / `#f1f5f9` / `slate-50` | Search fields at rest, inset rows, empty states |
-| Border | `#e2e8f0` / `slate-200` | Card edges, inputs, table rules |
-| Soft Divider | `slate-100` | Drawer header/footer rules, inner card separators |
-| Text Primary | `#0f172a` / `slate-900` | Titles, strong values |
-| Text Secondary | `#475569` / `slate-600`–`700` | Body, labels |
-| Text Muted | `#64748b` / `#94a3b8` | Captions, placeholders, inactive icons |
+- **Primary:** Deep Ink (`ink`) for content; Studio Navy (`navy`, `navy-hover`) for brand and primary actions; Measured Blue (`blue-action`, `blue-selected`, `blue-focus`) for interactive states.
+- **Secondary:** Quiet Sage (`sage`, `sage-surface`) for success and confirmation. Precise Error (`error`, `error-surface`) for actionable failures.
+- **Neutral:** Quiet Mist (`paper`) for canvas, Clean Sheet (`surface`) for working surfaces, Tinted Panel (`surface-tinted`) for explanation, Structure (`border`, `field-border`) for boundaries, Supporting Ink (`text-secondary`, `text-muted`) for lower-emphasis text.
 
-### Semantic Status
-| Status | Text | Background | Notes |
-|---|---|---|---|
-| Success / On-Time / Approved | `#047857` | `#d1fae5` | Emerald tint; selected filter may invert to solid fill + ring |
-| Warning / Late / Pending | `#b45309` | `#fef3c7` | Amber; pending count chips may use `amber-100` / `amber-800` |
-| Leave | `#475569` | `#f1f5f9` | Neutral slate pill |
-| Absent / Critical | `#ffffff` | `#0f172a` | High-contrast navy pill |
-| Required field marker | `#f43f5e` (`rose-500`) | — | Asterisks on form labels only |
-| Destructive CTA | white on `rose-600` | — | Clock-out / destructive confirms |
+**The One Accent Rule.** A screen may have semantic states, but only one color should read as its primary interaction accent. Avoid rainbow navigation, multi-colored cards, and decorative gradients.
 
-### Dark Mode (supported)
-When `data-theme="dark"` / `.dark`: canvas `#0f0f12`, surfaces `#121214` / `#161619`, borders `#282830`, primary `#3b82f6`. Prefer existing `dark:` class pairs already used on dashboard cards rather than inventing new dark palettes.
-
----
+**The Legibility Rule.** Never put muted blue-gray text on a dark fill. On dark surfaces use near-white text with tested contrast; never communicate state by color alone.
 
 ## Typography
 
-**Plus Jakarta Sans** is the UI face (weights 400–800). **JetBrains Mono** is reserved for codes, IDs, and monospace fields (e.g. project codes).
+**Display and body:** Plus Jakarta Sans, already loaded in the app. **Technical identifiers:** JetBrains Mono only for code-like data.
 
-Global letter-spacing on body is slightly tight (`~-0.011em`); headings use `tracking-tight` / `~-0.02em`.
+Type is readable first. Setup headings used to sit at 29–39px and drowned workspace screens; they now top out at 26px. Everyday modules use a smaller page title than setup, not a cramped one.
 
-### Hierarchy in product UI
-- **Page title:** `text-xl md:text-2xl font-bold tracking-tight text-slate-900` (e.g. Tasks, Attendance).
-- **Dashboard header:** `text-[20px] font-bold text-[#0f172a]`.
-- **Card title:** `text-base`–`text-lg font-bold text-[#0f172a]`.
-- **KPI numeral:** `text-2xl`–`text-[32px] font-bold tracking-tight`.
-- **Metric eyebrow:** `text-[11px] font-bold uppercase tracking-wider text-slate-400`.
-- **Form label:** `text-xs font-semibold text-slate-700`.
-- **Table header:** `text-[10px]`–`11px` bold uppercase `text-slate-500` on `bg-slate-50`.
-- **Helper / count:** `text-xs font-semibold text-slate-400`.
+- **Setup headline** (`headline`): one question per setup step, `clamp(20px, 2vw, 26px)`.
+- **Page title** (`page-title`): workspace modules (payroll, reports, settings, HR). `clamp(16px, 1.5vw, 20px)` — never the setup hero size.
+- **Section title** (`section-title`): 15px divisions inside a page.
+- **Body** (`body`): 13px, preferably under about 70 characters per line.
+- **Label** (`label`): 12px field labels and actions; sentence case.
+- **Microcopy:** 12px for secondary metadata only. Never drop UI copy to 11px except true captions (timestamps, table column codes).
 
----
+**The Answer-First Rule.** Titles state the task, not an abstract module name. Do not add an eyebrow/kicker above the heading, and do not add a subtitle, lede, or restating sentence under it. Lines such as “Attendance, leave, and projects as of Wednesday, Oct 14. Open a figure to act on it.” are banned: they repeat the page, add a date the UI already shows, and tell the user how to click. Put dates, counts, and instructions on the figures themselves.
 
-## Layout & Spacing
+## Layout
 
-### Shell
-- **Desktop sidebar dock:** Fixed left rail **68px** (`w-[68px]`), white, `border-r border-slate-200/80`, `shadow-xs`. Logo is a `rounded-xl bg-blue-600` squircle with white mark. Active item: left sapphire indicator bar + `bg-[#eff6ff] text-[#2563eb]` on a `rounded-2xl` 44px target.
-- **Main canvas:** Content sits to the right of the rail with vertical module rhythm `space-y-5`–`space-y-6` and bottom padding for scroll comfort.
-- **Mobile:** Sidebar becomes an overlay drawer; primary navigation is the **bottom bar** (`h-16`, white, top border, safe-area padding). Active tab shows a short sapphire underline pill at the top of the slot.
+- Workspace modules fill the remaining canvas inside the app shell (sidebar + 56px header). Cap content at 1600px. Give the canvas normal page padding (`xl` / `section`, about 20px; 24px on large screens). Do not wrap data pages in a 1280px onboarding column, and do not hug the edges with 8px gutters.
+- Fill-canvas pages (payroll, chat) own the leftover height: chrome stays put, the table or thread scrolls inside. Do not page-scroll a short header away from a long table.
+- Setup remains a flow pattern: centered frame up to 1440px, a guidance rail, flexible content. That layout is **not** the dashboard shell, but its spacing rhythm (group, then rest) **is**.
+- Hierarchy: 10–14px inside components and form groups, 14–20px between related blocks, about 20px between sections, about 32px for major transitions. Related items sit closer than unrelated ones; never use one tight gap everywhere.
+- Tables stay a little tighter than forms, not cramped: 10px vertical and 14px horizontal cell padding, 13px body in cells. Do not use 6–8px cell padding as a default.
+- Place decisions before dependent fields, labels with controls, and feedback next to the action that caused it.
+- Use asymmetric grids when content demands it. Avoid equal columns just for symmetry.
+- Stack at phone widths; keep primary actions reachable above the mobile nav. Avoid horizontal page scrolling; **36px is the default control height**. Icon-only hits stay at least 36×36px.
 
-### Page composition patterns
-1. **Header row:** Title left; right cluster = segmented control + secondary outline button + primary solid button.
-2. **Filter toolbar:** Full-width white `rounded-xl border border-slate-200 p-3` holding search + selects (`bg-slate-50` at rest → white + `border-blue-500` on focus).
-3. **Dashboard grid:** Top 2×2 / 4 KPI cards (`gap-3 sm:gap-4`), then `lg:grid-cols-12` with two equal `col-span-6` columns of cards, then a full-width table card.
-4. **Attendance module:** Horizontal **sub-nav pill row** → hero attendance card → optional metric tiles → filter bar → data table.
-
-### Rhythm
-- Card padding: typically `p-4`–`p-5` (`1–1.25rem`).
-- Inter-card gap: `1rem`–`1.5rem`.
-- Icon-to-label gaps: `gap-1.5`–`gap-2`.
-
----
+**The Comfortable Work Rule.** Everyday operations screens must be easy to scan and interact with for hours. Hierarchy and alignment do the work — not packing more rows into the first viewport, and not padding every block like a marketing page.
 
 ## Elevation & Depth
 
-| Level | Treatment |
-|---|---|
-| Canvas | Flat tinted ground, no shadow |
-| Cards / filter bars | `border border-slate-200` + `shadow-xs` / `shadow-card` (`0 1px 3px rgba(0,0,0,0.05)`); hover may lift to `shadow-sm` + slightly stronger border |
-| Popovers / menus | White + `shadow-lg` / popover shadow |
-| Slide-over drawer | Full-height white panel, `border-l border-slate-100`, `shadow-2xl`; scrim `bg-black/40 backdrop-blur-xs` |
-| Expanded centered modal (maps) | `rounded-2xl`, `shadow-2xl`, stronger scrim `bg-black/60 backdrop-blur-sm` |
+Borders and tonal layers define most surfaces. A slight ambient shadow is reserved for a current step, selected choice, or truly elevated overlay. Static cards should not look like floating tiles.
 
-Motion: prefer `animate-in fade-in` for overlays; drawers use `slide-in-from-right duration-300`; mobile sidebar `slide-in-from-left`. Primary buttons may use `active:scale-[0.99]` / `active:scale-95`.
+- **Current step:** `0 5px 15px rgba(26,46,62,.06)`.
+- **Selected choice:** `0 9px 22px rgba(26,58,84,.09)`, always paired with a stronger border so the state remains clear without shadow.
 
----
+**The Almost-Flat Rule.** No deep blur, glow, or heavy elevation as general decoration. Meaningful state and surface contrast do the work.
 
 ## Shapes
 
-| Element | Radius |
-|---|---|
-| Primary cards / KPI tiles / table shells | `rounded-2xl` (~16px) |
-| Drawers | Square against the viewport edge; inner controls use `rounded-xl` |
-| Inputs, selects, textareas (in drawers & forms) | `rounded-xl` |
-| Buttons (page CTAs, sub-nav pills) | `rounded-xl` (page) or `rounded-lg` (compact attendance actions) |
-| Segmented control track | `rounded-xl` track; `rounded-lg` active segment |
-| Status / count chips | `rounded-full` |
-| Sidebar nav targets | `rounded-2xl`; logo squircle `rounded-xl` |
-| Icon close / utility hits in drawers | `rounded-xl` hover wash |
-| Map modal chrome buttons | `rounded-full` |
+Controls are gently crisp (`control`); list rows use `list-item`; callouts use `panel`; large choice cards use `card`. This is a controlled range, not a mandate that every surface be a rounded rectangle. Dividers are thin and opaque. Circles are reserved for step numbers, radio marks, small status markers, and map pins.
 
-Avoid inventing new radius scales; match neighboring modules.
-
----
+Illustrations and choice icons use simplified architectural or operational linework: consistent stroke, open negative space, no emoji, no clip-art, and no decorative icon beside every heading. The setup artwork supports the form rather than competing with it.
 
 ## Components
 
-### 1. KPI / Metric Stat Cards
-- White `rounded-2xl`, `border border-slate-200/90`, `shadow-xs`, `p-4 sm:p-5`.
-- Uppercase muted eyebrow + large bold numeral in navy.
-- Often clickable (`button` / router push) with hover border strengthen.
-- Semantic split values (e.g. Approved / Pending) use emerald + amber type side-by-side, not extra badge chrome.
+### Buttons
 
-### 2. Module Cards (Tasks, Schedules, Employment, Heatmap)
-- Same white `rounded-2xl` + `#e2e8f0` border + `shadow-card`.
-- Header: bold title left; meta count + text link (`text-xs font-bold text-blue-600`) right.
-- Empty state: dashed `border-slate-200 rounded-xl` with muted copy + text action.
+- **Primary:** navy fill, white label, 7px radius, 36px height. Use one dominant next action per area.
+- **Secondary:** white fill, navy border and label; use for additive actions such as “Add workplace.”
+- **Hover and focus:** subtle color shift or 1–2px movement; visible blue focus outline. A disabled appearance must reflect real validation.
+- **Copy:** action plus object where possible (“Add workplace,” “Continue to structure,” “Launch workspace”).
 
-### 3. Buttons & Actions
-| Variant | Spec |
-|---|---|
-| **Primary** | `bg-blue-600 hover:bg-blue-700 text-white font-semibold/bold rounded-xl`, optional `shadow-md shadow-blue-600/20` |
-| **Secondary / Outline** | White, `border-slate-200`, `text-slate-700`, hover `bg-slate-50` |
-| **Ghost / Utility** | Transparent or `bg-slate-100`, muted text |
-| **Destructive** | `bg-rose-600 hover:bg-rose-700 text-white` |
-| **Sub-nav pill (active)** | `bg-blue-600 text-white shadow-sm shadow-blue-500/20` |
-| **Sub-nav pill (idle)** | White + `border-slate-200/80` + slate text |
+### Inputs and fields
 
-Icon + label CTAs use `gap-1.5`, icons ~16px.
+- White fill, field border, 7px radius, 36px height. Keep a visible label above the field; placeholders are examples, not labels.
+- Focus uses a blue border and soft ring. Errors appear near the field, explain the fix, and preserve typed values.
+- Use real controls for constrained values and validate again on the server.
 
-### 4. Segmented View Switcher
-Used on Projects (Board / List / Overview):
-- Track: `bg-slate-100/90 p-1 rounded-xl`.
-- Active segment: `bg-white text-blue-600 shadow-xs rounded-lg text-xs font-bold`.
-- Idle: `text-slate-600 hover:text-slate-900`.
+### Choice cards
 
-### 5. Filter / Search Toolbar
-- Container: white `rounded-xl border border-slate-200 p-3 shadow-2xs`.
-- Search: left Lucide icon, `bg-slate-50 border-slate-200 rounded-xl text-xs`, focus → white + `border-blue-500`.
-- Selects match the same recessed → focus treatment.
+- Use when options change the following workflow. Each card has a custom semantic illustration, clear title, one-sentence consequence, and radio indicator.
+- Selected state has a stronger blue border and quiet tint. Radio and accessible `aria-checked` must agree. On mobile, cards become horizontal rows.
+- Do not assign a generic Lucide icon to every choice. Draw or reuse a coherent Pixbe icon family when imagery genuinely helps.
 
-### 6. Navigation Dock
-- 68px icon rail; tooltips via native `title`.
-- Active: sapphire left tick (`w-1.5 h-6 rounded-r-md bg-[#2563eb]`) + ice fill.
-- Inactive icons: `text-slate-400`, hover `bg-slate-50 text-slate-700`.
+### Progress navigation
 
-### 7. Right Slide-Over Drawer (canonical create/edit)
-**Reference implementations:** Add Task / Add Project (`ProjectsModule`), Apply Regularization / Edit Attendance (`KekaAttendanceModule`).
+- Distinguish current, completed, and upcoming stages. The active stage gets a white surface; completed stages get a restrained sage marker.
+- Do not imply “saved” when data exists only as a draft. Step labels describe user tasks, not backend entities.
+- On phones, compress to a short horizontal stage strip instead of squeezing desktop descriptions into tiny columns.
 
-Structure:
-1. **Scrim:** `fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs`.
-2. **Panel:** `w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col`, `slide-in-from-right` (~200ms, not 300ms+).
-3. **Header:** `p-4 sm:p-6 sm:px-8 border-b border-slate-100` — title `text-xl sm:text-2xl font-bold text-slate-900` + square close control (`rounded-xl hover:bg-slate-100 active:scale-[0.97]`).
-4. **Body:** Scrollable `p-4 sm:p-6 sm:px-8 space-y-4 sm:space-y-5` with `custom-scrollbar`.
-5. **Footer:** Sticky `border-t border-slate-100` with equal-width **Cancel** (outline) + **Submit** (primary), `gap-3`, often `flex-1` each; press feedback `active:scale-[0.97]` ~150ms ease-out.
+### Cards, messages, and status
 
-**Form field recipe (drawer):**
-- Label: `text-xs font-semibold text-slate-700 mb-1.5/mb-2`; required `* ` in `text-rose-500`.
-- Control: `w-full rounded-xl border border-slate-200 bg-white px-3.5/px-4 py-2.5/py-3 text-sm font-medium text-slate-800`.
-- Focus: `focus:border-slate-400 focus:ring-1 focus:ring-slate-300` (drawer forms intentionally use slate focus, not sapphire).
-- Read-only assignee chip: `bg-slate-50` with muted uppercase micro-label (`text-[10px] tracking-wider`).
+- White working surfaces on Quiet Mist (`#f3f5f7`) are the default. Use tinted panels for explanation, not filler. Do not put cream or linen fills on cards.
+- Status text states what happened or remains, with a corrective action when relevant. Success and error combine text and surface color.
+- Destructive controls have explicit labels. Draft-only removal must not remove a persisted record.
 
-Do **not** reinvent centered small modals for these flows—match the drawer pattern.
+### Images and icons
 
-### 8. Centered Expanded Modal
-For map / multi-step confirmations (e.g. Confirm Punch Location):
-- Stronger scrim (`bg-black/60`), centered `max-w-5xl` panel, `rounded-2xl`, symmetrical header with circular back/close buttons and centered title.
-- Content may use recessed `#f1f5f9` map well or centered confirmation copy stack.
+- Brand and domain artwork should be original, with precise linework and limited navy/blue/sage color. `public/pixbe-workspace-plan.png` is the first reference asset.
+- Lucide is acceptable for small utility actions (back, close, upload, delete), not as the visual identity and not on every heading or card.
+- Informative icons need accessible text or an adjacent label; purely decorative art should be hidden from assistive technology.
 
-### 9. Data Tables
-- Shell: white card, often `overflow-x-auto`, `rounded-xl`–`2xl`, border + light shadow. Prefer `ATT_TABLE_SHELL` from `modules/attendance/attendanceUi.ts`.
-- Head: `bg-slate-50`, uppercase micro labels, bottom border (`ATT_TABLE_HEAD`).
-- Rows: `divide-y divide-slate-100`, hover `bg-slate-50`, comfortable `p-3.5` cells, strong name column in `font-bold text-slate-900`.
-- Status pills via `AttendanceStatusPill` (no leading dots):
-  - On-Time / Present → emerald soft
-  - Late → amber soft
-  - On-Leave → slate soft
-  - Absent → navy solid / white text
-  - Approved / Rejected → solid emerald / rose
-- Summary filter chips above tables may invert to solid fill + ring when selected.
+## Do's and Don'ts
 
-### 9b. Attendance module (TeamHub-inspired, sapphire)
-**Reference:** `KekaAttendanceModule`, shared primitives under `modules/attendance/`.
+### Do:
 
-Layout recipes (keep brand sapphire `#2563eb` — do not use TeamHub teal):
-1. **Sub-nav pills:** `ATT_SUBNAV_BASE` + `ATT_SUBNAV_ACTIVE` / `ATT_SUBNAV_IDLE`; press `active:scale-[0.97]`; no enter animation on tab switch.
-2. **Summary KPI row:** `AttendanceStatCards` — Present (soft sapphire), On Leave (solid primary), Absent (slate-900). Optional breakdowns under a hairline divider.
-3. **Overview chart:** `AttendanceOverviewChart` stacked bars (Present / On Leave / Absent) using chart kit sapphire series.
-4. **Filter toolbar:** `AttendanceFilterToolbar` — white recessed card, search + selects (DESIGN §5).
-5. **Punch hero:** `ATT_CARD` with shift meta, live timer, primary Punch In / rose Punch Out.
-6. **Settings:** `AttendanceSettingsView` sticky header + Save (`ATT_BTN_PRIMARY`) + same pill sub-nav; section bodies on `ATT_CARD`.
+- **Do** use the setup flow as the visual reference for color, type, and controls, at the tighter workspace scale, while keeping workspace pages full-width.
+- **Do** use real content states, clear validation, and accurate save and launch language.
+- **Do** pair Quiet Mist canvas (`#f3f5f7`), Clean Sheet white (`#ffffff`), deep ink, measured blue, and quiet sage.
+- **Do** test desktop and phone layouts, keyboard use, focus, and contrast.
+- **Do** give company and institute workflows equal care while preserving their distinct terminology.
 
-Shared tokens live in `modules/attendance/attendanceUi.ts`.
+### Don't:
 
-### 10. Employment / Progress Segments
-- Track `h-3`–`h-3.5 rounded-full` with contiguous navy / sapphire / sky / slate segments.
-- Legend: bold percentages + short labels; swatches match segment colors.
-
-### 11. Calendar & Heatmap
-- Selected day: solid sapphire circle, white type.
-- Today / soft highlight: ice fill + sapphire type.
-- Heatmap cells: stepped slate → ice → sky → navy densities; small `rounded-md` blocks inside a white card with range dropdown.
-
-### 12. Toasts & Notices
-- Success toast: emerald solid, `rounded-xl`, top-right, bold `text-xs`.
-- Permission / error notice: dark rose panel, border, dismissible.
-
-### 13. Forms outside drawers
-Page-level compact controls (attendance clock actions, toolbar selects) may use `rounded-lg` and sapphire focus (`focus:border-blue-600` / `focus:border-blue-500`). Prefer local consistency with the surrounding module.
-
----
-
-## UX Patterns & Guidelines
-
-1. **Match existing modules before inventing:** New create/edit UIs should clone the Add Task drawer chrome (header / body / dual footer CTAs / field styling).
-2. **Keep first viewport calm:** Module pages open with title + controls + primary data—not stacked promo cards or redundant KPI strips unless the dashboard itself.
-3. **Responsive:** Drawers go full-width on small screens; toolbars stack (`flex-col` → `sm:flex-row`); tables scroll horizontally; mobile uses bottom bar, not a persistent expanded sidebar.
-4. **Institution vs company:** Labels and nav items adapt (Students / Staff & Faculty vs Employees / Projects)—visual language stays identical.
-5. **Accessibility:** Icon-only controls need `title` / `aria-label`; required fields marked with rose asterisk + `required`; maintain contrast on status pills.
-6. **Badge hygiene:** Functional count badges on tabs are OK. Do not add decorative status dots, pulse animations inside pills, or redundant “Status:” prefixes when a single pill already states the condition.
-
----
-
-## Implementation Notes
-
-- Tokens live in `src/app/globals.css` (`:root` / `[data-theme]` CSS variables) and Tailwind utility classes in components.
-- Fonts: Plus Jakarta Sans + JetBrains Mono (+ Material Symbols Rounded where already used).
-- Prefer Lucide icons for new work to match Attendance, Projects, and shell navigation.
-- When updating UI, align with `DashboardModule` card language, `ProjectsModule` drawer language, and `KekaAttendanceModule` sub-nav + table language so the product feels like one system.
+- **Don't** seed a new workspace with fake offices, people, departments, or roles.
+- **Don't** decorate with a wall of generic Lucide icons, gradients, glow, oversized shadows, or multi-colored cards.
+- **Don't** mark a step complete or show a save confirmation before data is persisted.
+- **Don't** put a muted subtitle under a page or section title. The heading is enough.
+- **Don't** transpose the onboarding layout wholesale onto a dashboard or table, or use setup hero type (20–26px) as a workspace page title.
+- **Don't** specify or implement tightly packed UI: 6px gutters, 11px labels, 32px cramped controls, or 6px table cells as the product default.
+- **Don't** use warm paper, linen, taupe, or cream card fills. Those were tried and rejected.
+- **Don't** assume the dark theme already matches this guide; migrate and test it deliberately.

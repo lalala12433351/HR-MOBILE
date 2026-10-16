@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-export const PriorityLevelEnum = z.enum(['LOW', 'NORMAL', 'HIGH', 'URGENT']);
+// Announcements predate the rest of the API and their database constraint uses
+// lowercase values. Keep that as the wire/database contract while accepting the
+// labels used by older clients.
+export const PriorityLevelEnum = z.enum(['normal', 'important', 'urgent']);
 export const AnnouncementCategoryEnum = z.enum([
   'GENERAL',
   'HR_POLICY',
@@ -34,11 +37,12 @@ export const createAnnouncementSchema = z.object({
   content: z.string().min(5, 'Content must be at least 5 characters'),
   authorEmployeeId: z.string().optional().nullable(),
   targetDepartmentId: z.string().optional().nullable(),
-  priority: z
-    .string()
-    .transform((v) => v.toUpperCase())
-    .pipe(PriorityLevelEnum)
-    .default('NORMAL'),
+  priority: z.preprocess((value) => {
+    if (typeof value !== 'string') return value;
+    const normalized = value.trim().toLowerCase();
+    return ({ low: 'normal', high: 'important', critical: 'urgent' } as Record<string, string>)[normalized]
+      ?? normalized;
+  }, PriorityLevelEnum).default('normal'),
   category: z
     .string()
     .transform((v) => v.toUpperCase())

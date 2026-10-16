@@ -7,9 +7,106 @@ import { log } from '../../utils/logger.js';
 import {
   canAccessEmployee,
   isOrgWideRole,
+  resolveCallerEmployee,
 } from '../../utils/employeeScope.js';
 import { scheduleRepairSetupEmployees } from './employeeProvisionRepair.js';
-import { inferAuthRoleFromDesignation, normalizeAuthRole } from '../../utils/roles.js';
+import {
+  authRoleFromJobLevel,
+  inferAuthRoleFromDesignation,
+  isFounderEmployeeCode,
+  normalizeAuthRole,
+} from '../../utils/roles.js';
+import {
+  resolveDefaultReportingManagerId,
+  syncReportingHierarchy,
+} from '../../utils/reportingHierarchy.js';
+import { ensureLeadTables, getLeadIds, setDepartmentLeads } from '../../utils/orgLeads.js';
+import { ensureDepartmentByName } from '../../utils/orgUpsert.js';
+import { sendEmail } from '../../config/ses.js';
+import { employeeInfoUpdatedEmail } from '../../emails/templates.js';
+import { LicenseError, assertCanAddEmployees } from '../licenses/license.service.js';
+
+const BANK_KEYS = ['account_holder_name', 'account_number', 'bank_name', 'routing_or_ifsc_code'];
+const PAY_KEYS = [
+  'base_salary',
+  'hra',
+  'special_allowance',
+  'conveyance_allowance',
+  'medical_allowance',
+  'other_allowances',
+  'allowances',
+  'provident_fund_deduction',
+  'tax_deduction',
+];
+
+function redactSensitiveEmployee(
+  row: any,
+  opts: { canSeeBank: boolean; canSeePay: boolean }
+): any {
+  if (!row) return row;
+  const next = { ...row };
+  if (!opts.canSeeBank) {
+    for (const key of BANK_KEYS) next[key] = null;
+  }
+  if (!opts.canSeePay) {
+    for (const key of PAY_KEYS) next[key] = null;
+  }
+  return next;
+}
+
+async function ensureEmployeeExtraColumns(query: (sql: string, params?: any[]) => Promise<any>): Promise<void> {
+  try {
+    await query(`
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_type VARCHAR(64) DEFAULT 'Full-time';
+    `);
+  } catch (_) {}
+}
+
+async function notifyEmployeeOfInfoChange(input: {
+  query: (sql: string, params?: any[]) => Promise<{ rows: any[] }>;
+  employee: any;
+  actorName?: string;
+}): Promise<void> {
+  const email = String(input.employee?.email || '').trim();
+  const employeeId = input.employee?.id;
+  if (!employeeId) return;
+  const title = 'Your profile was updated';
+  const message = input.actorName
+    ? `${input.actorName} updated information on your employee profile.`
+    : 'HR updated information on your employee profile.';
+  try {
+    await input.query(
+      `INSERT INTO notifications (recipient_employee_id, title, message, category, priority, is_read)
+       VALUES ($1, $2, $3, 'HR', 'medium', false)`,
+      [employeeId, title, message]
+    );
+  } catch (err) {
+    log.warn('Could not write profile-update notification', err);
+  }
+  if (!email) return;
+  try {
+    const rendered = employeeInfoUpdatedEmail({
+      firstName: input.employee.first_name || input.employee.firstName,
+      actorName: input.actorName,
+    });
+    await sendEmail({ to: email, subject: rendered.subject, html: rendered.html, text: rendered.text });
+  } catch (err) {
+    log.warn(`Could not email profile-update notice to ${email}`, err);
+  }
+}
+
+async function attachExtraManagers(
+  query: (sql: string, params?: any[]) => Promise<{ rows: any[] }>,
+  employeeId: string,
+  departmentId: string | null,
+  managerIds: unknown
+): Promise<void> {
+  if (!departmentId || !Array.isArray(managerIds) || managerIds.length === 0) return;
+  const extras = managerIds.map((id) => String(id || '').trim()).filter(Boolean);
+  if (!extras.length) return;
+  const current = await getLeadIds(query, 'department', departmentId);
+  await setDepartmentLeads(query, departmentId, [...new Set([...current, ...extras])]);
+}
 import {
   attachOfficesToEmployeeRow,
   fetchEmployeeOfficesMap,
@@ -40,6 +137,8 @@ export async function getEmployees(req: Request, res: Response): Promise<void> {
     }
 
     const { departmentId, role, status } = req.query;
+    await ensureLeadTables(req.tenantQuery!);
+    await ensureEmployeeExtraColumns(req.tenantQuery!);
     // Directory list is org-wide for any authenticated tenant user.
     // Deep access (getById / update) still uses getAccessScope via canAccessEmployee.
     let sql = `
@@ -50,6 +149,15 @@ export async function getEmployees(req: Request, res: Response): Promise<void> {
         j.title as job_title,
         t.name as team_name,
         t.lead_employee_id as team_lead_id,
+        COALESCE((
+          SELECT array_agg(DISTINCT x.employee_id::text)
+          FROM (
+            SELECT dl.employee_id FROM department_leads dl WHERE dl.department_id = e.department_id
+            UNION
+            SELECT tl.employee_id FROM team_leads tl WHERE tl.team_id = e.team_id
+          ) x
+          WHERE x.employee_id <> e.id
+        ), ARRAY[]::text[]) as co_manager_ids,
         TRIM(COALESCE(mgr.first_name, '') || ' ' || COALESCE(NULLIF(mgr.last_name, 'User'), mgr.last_name, '')) as reporting_manager_name,
         TRIM(COALESCE(tlead.first_name, '') || ' ' || COALESCE(NULLIF(tlead.last_name, 'User'), tlead.last_name, '')) as team_manager_name,
         b.account_holder_name,
@@ -96,6 +204,9 @@ export async function getEmployees(req: Request, res: Response): Promise<void> {
     const result = await req.tenantQuery!(sql, params);
     const employeeIds = result.rows.map((r: any) => String(r.id));
     const officesMap = await fetchEmployeeOfficesMap(req.tenantQuery!, employeeIds);
+    const orgWide = isOrgWideRole(req.user?.role);
+    const me = await resolveCallerEmployee(req).catch(() => null);
+    const meId = me?.id ? String(me.id) : '';
 
     const mappedRows = result.rows.map((row: any) => {
       const isSuper = row.role === 'super_admin' || row.employee_code === 'EMP001';
@@ -134,17 +245,21 @@ export async function getEmployees(req: Request, res: Response): Promise<void> {
         ];
       }
 
+      const isSelf = meId && String(row.id) === meId;
       return attachOfficesToEmployeeRow(
-        {
-          ...row,
-          last_name: cleanedLastName,
-          account_status: resolvedStatus,
-          is_activated: isActivated,
-          is_deactivated: isDeactivated,
-          has_completed_profile: hasCompletedProfile,
-          onboarding_progress: onboardingProgress,
-          job_title: row.job_title || (isSuper ? 'Founder & CEO' : null),
-        },
+        redactSensitiveEmployee(
+          {
+            ...row,
+            last_name: cleanedLastName,
+            account_status: resolvedStatus,
+            is_activated: isActivated,
+            is_deactivated: isDeactivated,
+            has_completed_profile: hasCompletedProfile,
+            onboarding_progress: onboardingProgress,
+            job_title: row.job_title || (isSuper ? 'Founder & CEO' : null),
+          },
+          { canSeeBank: orgWide || Boolean(isSelf), canSeePay: orgWide }
+        ),
         offices
       );
     });
@@ -170,6 +285,7 @@ export async function getEmployeeById(req: Request, res: Response): Promise<void
       return;
     }
 
+    await ensureLeadTables(req.tenantQuery!);
     const result = await req.tenantQuery!(
       `SELECT 
         e.*,
@@ -178,6 +294,15 @@ export async function getEmployeeById(req: Request, res: Response): Promise<void
         j.title as job_title,
         t.name as team_name,
         t.lead_employee_id as team_lead_id,
+        COALESCE((
+          SELECT array_agg(DISTINCT x.employee_id::text)
+          FROM (
+            SELECT dl.employee_id FROM department_leads dl WHERE dl.department_id = e.department_id
+            UNION
+            SELECT tl.employee_id FROM team_leads tl WHERE tl.team_id = e.team_id
+          ) x
+          WHERE x.employee_id <> e.id
+        ), ARRAY[]::text[]) as co_manager_ids,
         TRIM(COALESCE(mgr.first_name, '') || ' ' || COALESCE(NULLIF(mgr.last_name, 'User'), mgr.last_name, '')) as reporting_manager_name,
         TRIM(COALESCE(tlead.first_name, '') || ' ' || COALESCE(NULLIF(tlead.last_name, 'User'), tlead.last_name, '')) as team_manager_name,
         b.account_holder_name,
@@ -233,16 +358,21 @@ export async function getEmployeeById(req: Request, res: Response): Promise<void
         : hasCompletedProfile
           ? 100
           : 0;
-    const mapped = {
-      ...row,
-      last_name: row.last_name === 'User' ? '' : row.last_name,
-      account_status: resolvedStatus,
-      is_activated: isActivated,
-      is_deactivated: isDeactivated,
-      has_completed_profile: hasCompletedProfile,
-      onboarding_progress: onboardingProgress,
-      job_title: row.job_title || (isSuper ? 'Founder & CEO' : null),
-    };
+    const orgWide = isOrgWideRole(req.user?.role);
+    const isSelf = access.scope.meId && String(row.id) === String(access.scope.meId);
+    const mapped = redactSensitiveEmployee(
+      {
+        ...row,
+        last_name: row.last_name === 'User' ? '' : row.last_name,
+        account_status: resolvedStatus,
+        is_activated: isActivated,
+        is_deactivated: isDeactivated,
+        has_completed_profile: hasCompletedProfile,
+        onboarding_progress: onboardingProgress,
+        job_title: row.job_title || (isSuper ? 'Founder & CEO' : null),
+      },
+      { canSeeBank: orgWide || Boolean(isSelf), canSeePay: orgWide }
+    );
 
     let offices = await fetchOfficesForEmployee(req.tenantQuery!, String(row.id));
     if (offices.length === 0 && row.office_id) {
@@ -282,6 +412,18 @@ function parseDateOrNull(val: any): string | null {
 
 export async function createEmployee(req: Request, res: Response): Promise<void> {
   try {
+    try {
+      await assertCanAddEmployees(req.tenant?.id || req.user?.tenant_id || '', 1);
+    } catch (licenseErr: any) {
+      if (licenseErr instanceof LicenseError) {
+        res.status(licenseErr.httpStatus).json({
+          success: false,
+          error: { code: licenseErr.code, message: licenseErr.message },
+        });
+        return;
+      }
+      throw licenseErr;
+    }
     const {
       employeeCode,
       firstName,
@@ -299,12 +441,15 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
       designation,
       jobTitle,
       reportingManagerId,
+      managerId,
+      managerIds,
       role: rawRole = 'employee',
       dateOfJoining,
+      employmentType,
       avatar,
     } = req.body;
 
-    const role = inferAuthRoleFromDesignation(designation || jobTitle, rawRole);
+    let role = inferAuthRoleFromDesignation(designation || jobTitle, rawRole);
 
     const cleanEmail = email ? String(email).trim().toLowerCase() : '';
     const cleanPhone = phone ? String(phone).trim() : '';
@@ -364,14 +509,7 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
     }
 
     if (department && (!validDeptId || String(validDeptId).startsWith('00000000'))) {
-      const depCheck = await req.tenantQuery!('SELECT id FROM departments WHERE name ILIKE $1 LIMIT 1', [department]);
-      if (depCheck.rows[0]) {
-        validDeptId = depCheck.rows[0].id;
-      } else {
-        const code = department.slice(0, 4).toUpperCase() + Math.floor(10 + Math.random() * 90);
-        const newDept = await req.tenantQuery!('INSERT INTO departments (name, code) VALUES ($1, $2) RETURNING id', [department, code]);
-        validDeptId = newDept.rows[0].id;
-      }
+      validDeptId = (await ensureDepartmentByName(req.tenantQuery!, department)).id;
     } else if (departmentId?.startsWith('00000000')) {
       const dep = await req.tenantQuery!('SELECT id FROM departments LIMIT 1');
       if (dep.rows[0]) validDeptId = dep.rows[0].id;
@@ -392,17 +530,40 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
       if (jb.rows[0]) validJobRoleId = jb.rows[0].id;
     }
 
+    if (validJobRoleId) {
+      const jobLevel = await req.tenantQuery!('SELECT level FROM job_roles WHERE id = $1 LIMIT 1', [validJobRoleId]);
+      const fromLevel = authRoleFromJobLevel(jobLevel.rows[0]?.level);
+      if (fromLevel) role = fromLevel;
+    }
+
     try {
       await req.tenantQuery!(`
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS avatar TEXT;
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS avatar_url TEXT;
       `);
     } catch (_) {}
+    await ensureEmployeeExtraColumns(req.tenantQuery!);
+
+    const cleanEmploymentType = String(employmentType || 'Full-time').trim() || 'Full-time';
+
+    const incomingManager = reportingManagerId !== undefined ? reportingManagerId : managerId;
+    const explicitManager =
+      incomingManager && String(incomingManager).trim() !== '' && !String(incomingManager).startsWith('00000000')
+        ? String(incomingManager)
+        : null;
+    const resolvedManagerId =
+      explicitManager ||
+      (await resolveDefaultReportingManagerId(req.tenantQuery!, {
+        departmentId: validDeptId || null,
+        teamId: teamId || null,
+        role,
+        jobTitle: titleVal,
+      }));
 
     const result = await req.tenantQuery!(
       `INSERT INTO employees (
-        employee_code, first_name, last_name, email, phone, office_id, department_id, team_id, job_role_id, reporting_manager_id, role, date_of_joining, account_status, avatar, avatar_url
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
+        employee_code, first_name, last_name, email, phone, office_id, department_id, team_id, job_role_id, reporting_manager_id, role, date_of_joining, account_status, avatar, avatar_url, employment_type
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, $15)
        RETURNING *`,
       [
         resolvedEmployeeCode,
@@ -414,15 +575,24 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
         validDeptId || null,
         teamId || null,
         validJobRoleId || null,
-        reportingManagerId || null,
+        resolvedManagerId || null,
         role,
         parseDateOrNull(dateOfJoining) || new Date().toISOString().split('T')[0],
         (req.body.accountStatus as string) || (req.body.account_status as string) || 'Not Activated',
         avatar || null,
+        cleanEmploymentType,
       ]
     );
 
     const createdEmp = result.rows[0];
+
+    try {
+      await syncReportingHierarchy(req.tenantQuery!, {
+        skipEmployeeIds: explicitManager ? [String(createdEmp.id)] : [],
+      });
+    } catch (hierErr) {
+      log.warn('Could not sync reporting hierarchy for new employee', hierErr);
+    }
 
     // Sync multi-office assignments (also covers single office from officeName/officeId)
     try {
@@ -444,25 +614,33 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
       log.warn('Could not sync employee offices for new employee', officeSyncErr);
     }
 
-    // Provision Cognito + global auth mapping so the employee can log in
+    try {
+      const extraMgrs = Array.isArray(managerIds) ? managerIds : [];
+      await attachExtraManagers(req.tenantQuery!, createdEmp.id, validDeptId || null, extraMgrs);
+    } catch (mgrErr) {
+      log.warn('Could not attach extra managers for new employee', mgrErr);
+    }
+
+    // Provision Cognito + global auth mapping, then email the employee a setup link
     try {
       const cleanEmailForAuth = email ? email.trim().toLowerCase() : '';
       if (cleanEmailForAuth) {
-        const initialPassword = (req.body.password as string) || 'Welcome@123';
         const auth = await provisionEmployeeAuth({
           employeeId: createdEmp.id,
           email: cleanEmailForAuth,
           firstName,
           lastName,
           role: role || 'employee',
-          password: initialPassword,
           tenantId: req.tenant?.id,
           schemaName: req.dbSchema || req.tenantId,
           tenantSlug: req.tenant?.slug,
+          sendInvite: req.body.sendInvite !== false,
+          invitedBy: req.user?.name,
           tenantQuery: req.tenantQuery!,
         });
         createdEmp.cognito_sub = auth.cognitoSub;
-        (createdEmp as any).temporary_password = auth.temporaryPassword;
+        if (auth.inviteSent) createdEmp.account_status = 'Invited';
+        (createdEmp as any).invite_sent = auth.inviteSent;
       }
     } catch (authSyncErr) {
       log.warn('Could not provision Cognito auth for new employee', authSyncErr);
@@ -502,7 +680,9 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
       jobTitle,
       reportingManagerId: rawReportingManagerId,
       managerId,
+      managerIds,
       role,
+      employmentType,
       employmentStatus: rawEmploymentStatus,
       status,
       dateOfJoining,
@@ -585,17 +765,11 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS onboarding_progress INTEGER DEFAULT 0;
       `);
     } catch (_) {}
+    await ensureEmployeeExtraColumns(req.tenantQuery!);
 
     let validDeptId = departmentId !== undefined ? departmentId : emp.department_id;
     if (department && (!validDeptId || String(validDeptId).startsWith('00000000'))) {
-      const depCheck = await req.tenantQuery!('SELECT id FROM departments WHERE name ILIKE $1 LIMIT 1', [department]);
-      if (depCheck.rows[0]) {
-        validDeptId = depCheck.rows[0].id;
-      } else {
-        const code = department.slice(0, 4).toUpperCase() + Math.floor(10 + Math.random() * 90);
-        const newDept = await req.tenantQuery!('INSERT INTO departments (name, code) VALUES ($1, $2) RETURNING id', [department, code]);
-        validDeptId = newDept.rows[0].id;
-      }
+      validDeptId = (await ensureDepartmentByName(req.tenantQuery!, department)).id;
     }
 
     let validJobRoleId = jobRoleId !== undefined ? jobRoleId : emp.job_role_id;
@@ -685,10 +859,21 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
     if (orgWide && role !== undefined) {
       values.push(normalizeAuthRole(role));
       updates.push(`role = $${values.length}`);
+    } else if (orgWide && validJobRoleId && !String(validJobRoleId).startsWith('00000000') && !isFounderEmployeeCode(emp.employee_code)) {
+      const jobLevel = await req.tenantQuery!('SELECT level FROM job_roles WHERE id = $1 LIMIT 1', [validJobRoleId]);
+      const fromLevel = authRoleFromJobLevel(jobLevel.rows[0]?.level);
+      if (fromLevel && fromLevel !== emp.role) {
+        values.push(fromLevel);
+        updates.push(`role = $${values.length}`);
+      }
     }
     if (orgWide && employmentStatus !== undefined) {
       values.push(employmentStatus);
       updates.push(`employment_status = $${values.length}`);
+    }
+    if (orgWide && employmentType !== undefined) {
+      values.push(String(employmentType || 'Full-time').trim() || 'Full-time');
+      updates.push(`employment_type = $${values.length}`);
     }
     if (orgWide && dateOfJoining !== undefined) {
       const cleanJoining = parseDateOrNull(dateOfJoining);
@@ -958,6 +1143,27 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
     const result = await req.tenantQuery!(query, values);
     let updated = result.rows[0];
 
+    try {
+      const previousDeptLeads: Record<string, string | null> = {};
+      if (emp.department_id) {
+        const oldLeadRes = await req.tenantQuery!(
+          `SELECT lead_employee_id FROM departments WHERE id = $1 LIMIT 1`,
+          [emp.department_id]
+        );
+        previousDeptLeads[String(emp.department_id)] = oldLeadRes.rows[0]?.lead_employee_id
+          ? String(oldLeadRes.rows[0].lead_employee_id)
+          : null;
+      }
+      await syncReportingHierarchy(req.tenantQuery!, {
+        previousDeptLeads,
+        skipEmployeeIds: reportingManagerId !== undefined ? [String(emp.id)] : [],
+      });
+      const afterHier = await req.tenantQuery!(`SELECT * FROM employees WHERE id = $1`, [emp.id]);
+      if (afterHier.rows[0]) updated = afterHier.rows[0];
+    } catch (hierErr) {
+      log.warn('Could not sync reporting hierarchy on employee update', hierErr);
+    }
+
     if (orgWide && officePayloadProvided && resolvedUpdateOffices) {
       try {
         await syncEmployeeOffices(
@@ -972,6 +1178,27 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
       } catch (officeSyncErr) {
         log.warn('Could not sync employee offices on update', officeSyncErr);
       }
+    }
+
+    if (orgWide && Array.isArray(managerIds)) {
+      try {
+        await attachExtraManagers(
+          req.tenantQuery!,
+          String(emp.id),
+          updated.department_id || validDeptId || null,
+          managerIds
+        );
+      } catch (mgrErr) {
+        log.warn('Could not attach extra managers on employee update', mgrErr);
+      }
+    }
+
+    if (orgWide && access.scope.meId && String(emp.id) !== String(access.scope.meId)) {
+      void notifyEmployeeOfInfoChange({
+        query: req.tenantQuery!,
+        employee: updated,
+        actorName: req.user?.name || req.user?.email,
+      });
     }
 
     const offices = await fetchOfficesForEmployee(req.tenantQuery!, String(emp.id));
@@ -1000,11 +1227,12 @@ export async function updateBankDetails(req: Request, res: Response): Promise<vo
       return;
     }
 
-    // Employees may only edit their own bank details; managers cannot edit reports' bank info.
-    if (!isOrgWideRole(req.user?.role) && access.scope.meId && String(access.target.id) !== String(access.scope.meId)) {
+    const orgWide = isOrgWideRole(req.user?.role);
+    const isSelf = access.scope.meId && String(access.target.id) === String(access.scope.meId);
+    if (!orgWide && !isSelf) {
       res.status(403).json({
         success: false,
-        error: { code: 'FORBIDDEN', message: 'Employees may only update their own bank details' },
+        error: { code: 'FORBIDDEN', message: 'Bank details are only visible to HR, admin, and the employee' },
       });
       return;
     }

@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS departments (
 );
 
 ALTER TABLE departments ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE departments ADD COLUMN IF NOT EXISTS short_code VARCHAR(8);
+CREATE UNIQUE INDEX IF NOT EXISTS departments_short_code_uq ON departments (LOWER(short_code)) WHERE short_code IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS teams (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -108,6 +110,40 @@ SELECT e.id, e.office_id, true
 FROM employees e
 WHERE e.office_id IS NOT NULL
 ON CONFLICT (employee_id, office_id) DO NOTHING;
+
+-- Many-to-many: departments/teams may have several co-leads (primary stays on lead_employee_id)
+CREATE TABLE IF NOT EXISTS department_leads (
+    department_id UUID NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    is_primary BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (department_id, employee_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_department_leads_employee ON department_leads(employee_id);
+
+CREATE TABLE IF NOT EXISTS team_leads (
+    team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    is_primary BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (team_id, employee_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_leads_employee ON team_leads(employee_id);
+
+-- Backfill from legacy single lead_employee_id
+INSERT INTO department_leads (department_id, employee_id, is_primary)
+SELECT d.id, d.lead_employee_id, true
+FROM departments d
+JOIN employees e ON e.id = d.lead_employee_id
+ON CONFLICT (department_id, employee_id) DO NOTHING;
+
+INSERT INTO team_leads (team_id, employee_id, is_primary)
+SELECT t.id, t.lead_employee_id, true
+FROM teams t
+JOIN employees e ON e.id = t.lead_employee_id
+ON CONFLICT (team_id, employee_id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS bank_details (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -261,7 +297,7 @@ CREATE TABLE IF NOT EXISTS timesheets (
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     task_id UUID REFERENCES project_tasks(id) ON DELETE SET NULL,
     work_date DATE NOT NULL,
-    hours_spent NUMERIC(4, 2) NOT NULL CHECK (hours_spent > 0 AND hours_spent <= 24),
+    hours_spent NUMERIC(4, 2) NOT NULL CHECK (hours_spent >= 0 AND hours_spent <= 24),
     description TEXT NOT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'approved' CHECK (status IN ('draft', 'submitted', 'approved', 'rejected')),
     approver_id UUID REFERENCES employees(id),
@@ -285,6 +321,99 @@ ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS billable BOOLEAN NOT NULL DEFAUL
 
 CREATE INDEX IF NOT EXISTS idx_timesheets_emp_date ON timesheets(employee_id, work_date);
 CREATE INDEX IF NOT EXISTS idx_timesheets_entry_type_date ON timesheets(entry_type, work_date);
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS billing_mode VARCHAR(16) NOT NULL DEFAULT 'deliverable';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS hourly_rate NUMERIC(12, 2);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS currency VARCHAR(8) NOT NULL DEFAULT 'INR';
+
+CREATE TABLE IF NOT EXISTS billing_clients (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(128) NOT NULL,
+    company_name VARCHAR(128),
+    email VARCHAR(255),
+    phone VARCHAR(32),
+    billing_address TEXT,
+    gstin VARCHAR(32),
+    currency VARCHAR(8) NOT NULL DEFAULT 'INR',
+    payment_terms_days INTEGER NOT NULL DEFAULT 15,
+    default_hourly_rate NUMERIC(12, 2),
+    notes TEXT,
+    status VARCHAR(16) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES billing_clients(id) ON DELETE SET NULL;
+
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS timer_started_at TIMESTAMPTZ;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS time_spent_seconds INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS recurrence_series_id UUID;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS recurrence_rule JSONB;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS recurrence_end DATE;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS is_recurrence_template BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS occurrence_date DATE;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS parent_task_id UUID;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS billable BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS billing_type VARCHAR(16) NOT NULL DEFAULT 'deliverable';
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS invoice_id UUID;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES billing_clients(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS project_task_assignees (
+    task_id UUID NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    is_primary BOOLEAN NOT NULL DEFAULT false,
+    PRIMARY KEY (task_id, employee_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_task_assignees_employee ON project_task_assignees(employee_id);
+
+CREATE TABLE IF NOT EXISTS task_due_reminders (
+    task_id UUID NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    due_date DATE NOT NULL,
+    reminder_kind VARCHAR(16) NOT NULL,
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (task_id, employee_id, due_date, reminder_kind)
+);
+
+ALTER TABLE timesheets ADD COLUMN IF NOT EXISTS invoice_id UUID;
+
+CREATE TABLE IF NOT EXISTS invoices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+    client_id UUID REFERENCES billing_clients(id) ON DELETE SET NULL,
+    invoice_number VARCHAR(32) NOT NULL,
+    customer_name VARCHAR(128),
+    issue_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    due_date DATE,
+    billing_period_start DATE,
+    billing_period_end DATE,
+    kind VARCHAR(16) NOT NULL DEFAULT 'project',
+    subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    gst_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    status VARCHAR(32) NOT NULL DEFAULT 'draft',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES billing_clients(id) ON DELETE SET NULL;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS billing_period_start DATE;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS billing_period_end DATE;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS kind VARCHAR(16) NOT NULL DEFAULT 'project';
+ALTER TABLE invoices ALTER COLUMN project_id DROP NOT NULL;
+
+CREATE TABLE IF NOT EXISTS invoice_lines (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    quantity NUMERIC(10, 2) NOT NULL DEFAULT 1,
+    unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    total NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    source_task_id UUID,
+    source_timesheet_id UUID
+);
 
 -- 5. PAYROLL MODULE: Salary Structures, Payroll Runs, Payslips
 CREATE TABLE IF NOT EXISTS salary_structures (
@@ -355,10 +484,28 @@ CREATE TABLE IF NOT EXISTS announcements (
     author_employee_id UUID REFERENCES employees(id),
     target_department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
     priority VARCHAR(16) NOT NULL DEFAULT 'normal' CHECK (priority IN ('normal', 'important', 'urgent')),
+    category VARCHAR(64) DEFAULT 'GENERAL',
+    pin_to_header_banner BOOLEAN NOT NULL DEFAULT false,
+    tags JSONB DEFAULT '[]'::jsonb,
+    attachment_file_name VARCHAR(255),
+    attachment_file_url TEXT,
+    attachment_file_size BIGINT,
+    attachment_mime_type VARCHAR(128),
     is_published BOOLEAN NOT NULL DEFAULT true,
     published_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Earlier tenant schemas predate the announcement metadata columns.  Reapplying
+-- this idempotent migration upgrades them before the broadcast endpoint reads or
+-- writes those fields.
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS category VARCHAR(64) DEFAULT 'GENERAL';
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS pin_to_header_banner BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS attachment_file_name VARCHAR(255);
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS attachment_file_url TEXT;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS attachment_file_size BIGINT;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS attachment_mime_type VARCHAR(128);
 
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

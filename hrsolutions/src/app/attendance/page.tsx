@@ -20,6 +20,8 @@ function AttendanceContent() {
   React.useEffect(() => {
     if (searchParams.get('tab') === 'reports' || searchParams.get('subTab') === 'reports') {
       router.replace('/reports');
+    } else if (searchParams.get('tab') === 'settings' || searchParams.get('subTab') === 'settings') {
+      router.replace('/settings?section=attendance');
     }
   }, [searchParams, router]);
 
@@ -30,8 +32,6 @@ function AttendanceContent() {
       ? 'holidays'
       : tabParam === 'regularizations' || subTabParam === 'regularizations'
       ? 'regularizations'
-      : tabParam === 'settings' || subTabParam === 'settings'
-      ? 'settings'
       : tabParam === 'team_attendance' || subTabParam === 'team_attendance'
       ? 'team_attendance'
       : tabParam === 'my_attendance' || subTabParam === 'my_attendance'

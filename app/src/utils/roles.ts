@@ -18,6 +18,41 @@ const VALID: ReadonlySet<string> = new Set([
   'student',
 ]);
 
+const ROLE_RANK: Record<string, number> = {
+  platform_admin: 100,
+  super_admin: 80,
+  hr_manager: 60,
+  manager: 40,
+  faculty: 30,
+  teacher: 30,
+  employee: 20,
+  student: 10,
+};
+
+export function roleRank(role?: string | null): number {
+  return ROLE_RANK[String(role || '').trim().toLowerCase()] || 0;
+}
+
+/** Keep the more privileged role. Workspace owners must not be demoted to employee. */
+export function pickEffectiveAuthRole(roles: Array<string | null | undefined>): ApiAuthRole {
+  let best: ApiAuthRole = 'employee';
+  let bestRank = roleRank(best);
+  for (const role of roles) {
+    if (!role) continue;
+    const normalized = normalizeAuthRole(role);
+    const rank = roleRank(normalized);
+    if (rank > bestRank) {
+      best = normalized;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
+export function isFounderEmployeeCode(code?: string | null): boolean {
+  return /^(EMP-?0*1)$/i.test(String(code || '').trim());
+}
+
 const PROTECTED_FROM_MANAGER_PROMOTE: ReadonlySet<string> = new Set([
   'platform_admin',
   'super_admin',
@@ -102,6 +137,52 @@ export function normalizeAuthRole(role?: string | null): ApiAuthRole {
   return 'employee';
 }
 
+/** Map a job-role level from workspace setup onto a backend auth role. */
+export function authRoleFromJobLevel(level?: string | null): ApiAuthRole | null {
+  const l = String(level || '').trim().toLowerCase();
+  if (l === 'hr') return 'hr_manager';
+  if (l === 'manager') return 'manager';
+  if (l === 'admin') return 'super_admin';
+  if (l === 'employee' || l === 'l1') return 'employee';
+  return null;
+}
+
+const OWNER_CODE_SQL = `(employee_code ILIKE 'EMP001' OR employee_code ILIKE 'EMP-001')`;
+
+/**
+ * Apply a job-role permission tier to people in that job.
+ * The original workspace owner (EMP001) is never demoted.
+ */
+export async function syncEmployeesToJobLevel(
+  query: TenantQuery,
+  jobRoleId: string | null | undefined,
+  level?: string | null
+): Promise<void> {
+  if (!jobRoleId) return;
+  const nextRole = authRoleFromJobLevel(level);
+  if (!nextRole) return;
+
+  await query(
+    `UPDATE employees
+     SET role = $2
+     WHERE job_role_id = $1::uuid
+       AND NOT ${OWNER_CODE_SQL}
+       AND role IS DISTINCT FROM $2`,
+    [jobRoleId, nextRole]
+  );
+
+  await query(
+    `UPDATE public.global_auth_mapping m
+     SET role = e.role
+     FROM employees e
+     WHERE LOWER(m.email) = LOWER(e.email)
+       AND e.job_role_id = $1::uuid
+       AND NOT (e.employee_code ILIKE 'EMP001' OR e.employee_code ILIKE 'EMP-001')
+       AND m.role IS DISTINCT FROM 'platform_admin'`,
+    [jobRoleId]
+  );
+}
+
 /** Infer auth role from a job title when callers only send designation. */
 export function inferAuthRoleFromDesignation(
   designation?: string | null,
@@ -117,17 +198,6 @@ export function inferAuthRoleFromDesignation(
   const d = String(designation || '').toLowerCase();
   if (!d) return 'employee';
 
-  if (d.includes('hr') || d.includes('people ops') || d.includes('people lead')) {
-    return 'hr_manager';
-  }
-  if (
-    d.includes('manager') ||
-    d.includes('lead') ||
-    d.includes('director') ||
-    d.includes('head')
-  ) {
-    return 'manager';
-  }
   if (d.includes('faculty') || d.includes('teacher') || d.includes('professor')) {
     return 'faculty';
   }

@@ -1,0 +1,418 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-10T09:36:43.297Z",
+  "title": "Design System: Pixbe Workspace",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "neutral",
+        "displayName": "Deep Ink",
+        "canonical": "#172234",
+        "tonalRamp": [
+          "oklch(15% 0.038 260)",
+          "oklch(27% 0.038 260)",
+          "oklch(39% 0.038 260)",
+          "oklch(51% 0.038 260)",
+          "oklch(63% 0.038 260)",
+          "oklch(75% 0.038 260)",
+          "oklch(86% 0.038 260)",
+          "oklch(95% 0.038 260)"
+        ]
+      },
+      "navy": {
+        "role": "primary",
+        "displayName": "Studio Navy",
+        "canonical": "#17324e",
+        "tonalRamp": [
+          "oklch(15% 0.061 251)",
+          "oklch(27% 0.061 251)",
+          "oklch(39% 0.061 251)",
+          "oklch(51% 0.061 251)",
+          "oklch(63% 0.061 251)",
+          "oklch(75% 0.061 251)",
+          "oklch(86% 0.061 251)",
+          "oklch(95% 0.061 251)"
+        ]
+      },
+      "navy-hover": {
+        "role": "primary",
+        "displayName": "Studio Navy Hover",
+        "canonical": "#285275",
+        "tonalRamp": [
+          "oklch(15% 0.075 246)",
+          "oklch(27% 0.075 246)",
+          "oklch(39% 0.075 246)",
+          "oklch(51% 0.075 246)",
+          "oklch(63% 0.075 246)",
+          "oklch(75% 0.075 246)",
+          "oklch(86% 0.075 246)",
+          "oklch(95% 0.075 246)"
+        ]
+      },
+      "blue-action": {
+        "role": "primary",
+        "displayName": "Measured Blue",
+        "canonical": "#2d628e",
+        "tonalRamp": [
+          "oklch(15% 0.091 246)",
+          "oklch(27% 0.091 246)",
+          "oklch(39% 0.091 246)",
+          "oklch(51% 0.091 246)",
+          "oklch(63% 0.091 246)",
+          "oklch(75% 0.091 246)",
+          "oklch(86% 0.091 246)",
+          "oklch(95% 0.091 246)"
+        ]
+      },
+      "blue-selected": {
+        "role": "neutral",
+        "displayName": "Blue-White Selection",
+        "canonical": "#f8fbfe",
+        "tonalRamp": [
+          "oklch(15% 0.005 248)",
+          "oklch(27% 0.005 248)",
+          "oklch(39% 0.005 248)",
+          "oklch(51% 0.005 248)",
+          "oklch(63% 0.005 248)",
+          "oklch(75% 0.005 248)",
+          "oklch(86% 0.005 248)",
+          "oklch(95% 0.005 248)"
+        ]
+      },
+      "blue-focus": {
+        "role": "neutral",
+        "displayName": "Soft Focus Blue",
+        "canonical": "#d8e8f2",
+        "tonalRamp": [
+          "oklch(15% 0.022 235)",
+          "oklch(27% 0.022 235)",
+          "oklch(39% 0.022 235)",
+          "oklch(51% 0.022 235)",
+          "oklch(63% 0.022 235)",
+          "oklch(75% 0.022 235)",
+          "oklch(86% 0.022 235)",
+          "oklch(95% 0.022 235)"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Warm Paper",
+        "canonical": "#f6f5f1",
+        "tonalRamp": [
+          "oklch(15% 0.005 95)",
+          "oklch(27% 0.005 95)",
+          "oklch(39% 0.005 95)",
+          "oklch(51% 0.005 95)",
+          "oklch(63% 0.005 95)",
+          "oklch(75% 0.005 95)",
+          "oklch(86% 0.005 95)",
+          "oklch(95% 0.005 95)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Clean Sheet",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0.000 90)",
+          "oklch(27% 0.000 90)",
+          "oklch(39% 0.000 90)",
+          "oklch(51% 0.000 90)",
+          "oklch(63% 0.000 90)",
+          "oklch(75% 0.000 90)",
+          "oklch(86% 0.000 90)",
+          "oklch(95% 0.000 90)"
+        ]
+      },
+      "surface-tinted": {
+        "role": "neutral",
+        "displayName": "Tinted Panel",
+        "canonical": "#e7eef0",
+        "tonalRamp": [
+          "oklch(15% 0.008 217)",
+          "oklch(27% 0.008 217)",
+          "oklch(39% 0.008 217)",
+          "oklch(51% 0.008 217)",
+          "oklch(63% 0.008 217)",
+          "oklch(75% 0.008 217)",
+          "oklch(86% 0.008 217)",
+          "oklch(95% 0.008 217)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Structure Border",
+        "canonical": "#dce2e5",
+        "tonalRamp": [
+          "oklch(15% 0.008 229)",
+          "oklch(27% 0.008 229)",
+          "oklch(39% 0.008 229)",
+          "oklch(51% 0.008 229)",
+          "oklch(63% 0.008 229)",
+          "oklch(75% 0.008 229)",
+          "oklch(86% 0.008 229)",
+          "oklch(95% 0.008 229)"
+        ]
+      },
+      "field-border": {
+        "role": "neutral",
+        "displayName": "Field Border",
+        "canonical": "#cad5dc",
+        "tonalRamp": [
+          "oklch(15% 0.015 235)",
+          "oklch(27% 0.015 235)",
+          "oklch(39% 0.015 235)",
+          "oklch(51% 0.015 235)",
+          "oklch(63% 0.015 235)",
+          "oklch(75% 0.015 235)",
+          "oklch(86% 0.015 235)",
+          "oklch(95% 0.015 235)"
+        ]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Supporting Ink",
+        "canonical": "#5e6c7b",
+        "tonalRamp": [
+          "oklch(15% 0.029 250)",
+          "oklch(27% 0.029 250)",
+          "oklch(39% 0.029 250)",
+          "oklch(51% 0.029 250)",
+          "oklch(63% 0.029 250)",
+          "oklch(75% 0.029 250)",
+          "oklch(86% 0.029 250)",
+          "oklch(95% 0.029 250)"
+        ]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Muted Ink",
+        "canonical": "#687789",
+        "tonalRamp": [
+          "oklch(15% 0.033 253)",
+          "oklch(27% 0.033 253)",
+          "oklch(39% 0.033 253)",
+          "oklch(51% 0.033 253)",
+          "oklch(63% 0.033 253)",
+          "oklch(75% 0.033 253)",
+          "oklch(86% 0.033 253)",
+          "oklch(95% 0.033 253)"
+        ]
+      },
+      "sage": {
+        "role": "secondary",
+        "displayName": "Quiet Sage",
+        "canonical": "#53886b",
+        "tonalRamp": [
+          "oklch(15% 0.073 159)",
+          "oklch(27% 0.073 159)",
+          "oklch(39% 0.073 159)",
+          "oklch(51% 0.073 159)",
+          "oklch(63% 0.073 159)",
+          "oklch(75% 0.073 159)",
+          "oklch(86% 0.073 159)",
+          "oklch(95% 0.073 159)"
+        ]
+      },
+      "sage-surface": {
+        "role": "secondary",
+        "displayName": "Sage Wash",
+        "canonical": "#eaf1ee",
+        "tonalRamp": [
+          "oklch(15% 0.008 169)",
+          "oklch(27% 0.008 169)",
+          "oklch(39% 0.008 169)",
+          "oklch(51% 0.008 169)",
+          "oklch(63% 0.008 169)",
+          "oklch(75% 0.008 169)",
+          "oklch(86% 0.008 169)",
+          "oklch(95% 0.008 169)"
+        ]
+      },
+      "error": {
+        "role": "secondary",
+        "displayName": "Precise Error",
+        "canonical": "#8b3133",
+        "tonalRamp": [
+          "oklch(15% 0.123 22)",
+          "oklch(27% 0.123 22)",
+          "oklch(39% 0.123 22)",
+          "oklch(51% 0.123 22)",
+          "oklch(63% 0.123 22)",
+          "oklch(75% 0.123 22)",
+          "oklch(86% 0.123 22)",
+          "oklch(95% 0.123 22)"
+        ]
+      },
+      "error-surface": {
+        "role": "secondary",
+        "displayName": "Error Wash",
+        "canonical": "#faeeee",
+        "tonalRamp": [
+          "oklch(15% 0.013 17)",
+          "oklch(27% 0.013 17)",
+          "oklch(39% 0.013 17)",
+          "oklch(51% 0.013 17)",
+          "oklch(63% 0.013 17)",
+          "oklch(75% 0.013 17)",
+          "oklch(86% 0.013 17)",
+          "oklch(95% 0.013 17)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Task Headline",
+        "purpose": "One main question or outcome per page or flow step."
+      },
+      "section-title": {
+        "displayName": "Section Title",
+        "purpose": "Groups a task into meaningful parts."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Explanations and guidance."
+      },
+      "label": {
+        "displayName": "Field Label",
+        "purpose": "Visible labels and compact actions."
+      }
+    },
+    "shadows": [
+      {
+        "name": "current-step",
+        "value": "0 5px 15px rgba(26,46,62,.06)",
+        "purpose": "Active stage in a sequence."
+      },
+      {
+        "name": "selected-choice",
+        "value": "0 9px 22px rgba(26,58,84,.09)",
+        "purpose": "Selected consequential option, paired with a stronger border."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-change",
+        "value": "160ms ease",
+        "purpose": "Subtle border, fill, and transform changes for hover and selection."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "flow-mobile",
+        "value": "730px"
+      },
+      {
+        "name": "flow-compact",
+        "value": "1050px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single dominant action in a task area.",
+      "html": "<button class=\"ds-btn-primary\">Continue to structure <span aria-hidden=\"true\">→</span></button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:17px;min-height:43px;padding:10px 16px;border:1px solid #17324e;border-radius:7px;background:#17324e;color:#fff;font:750 13px 'Plus Jakarta Sans',sans-serif;cursor:pointer;transition:background .15s ease,transform .15s ease}.ds-btn-primary:hover{background:#285275;transform:translateY(-1px)}.ds-btn-primary:focus-visible{outline:2px solid #2d628e;outline-offset:3px}.ds-btn-primary:disabled{opacity:.48;cursor:not-allowed;transform:none}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Additive or lower-priority action.",
+      "html": "<button class=\"ds-btn-secondary\">Add workplace <span aria-hidden=\"true\">+</span></button>",
+      "css": ".ds-btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:17px;min-height:43px;padding:10px 16px;border:1px solid #253e56;border-radius:7px;background:#fff;color:#17324e;font:750 13px 'Plus Jakarta Sans',sans-serif;cursor:pointer;transition:background .15s ease,transform .15s ease}.ds-btn-secondary:hover{background:#edf3f5;transform:translateY(-1px)}.ds-btn-secondary:focus-visible{outline:2px solid #2d628e;outline-offset:3px}"
+    },
+    {
+      "name": "Labeled Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Visible label, example placeholder, and calm focus state.",
+      "html": "<label class=\"ds-field\">Workplace name<input placeholder=\"e.g. Main office\" /></label>",
+      "css": ".ds-field{display:block;color:#233549;font:740 12px 'Plus Jakarta Sans',sans-serif}.ds-field input{display:block;width:260px;height:43px;margin-top:7px;padding:0 12px;border:1px solid #cad5dc;border-radius:7px;background:#fff;color:#172234;font:500 13px 'Plus Jakarta Sans',sans-serif;outline:0}.ds-field input::placeholder{color:#7c8d9c}.ds-field input:focus{border-color:#2d628e;box-shadow:0 0 0 3px #d8e8f2}"
+    },
+    {
+      "name": "Selected Choice Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Consequential choice with clear selection without relying on shadow alone.",
+      "html": "<div class=\"ds-choice\" role=\"radio\" aria-checked=\"true\"><div class=\"ds-choice-icon\" aria-hidden=\"true\">◇</div><strong>Hybrid</strong><small>Your team splits time between locations and remote work.</small><i aria-hidden=\"true\"></i></div>",
+      "css": ".ds-choice{position:relative;display:flex;flex-direction:column;min-height:190px;width:260px;padding:19px;border:2px solid #2d628e;border-radius:12px;background:#f8fbfe;color:#24374a;box-shadow:0 9px 22px rgba(26,58,84,.09);font-family:'Plus Jakarta Sans',sans-serif}.ds-choice-icon{color:#496b82;font-size:30px}.ds-choice strong{margin-top:auto;font-size:17px;font-weight:750}.ds-choice small{margin-top:5px;color:#647487;font-size:12px;line-height:1.45}.ds-choice i{position:absolute;top:19px;right:19px;width:17px;height:17px;border:5px solid #2d628e;border-radius:50%;background:#fff}.ds-choice:focus-visible{outline:2px solid #2d628e;outline-offset:3px}"
+    },
+    {
+      "name": "Current Step",
+      "kind": "nav",
+      "description": "Active position in a guided sequence.",
+      "html": "<div class=\"ds-step\"><span>1</span><div><strong>Workplace</strong><small>Where your team works</small></div></div>",
+      "css": ".ds-step{display:flex;align-items:center;gap:12px;width:230px;min-height:59px;padding:8px 10px;border-radius:9px;background:#fff;color:#172234;box-shadow:0 5px 15px rgba(26,46,62,.06);font-family:'Plus Jakarta Sans',sans-serif}.ds-step>span{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;background:#17324e;color:#fff;font-size:12px;font-weight:750}.ds-step strong{display:block;font-size:13px;font-weight:730}.ds-step small{display:block;margin-top:2px;color:#778494;font-size:11px}"
+    },
+    {
+      "name": "Error Message",
+      "kind": "custom",
+      "description": "Actionable validation; text and tint both carry state.",
+      "html": "<div class=\"ds-error\" role=\"alert\">Choose a map location before continuing.</div>",
+      "css": ".ds-error{padding:14px 16px;border-radius:9px;background:#faeeee;color:#8b3133;font:500 13px/1.45 'Plus Jakarta Sans',sans-serif}"
+    },
+    {
+      "name": "Explanatory Panel",
+      "kind": "card",
+      "description": "Quiet tinted information without heavy elevation.",
+      "html": "<div class=\"ds-panel\"><h3>What happens next</h3><p>Invitations are sent when you launch.</p></div>",
+      "css": ".ds-panel{padding:25px 28px;border-radius:11px;background:#e7eef0;color:#18354a;font-family:'Plus Jakarta Sans',sans-serif}.ds-panel h3{margin:0;font-size:19px;font-weight:760;letter-spacing:-.025em}.ds-panel p{margin:9px 0 0;color:#506477;font-size:13px;line-height:1.65}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Working Studio",
+    "overview": "Pixbe should feel like a thoughtfully arranged place to get work done: warm paper, crisp ink, quiet structure, and a small number of purposeful color accents. The interface is professional without feeling sterile, confident without being loud.",
+    "keyCharacteristics": [
+      "Warm ivory canvas and white working surfaces, with deep navy typography.",
+      "Clear editorial hierarchy: an assertive task heading, concise supporting copy, then direct controls.",
+      "Restrained blue interaction states and sage confirmation; semantic red only for errors.",
+      "Custom, consistent line illustrations for meaningful choices; utility icons only where they speed scanning.",
+      "Explicit state and validation: a selection, save, invitation, or launch must never look complete before it is."
+    ],
+    "rules": [
+      {
+        "name": "The One Accent Rule",
+        "body": "A screen may have semantic states, but only one color should read as its primary interaction accent. Avoid rainbow navigation, multi-colored cards, and decorative gradients.",
+        "section": "colors"
+      },
+      {
+        "name": "The Legibility Rule",
+        "body": "Never put muted blue-gray text on a dark fill. On dark surfaces use near-white text with tested contrast; never communicate state by color alone.",
+        "section": "colors"
+      },
+      {
+        "name": "The Answer-First Rule",
+        "body": "Titles state the task, not an abstract module name. Supporting text explains consequences in one or two sentences.",
+        "section": "typography"
+      },
+      {
+        "name": "The Density Follows Work Rule",
+        "body": "A first-run decision can breathe; an all-day operations table should prioritize scanability. Carry identity through type, color, borders, and rhythm—not identical padding everywhere.",
+        "section": "layout"
+      },
+      {
+        "name": "The Almost-Flat Rule",
+        "body": "No deep blur, glow, or heavy elevation as general decoration. Meaningful state and surface contrast do the work.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use the setup flow as the visual reference, adapting density to the task.",
+      "Do use real content states, clear validation, and accurate save and launch language.",
+      "Do pair warm paper, clean white surfaces, deep ink, measured blue, and quiet sage.",
+      "Do test desktop and phone layouts, keyboard use, focus, and contrast.",
+      "Do give company and institute workflows equal care while preserving their distinct terminology."
+    ],
+    "donts": [
+      "Don't seed a new workspace with fake offices, people, departments, or roles.",
+      "Don't decorate with a wall of generic Lucide icons, gradients, glow, oversized shadows, or multi-colored cards.",
+      "Don't mark a step complete or show a save confirmation before data is persisted.",
+      "Don't transpose the onboarding layout wholesale onto a dense dashboard or table.",
+      "Don't claim the existing global stylesheet or dark theme already matches this guide; migrate and test them deliberately."
+    ]
+  }
+}

@@ -5,6 +5,7 @@ import { pool } from '../config/database.js';
 import { sanitizeSchemaName } from '../db/queryRunner.js';
 import { verifyJwt } from '../utils/crypto.js';
 import { log } from '../utils/logger.js';
+import { isFounderEmployeeCode, pickEffectiveAuthRole, roleRank } from '../utils/roles.js';
 
 type AppJwtPayload = {
   sub?: string;
@@ -47,11 +48,23 @@ function setCachedIdentity(sub: string, entry: Omit<AuthIdentityCacheEntry, 'exp
   authIdentityCache.set(sub, { ...entry, expiresAt: Date.now() + AUTH_IDENTITY_TTL_MS });
 }
 
-async function resolveGlobalAuthMapping(sub: string, email: string): Promise<any | null> {
+/** Drop cached identities so deleted users/tenants are rejected on their next request. */
+export function invalidateAuthIdentities(filter: { subs?: string[]; tenantUuid?: string }): void {
+  const subs = new Set(filter.subs || []);
+  for (const [sub, entry] of authIdentityCache) {
+    if (subs.has(sub) || (filter.tenantUuid && entry.tenantRecord?.tenant_uuid === filter.tenantUuid)) {
+      authIdentityCache.delete(sub);
+    }
+  }
+}
+
+/** Returns the mapping row, null when the user has none, or undefined when the lookup itself failed. */
+async function resolveGlobalAuthMapping(sub: string, email: string): Promise<any | null | undefined> {
   try {
     const bySub = await pool.query(
       `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.schema_name, t.status as tenant_status,
-              t.name as tenant_name, t.industry as tenant_industry
+              t.name as tenant_name, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
+              t.address, t.city, t.state_province, t.postal_code, t.country
        FROM public.global_auth_mapping gam
        JOIN public.tenants t ON gam.tenant_id = t.id
        WHERE gam.cognito_sub = $1
@@ -64,7 +77,8 @@ async function resolveGlobalAuthMapping(sub: string, email: string): Promise<any
     if (email) {
       const byEmail = await pool.query(
         `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.schema_name, t.status as tenant_status,
-                t.name as tenant_name, t.industry as tenant_industry
+                t.name as tenant_name, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
+                t.address, t.city, t.state_province, t.postal_code, t.country
          FROM public.global_auth_mapping gam
          JOIN public.tenants t ON gam.tenant_id = t.id
          WHERE LOWER(gam.email) = $1
@@ -76,28 +90,36 @@ async function resolveGlobalAuthMapping(sub: string, email: string): Promise<any
     }
   } catch (dbErr: any) {
     log.warn('Notice: Control plane lookup error in auth middleware', { error: dbErr.message });
+    return undefined;
   }
   return null;
 }
 
-async function resolveEmployeeRole(
+async function resolveEmployeeAuth(
   schemaName: string,
   sub: string,
   email: string
-): Promise<UserRole | undefined> {
+): Promise<{ role?: UserRole; code?: string } | undefined> {
+  const order = `ORDER BY CASE LOWER(role)
+      WHEN 'platform_admin' THEN 0 WHEN 'super_admin' THEN 1 WHEN 'hr_manager' THEN 2
+      WHEN 'manager' THEN 3 ELSE 4 END, created_at ASC`;
   try {
     const bySub = await pool.query(
-      `SELECT role FROM "${schemaName}".employees WHERE cognito_sub = $1 LIMIT 1`,
+      `SELECT role, employee_code FROM "${schemaName}".employees WHERE cognito_sub = $1 ${order} LIMIT 1`,
       [sub]
     );
-    if (bySub.rows[0]?.role) return bySub.rows[0].role as UserRole;
+    if (bySub.rows[0]?.role) {
+      return { role: bySub.rows[0].role as UserRole, code: bySub.rows[0].employee_code };
+    }
 
     if (email) {
       const byEmail = await pool.query(
-        `SELECT role FROM "${schemaName}".employees WHERE LOWER(email) = $1 LIMIT 1`,
+        `SELECT role, employee_code FROM "${schemaName}".employees WHERE LOWER(email) = $1 ${order} LIMIT 1`,
         [email]
       );
-      if (byEmail.rows[0]?.role) return byEmail.rows[0].role as UserRole;
+      if (byEmail.rows[0]?.role) {
+        return { role: byEmail.rows[0].role as UserRole, code: byEmail.rows[0].employee_code };
+      }
     }
   } catch (_) {}
   return undefined;
@@ -267,6 +289,25 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
       // 2. Resolve Tenant Identity from PostgreSQL Control Plane
       tenantRecord = await resolveGlobalAuthMapping(sub, email);
 
+      if (tenantRecord === undefined) {
+        res.status(503).json({
+          success: false,
+          error: { code: 'AUTH_LOOKUP_UNAVAILABLE', message: 'Unable to verify account access right now. Please retry.' },
+        });
+        return;
+      }
+
+      // Cognito tokens stay cryptographically valid after a user or workspace is deleted,
+      // so the control-plane mapping (not JWT claims) is the source of truth for access.
+      if (!tenantRecord) {
+        log.warn(`Access Denied: No workspace mapping for "${email || sub}"`);
+        res.status(401).json({
+          success: false,
+          error: { code: 'ACCOUNT_NOT_FOUND', message: 'This account no longer has access to any workspace.' },
+        });
+        return;
+      }
+
       tenantId = tenantRecord?.tenant_slug || payload['custom:tenant_id'] || payload.tenant_id || 'demo';
       schemaName =
         tenantRecord?.schema_name || payload['custom:db_schema'] || payload.db_schema || `tenant_${tenantId}`;
@@ -277,23 +318,53 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
         schemaName = 'tenant_demo';
       }
 
-      // Prefer tenant employee.role for authorization (mapping / Cognito custom:role can lag)
-      // Never demote platform_admin via a tenant employee row.
-      effectiveRole = (tenantRecord?.role || role) as UserRole;
-      if (effectiveRole !== 'platform_admin' && schemaName && (email || sub)) {
-        const empRole = await resolveEmployeeRole(schemaName, sub, email);
-        if (empRole) {
-          effectiveRole = empRole;
-          if (tenantRecord?.role && tenantRecord.role !== empRole && tenantRecord.id) {
-            pool
-              .query(
-                `UPDATE public.global_auth_mapping SET role = $1
-                 WHERE id = $2 OR (cognito_sub = $3 AND tenant_id = $4)`,
-                [empRole, tenantRecord.id, sub, tenantRecord.tenant_uuid]
-              )
-              .catch(() => {});
-          }
-        }
+      // Cognito tokens default custom:role to employee. Never let that (or a
+      // stale employee row) demote the workspace owner / mapping admin.
+      const emp = schemaName && (email || sub)
+        ? await resolveEmployeeAuth(schemaName, sub, email)
+        : undefined;
+      const isTenantAdmin =
+        Boolean(email) &&
+        String(tenantRecord?.tenant_admin_email || '').trim().toLowerCase() === email;
+      const founderRole =
+        isTenantAdmin || isFounderEmployeeCode(emp?.code) ? 'super_admin' : undefined;
+      effectiveRole = pickEffectiveAuthRole([
+        tenantRecord?.role,
+        founderRole,
+        emp?.role,
+        role,
+      ]);
+      if (role === 'platform_admin' || tenantRecord?.role === 'platform_admin') {
+        effectiveRole = 'platform_admin';
+      }
+
+      if (
+        tenantRecord?.id &&
+        effectiveRole !== 'platform_admin' &&
+        roleRank(effectiveRole) > roleRank(tenantRecord.role)
+      ) {
+        pool
+          .query(
+            `UPDATE public.global_auth_mapping SET role = $1
+             WHERE id = $2 OR (cognito_sub = $3 AND tenant_id = $4)`,
+            [effectiveRole, tenantRecord.id, sub, tenantRecord.tenant_uuid]
+          )
+          .catch(() => {});
+      }
+      if (
+        schemaName &&
+        email &&
+        effectiveRole === 'super_admin' &&
+        emp?.role &&
+        emp.role !== 'super_admin'
+      ) {
+        pool
+          .query(
+            `UPDATE "${schemaName}".employees SET role = 'super_admin', updated_at = CURRENT_TIMESTAMP
+             WHERE LOWER(email) = $1 AND role IS DISTINCT FROM 'super_admin'`,
+            [email]
+          )
+          .catch(() => {});
       }
 
       setCachedIdentity(sub, {
@@ -370,6 +441,11 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
       slug: tenantRecord?.tenant_slug || tenantId,
       name: tenantRecord?.tenant_name || undefined,
       industry: tenantRecord?.tenant_industry || undefined,
+      address: tenantRecord?.address || undefined,
+      city: tenantRecord?.city || undefined,
+      stateProvince: tenantRecord?.state_province || undefined,
+      postalCode: tenantRecord?.postal_code || undefined,
+      country: tenantRecord?.country || undefined,
     };
 
     req.user = {
@@ -402,6 +478,53 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
   }
 }
 
+export type ResolvedAuthContext = {
+  user: NonNullable<Request['user']>;
+  tenant: Request['tenant'];
+  tenantId?: string;
+  dbSchema?: string;
+};
+
+export class AuthContextError extends Error {
+  constructor(public status: number, public code: string, message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Runs the same verification as `authenticateToken` for transports without an
+ * Express request (WebSocket handshakes).
+ */
+export function resolveAuthContext(token: string): Promise<ResolvedAuthContext> {
+  return new Promise((resolve, reject) => {
+    const req: any = { headers: { authorization: `Bearer ${token}` }, query: {} };
+    let statusCode = 401;
+    const res: any = {
+      status(code: number) {
+        statusCode = code;
+        return res;
+      },
+      json(body: any) {
+        reject(
+          new AuthContextError(
+            statusCode,
+            body?.error?.code || 'UNAUTHORIZED',
+            body?.error?.message || 'Authentication failed'
+          )
+        );
+        return res;
+      },
+    };
+    authenticateToken(req, res, () => {
+      if (!req.user) {
+        reject(new AuthContextError(401, 'UNAUTHORIZED', 'Authentication failed'));
+        return;
+      }
+      resolve({ user: req.user, tenant: req.tenant, tenantId: req.tenantId, dbSchema: req.dbSchema });
+    }).catch(reject);
+  });
+}
+
 async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promise<void> {
   const sub = appJwt.sub!;
   const email = (appJwt.email || '').trim().toLowerCase();
@@ -416,7 +539,8 @@ async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promis
   try {
     const bySub = await pool.query(
       `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.schema_name, t.status as tenant_status,
-              t.name as tenant_name, t.industry as tenant_industry
+              t.name as tenant_name, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
+              t.address, t.city, t.state_province, t.postal_code, t.country
        FROM public.global_auth_mapping gam
        JOIN public.tenants t ON gam.tenant_id = t.id
        WHERE gam.cognito_sub = $1
@@ -428,7 +552,8 @@ async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promis
     if (!row && email) {
       const byEmail = await pool.query(
         `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.schema_name, t.status as tenant_status,
-                t.name as tenant_name, t.industry as tenant_industry
+                t.name as tenant_name, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
+                t.address, t.city, t.state_province, t.postal_code, t.country
          FROM public.global_auth_mapping gam
          JOIN public.tenants t ON gam.tenant_id = t.id
          WHERE LOWER(gam.email) = $1

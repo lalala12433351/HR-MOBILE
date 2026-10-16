@@ -2,8 +2,9 @@
 
 import React, { useMemo } from 'react';
 import { useDashboardContext } from './DashboardDataContext';
+import { DashPanel } from './DashPanel';
 
-export const EmploymentStatusBar: React.FC = () => {
+export const EmploymentStatusBar: React.FC<{ className?: string }> = ({ className = '' }) => {
   const dashboardState = useDashboardContext();
   const employees = dashboardState.employees || [];
 
@@ -40,48 +41,42 @@ export const EmploymentStatusBar: React.FC = () => {
     {
       key: 'ft',
       label: 'Full-Time',
-      color: 'var(--primary-blue)',
+      color: 'var(--studio-navy)',
       ...stats.fullTime,
     },
     {
       key: 'pt',
       label: 'Part-Time',
-      color: 'var(--accent-purple)',
+      color: 'var(--primary-blue)',
       ...stats.partTime,
     },
     {
       key: 'ct',
       label: 'Contractor',
-      color: '#06b6d4',
+      color: 'var(--studio-sage)',
       ...stats.contract,
     },
     {
       key: 'it',
       label: 'Internship',
-      color: '#94a3b8',
+      color: 'var(--border-strong)',
       ...stats.intern,
     },
   ];
 
   return (
-    <div className="dash-card p-5" data-purpose="employment-status-card">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-base font-bold text-[var(--text-primary)] tracking-tight">
-          Employment Status
-        </h2>
+    <DashPanel title="Employment mix" className={className} purpose="employment-status-card">
+      <div className="flex items-baseline gap-1.5 mb-2.5">
+        <span className="dash-kpi">{stats.total}</span>
+        <span className="text-xs font-semibold text-[var(--text-muted)]">People</span>
       </div>
 
-      <div className="flex items-baseline gap-2 mb-3">
-        <span className="dash-kpi text-[32px]">{stats.total}</span>
-        <span className="text-xs font-semibold text-[var(--text-muted)]">Employees</span>
-      </div>
-
-      <div className="w-full h-2.5 rounded-full overflow-hidden flex bg-[color-mix(in_srgb,var(--border-color)_55%,var(--bg-surface-subtle))] mb-1.5">
+      <div className="w-full h-1.5 overflow-hidden flex bg-[color-mix(in_srgb,var(--border-color)_55%,var(--bg-surface-subtle))] mb-1">
         {segments.map((seg) =>
           seg.percent > 0 ? (
             <div
               key={seg.key}
-              className="h-full transition-[width] duration-200 ease-[cubic-bezier(0.77,0,0.175,1)] first:rounded-l-full last:rounded-r-full"
+              className="h-full transition-[width] duration-200 ease-out"
               style={{ width: `${seg.percent}%`, backgroundColor: seg.color }}
               title={`${seg.label}: ${seg.percent}%`}
             />
@@ -89,31 +84,21 @@ export const EmploymentStatusBar: React.FC = () => {
         )}
       </div>
 
-      <div className="flex justify-between text-[10px] text-[var(--text-muted)] font-semibold mb-5">
-        <span>0%</span>
-        <span>100%</span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-x-6 gap-y-4 pt-1">
+      <div>
         {segments.map((seg) => (
-          <div key={seg.key}>
-            <div className="flex items-center gap-2">
-              <span
-                className="w-2.5 h-3.5 rounded-full shrink-0"
-                style={{ backgroundColor: seg.color }}
-              />
-              <span className="text-sm font-bold text-[var(--text-primary)]">{seg.label}</span>
-            </div>
-            <p className="text-xs text-[var(--text-secondary)] mt-1 pl-4.5 font-medium">
-              <strong className="font-bold text-[var(--text-primary)] tabular-nums">
-                {seg.percent}%
-              </strong>
-              <span className="text-[var(--text-muted)] mx-1.5">—</span>
-              <span className="tabular-nums">{seg.count} Employees</span>
-            </p>
+          <div key={seg.key} className="dash-row">
+            <span className="inline-flex items-center gap-2 text-xs font-medium text-[var(--text-primary)]">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: seg.color }} />
+              {seg.label}
+            </span>
+            <span className="text-xs text-[var(--text-secondary)] tabular-nums">
+              <strong className="font-bold text-[var(--text-primary)]">{seg.percent}%</strong>
+              <span className="text-[var(--text-muted)] mx-1.5">·</span>
+              {seg.count}
+            </span>
           </div>
         ))}
       </div>
-    </div>
+    </DashPanel>
   );
 };

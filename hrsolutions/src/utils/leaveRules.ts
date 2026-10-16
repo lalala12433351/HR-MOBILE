@@ -23,20 +23,25 @@ export const normalizeRoleForLeaveQuotas = (
   const d = (designation || '').toLowerCase();
   const empType = (employmentType || '').toLowerCase();
 
-  if (empType === 'contract' || empType === 'contractor' || r.includes('contract')) return 'contractor';
-  if (empType === 'intern' || r.includes('intern') || d.includes('intern')) return 'intern';
+  if (empType === 'contract' || empType === 'contractor') return 'contractor';
+  if (empType === 'intern') return 'intern';
+
+  // Auth role is the source of truth. Job titles like "Account Manager" must not
+  // switch an employee onto the manager leave policy.
   if (r === 'super_admin' || r === 'admin') return 'admin';
   if (r === 'hr_manager' || r === 'hr') return 'hr_manager';
-  if (r === 'team_lead' || d.includes('team lead') || d.includes('tech lead')) return 'team_lead';
-  if (
-    r === 'project_manager' ||
-    r === 'sales_manager' ||
-    r === 'finance_manager' ||
-    r === 'manager' ||
-    d.includes('manager')
-  ) {
+  if (r === 'team_lead') return 'team_lead';
+  if (r === 'manager' || r === 'project_manager' || r === 'sales_manager' || r === 'finance_manager') {
     return 'manager';
   }
+  if (r.includes('contract')) return 'contractor';
+  if (r === 'intern') return 'intern';
+  if (r === 'employee' || r === 'faculty' || r === 'student') return 'employee';
+
+  if (/\bcontract(or)?\b/.test(d)) return 'contractor';
+  if (/\bintern\b/.test(d)) return 'intern';
+  if (/\b(team|tech) lead\b/.test(d)) return 'team_lead';
+  if (/\bmanager\b/.test(d)) return 'manager';
   return 'employee';
 };
 
@@ -112,22 +117,21 @@ export const getEffectiveLeaveQuotas = (
   const annualEarned = roleQuotas.earnedLeave ?? (leaveSettings?.paidLeaveQuota || 15);
   const compOff = (employee as any)?.leaveBalances?.compOff ?? 24;
 
-  // Monthly by default unless explicitly set to 'annual'
-  const isMonthly = leaveSettings?.accrualFrequency !== 'annual';
-  const enableCarryOver = leaveSettings?.enableCarryOver !== false;
+  const policiesEnabled = leaveSettings?.leavePoliciesEnabled !== false;
+  const isMonthly = policiesEnabled && leaveSettings?.accrualFrequency === 'monthly';
+  const enableMonthlyRollover = leaveSettings?.enableMonthlyRollover !== false;
+  const enableCarryOver = policiesEnabled && leaveSettings?.enableCarryOver !== false;
   const maxCarryOverCap = leaveSettings?.maxCarryForwardDays ?? 10;
 
-  // Monthly Accrual Calculation:
-  // Accrual rate per month (e.g. 1.25 d/mo for earned, 1.0 d/mo for casual, 0.83 d/mo for sick)
   const monthlyRates = {
-    casualLeave: Math.round((annualCasual / 12) * 100) / 100,
-    sickLeave: Math.round((annualSick / 12) * 100) / 100,
-    earnedLeave: Math.round((annualEarned / 12) * 100) / 100,
+    casualLeave: formatLeaveDays(annualCasual / 12),
+    sickLeave: formatLeaveDays(annualSick / 12),
+    earnedLeave: formatLeaveDays(annualEarned / 12),
   };
 
   const now = new Date();
   const currentYear = now.getFullYear();
-  const currentMonthIdx = now.getMonth() + 1; // 1-12 (e.g. 9 for Sept)
+  const currentMonthIdx = now.getMonth() + 1; // 1-12
 
   let monthsElapsed = currentMonthIdx;
   const joinDateStr = (employee as any)?.joinDate || (employee as any)?.joiningDate;
@@ -137,45 +141,36 @@ export const getEffectiveLeaveQuotas = (
       const joinYear = joinDate.getFullYear();
       const joinMonth = joinDate.getMonth() + 1;
       if (joinYear === currentYear) {
-        // Employee joined in current calendar year: count months from join month up to current month
         monthsElapsed = Math.max(1, Math.min(12, currentMonthIdx - joinMonth + 1));
       } else if (joinYear > currentYear) {
         monthsElapsed = 0;
       } else {
-        // Joined before current year: eligible for all months elapsed in current year
         monthsElapsed = currentMonthIdx;
       }
     }
   }
 
-  // Calculate accrued leaves for the year so far (whole days — avoids 9.47 / 15.25 style balances)
-  const accruedCasual = isMonthly
-    ? Math.min(annualCasual, Math.round(monthlyRates.casualLeave * monthsElapsed))
-    : annualCasual;
-  const accruedSick = isMonthly
-    ? Math.min(annualSick, Math.round(monthlyRates.sickLeave * monthsElapsed))
-    : annualSick;
-  const accruedEarned = isMonthly
-    ? Math.min(annualEarned, Math.round(monthlyRates.earnedLeave * monthsElapsed))
-    : annualEarned;
-
-  // Carry Over Leaves (from previous cycle/year)
-  const rawCarryOver = (employee as any)?.carriedOverLeaves || {
-    casualLeave: enableCarryOver ? Math.min(2, Math.floor(maxCarryOverCap * 0.25)) : 0,
-    sickLeave: enableCarryOver ? Math.min(2, Math.floor(maxCarryOverCap * 0.25)) : 0,
-    earnedLeave: enableCarryOver ? Math.min(4, Math.floor(maxCarryOverCap * 0.5)) : 0,
+  const grantForYear = (annual: number, monthlyRate: number) => {
+    if (!isMonthly) return formatLeaveDays(annual);
+    if (!enableMonthlyRollover) return monthlyRate;
+    return formatLeaveDays(Math.min(annual, (annual / 12) * monthsElapsed));
   };
-  const totalCarryOver = Math.min(
-    maxCarryOverCap,
-    (rawCarryOver.casualLeave || 0) + (rawCarryOver.sickLeave || 0) + (rawCarryOver.earnedLeave || 0)
-  );
 
+  const accruedCasual = grantForYear(annualCasual, monthlyRates.casualLeave);
+  const accruedSick = grantForYear(annualSick, monthlyRates.sickLeave);
+  const accruedEarned = grantForYear(annualEarned, monthlyRates.earnedLeave);
+
+  // Only real ledger carry-over counts — do not invent leftover days from the cap.
+  const rawCarryOver = enableCarryOver ? (employee as any)?.carriedOverLeaves || {} : {};
   const carryOver = {
-    casualLeave: rawCarryOver.casualLeave || 0,
-    sickLeave: rawCarryOver.sickLeave || 0,
-    earnedLeave: rawCarryOver.earnedLeave || 0,
-    total: totalCarryOver,
+    casualLeave: formatLeaveDays(rawCarryOver.casualLeave || 0),
+    sickLeave: formatLeaveDays(rawCarryOver.sickLeave || 0),
+    earnedLeave: formatLeaveDays(rawCarryOver.earnedLeave || 0),
+    total: 0,
   };
+  carryOver.total = formatLeaveDays(
+    Math.min(maxCarryOverCap, carryOver.casualLeave + carryOver.sickLeave + carryOver.earnedLeave)
+  );
 
   // If the admin explicitly provided a custom override in EmployeeDetailView, or server ledger is hydrated:
   const hasServerBalances = !!(employee as any)?.leaveBalancesFromServer;
@@ -208,6 +203,8 @@ export const getEffectiveLeaveQuotas = (
     inProbation,
     isProbationRestricted: inProbation,
     balancesFromServer: hasServerBalances,
+    leavePoliciesEnabled: policiesEnabled,
+    enableMonthlyRollover: isMonthly && enableMonthlyRollover,
     probationPolicyNotice: inProbation
       ? 'Paid leaves (Casual, Sick, Earned) are restricted during probation. All absences must be logged as Loss of Pay (LOP / Unpaid).'
       : undefined,

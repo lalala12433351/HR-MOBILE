@@ -12,6 +12,22 @@ export function hashPassword(password: string): string {
 }
 
 /**
+ * Random password that satisfies the Cognito policy but is never shown to anyone.
+ * Used for invited accounts until the user sets their own password.
+ */
+export function generateUnusablePassword(): string {
+  return `Aa1!${crypto.randomBytes(24).toString('base64url')}`;
+}
+
+function timingSafeEqualHex(left: string, right: string): boolean {
+  if (!/^[0-9a-f]+$/i.test(left) || !/^[0-9a-f]+$/i.test(right)) return false;
+  const a = Buffer.from(left, 'hex');
+  const b = Buffer.from(right, 'hex');
+  if (a.length === 0 || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
  * Verify a password against a stored PBKDF2 hash or plain fallback
  */
 export function verifyPassword(password: string, storedHash: string | null | undefined): boolean {
@@ -19,14 +35,17 @@ export function verifyPassword(password: string, storedHash: string | null | und
 
   // Handle plain password fallback (e.g. for development / initial seed)
   if (!storedHash.includes(':')) {
-    return password === storedHash;
+    const a = Buffer.from(password);
+    const b = Buffer.from(storedHash);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
   }
 
   const [salt, originalHash] = storedHash.split(':');
   if (!salt || !originalHash) return false;
 
   const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(originalHash, 'hex'));
+  return timingSafeEqualHex(hash, originalHash);
 }
 
 /**

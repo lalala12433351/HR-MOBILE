@@ -25,6 +25,14 @@ export function applyLeaveBalancesToEmployees(
         earnedLeave: Number(bal.earnedLeave ?? 0),
         compOff: Number(bal.wfh ?? bal.compOff ?? 0),
       },
+      leaveBalanceTotals: bal.totals
+        ? {
+            casualLeave: Number(bal.totals.casualLeave ?? 0),
+            sickLeave: Number(bal.totals.sickLeave ?? 0),
+            earnedLeave: Number(bal.totals.earnedLeave ?? 0),
+            compOff: Number(bal.totals.wfh ?? bal.totals.compOff ?? 0),
+          }
+        : undefined,
     } as Employee;
   });
 }

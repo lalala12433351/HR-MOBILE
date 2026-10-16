@@ -46,7 +46,10 @@ services:
       ALLOWED_ORIGINS: "*"
       COGNITO_USER_POOL_ID: "us-east-1_examplepool"
       COGNITO_CLIENT_ID: "exampleclientid12345"
-      AWS_REGION: "us-east-1"
+      AWS_REGION: "ap-south-1"
+      FRONTEND_APP_ORIGIN: "http://localhost:3000"
+      EMAIL_TRANSPORT: "log"
+      SES_FROM_EMAIL: "Pixbe <auth@pixbe.in>"
     ports:
       - "8080:8080"
     depends_on:

@@ -11,6 +11,11 @@ declare global {
         slug?: string;
         name?: string;
         industry?: string;
+        address?: string;
+        city?: string;
+        stateProvince?: string;
+        postalCode?: string;
+        country?: string;
       };
       user?: AuthenticatedUser;
       tenantId?: string;

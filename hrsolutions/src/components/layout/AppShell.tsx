@@ -1,23 +1,20 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import {
-  Search,
-  Bell,
-  Menu,
-} from 'lucide-react';
 import { AppProvider, useApp } from '@/context/AppContext';
 import { api } from '@/services/apiClient';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { MobileBottomBar } from './MobileBottomBar';
 import { ImpersonationBanner } from '@/components/common/ImpersonationBanner';
+import { LicenseBanner } from '@/components/common/LicenseBanner';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { AIAssistantModal } from '@/components/ai/AIAssistantModal';
 import { AppToaster } from '@/components/ui/AppToaster';
 import { isMasterAdminHost } from '@/config/origins';
+import { ChatProvider } from '@/hooks/useChat';
+import { useWorkplaceLocationWatch } from '@/hooks/useWorkplaceLocationWatch';
 
 function AppShellContent({ children }: { children?: React.ReactNode }) {
   const router = useRouter();
@@ -43,12 +40,16 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     themeMode,
     toggleThemeMode,
   } = useApp();
+  useWorkplaceLocationWatch();
 
   const isAuthPage =
     pathname === '/login' ||
     pathname === '/register' ||
     pathname === '/signup' ||
     pathname === '/student-login' ||
+    pathname === '/accept-invite' ||
+    pathname === '/forgot-password' ||
+    pathname === '/reset-password' ||
     Boolean(pathname?.startsWith('/student-login'));
   const hostname = typeof window !== 'undefined' ? window.location.hostname : null;
   const onMasterAdminHost = isMasterAdminHost(hostname);
@@ -135,7 +136,7 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
   // Platform console / auth surfaces must render immediately — do not wait on tenant AppContext.
   if (isAuthPage || isMasterAdminPage || isImpersonatePage || isSetupPage || isEmployeeOnboardingPage) {
     return (
-      <div className="h-screen w-full bg-[#f8fafc] dark:bg-[#0f0f12] text-slate-900 font-sans overflow-y-auto custom-scrollbar">
+      <div className="h-screen w-full bg-[var(--bg-app)] text-[var(--text-primary)] font-sans overflow-y-auto custom-scrollbar">
         {children}
       </div>
     );
@@ -144,10 +145,10 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
   // Loading state while checking authentication session (tenant app only)
   if (!isLoaded || !state.isAuthenticated) {
     return (
-      <div className="min-h-screen w-full bg-[#f3f3f9] dark:bg-[#0f0f12] flex items-center justify-center text-slate-800 font-sans">
+      <div className="min-h-screen w-full bg-[var(--bg-app)] flex items-center justify-center text-[var(--text-primary)] font-sans">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-7 h-7 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs text-slate-500 font-medium tracking-wide">
+          <div className="w-7 h-7 border-2 border-[var(--studio-navy)] border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-[var(--text-secondary)] font-medium">
             Loading workspace...
           </span>
         </div>
@@ -160,18 +161,21 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     router.push(path);
   };
 
-  const isStudentRole = currentPersona?.role === 'student';
-  const unreadNotifCount = state.notifications?.filter((n) => !n.read).length || 0;
-
   if (!currentPersona) {
     return (
-      <div className="h-screen w-full bg-[#f8fafc] dark:bg-[#0f0f12] text-slate-900 font-sans flex items-center justify-center">
-        <p className="text-sm text-slate-500">Loading workspace…</p>
+      <div className="h-screen w-full bg-[var(--bg-app)] text-[var(--text-primary)] font-sans flex items-center justify-center">
+        <p className="text-sm text-[var(--text-secondary)]">Loading workspace…</p>
       </div>
     );
   }
 
+  const isChatPage = pathname === '/chat';
+  const isPayrollPage = Boolean(pathname?.startsWith('/payroll'));
+  const isFillCanvas = isChatPage || isPayrollPage;
+  const isWorkPage = pathname === '/projects' || pathname === '/timesheets';
+
   return (
+    <ChatProvider>
     <div className="flex h-screen w-full bg-[var(--bg-app)] text-[var(--text-primary)] overflow-hidden font-sans">
       {/* Fixed Sidebar Dock on Desktop / Slide-over Drawer on Mobile */}
       <Sidebar
@@ -181,9 +185,10 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
       />
 
       {/* Main Connected Workspace Area */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-transparent pl-0 lg:pl-[68px]">
+      <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-transparent pl-0 lg:pl-[var(--sidebar-width)]">
         {/* Impersonation Banner if active */}
         <ImpersonationBanner />
+        {!isMasterAdminPage && !isSetupPage && !isEmployeeOnboardingPage && <LicenseBanner />}
 
         {/* ─── GLOBAL TOP NAVIGATION HEADER ─── */}
         <Header
@@ -203,9 +208,19 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
         />
 
         {/* Dynamic Page Content Directly in Canvas */}
-        <main className="flex-1 w-full max-w-[1600px] mx-auto min-w-0 overflow-y-auto px-6 py-6 lg:px-8 pb-20 sm:pb-24 custom-scrollbar bg-transparent relative">
-          {children}
-        </main>
+        {isChatPage ? (
+          <main className="pixbe-main chat-main flex flex-col flex-1 w-full min-w-0 min-h-0 overflow-hidden relative">
+            {children}
+          </main>
+        ) : isFillCanvas ? (
+          <main className="pixbe-main flex flex-col flex-1 w-full max-w-[1600px] mx-auto min-w-0 min-h-0 overflow-hidden px-5 sm:px-6 lg:px-8 pt-5 pb-[88px] lg:pb-6 relative">
+            {children}
+          </main>
+        ) : (
+          <main className={`pixbe-main ${isWorkPage ? 'work-main' : ''} ${pathname === '/projects' ? 'projects-surface' : ''} flex-1 w-full max-w-[1600px] mx-auto min-w-0 overflow-y-auto px-6 lg:px-8 pb-16 sm:pb-20 custom-scrollbar relative`}>
+            {children}
+          </main>
+        )}
 
         {/* ─── MINIMALIST MOBILE BOTTOM NAVIGATION BAR ─── */}
         <MobileBottomBar />
@@ -231,6 +246,7 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
         initialQuery={aiQuery}
       />
     </div>
+    </ChatProvider>
   );
 }
 

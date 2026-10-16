@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { ChevronDown, Search } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { Search } from 'lucide-react';
 import { useDashboardContext } from './DashboardDataContext';
-import { AttendanceRecord, LeaveRequest } from '@/types';
+import { AttendanceRecord } from '@/types';
 import { UserAvatar } from '@/components/common/UserAvatar';
+import { DashPanel } from './DashPanel';
+import { isLeaveActiveOn, localDateKey } from '@/utils/dashboardPeople';
 
-export const EmployeeAttendanceTable: React.FC = () => {
-  const { state } = useApp();
+export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ className = '' }) => {
   const dashboardState = useDashboardContext();
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<'all' | 'On-Time' | 'Late' | 'On-Leave' | 'Absent'>('all');
@@ -18,7 +18,7 @@ export const EmployeeAttendanceTable: React.FC = () => {
   const employees = dashboardState.employees || [];
   const attendance = dashboardState.attendance || [];
   const leaves = dashboardState.leaves || [];
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = localDateKey();
 
   const formattedDate = useMemo(() => {
     return new Date().toLocaleDateString('en-GB', {
@@ -39,22 +39,14 @@ export const EmployeeAttendanceTable: React.FC = () => {
 
     const activeLeavesSet = new Set<string>();
     leaves.forEach((l) => {
-      if (l.status === 'Approved' && l.startDate <= todayStr && l.endDate >= todayStr) {
+      if (isLeaveActiveOn(l, todayStr) && l.employeeId) {
         activeLeavesSet.add(l.employeeId);
       }
     });
 
-    const avatarBgs = [
-      'bg-emerald-100 text-emerald-800',
-      'bg-[#eff6ff] text-[#2563eb]',
-      'bg-indigo-100 text-indigo-800',
-      'bg-rose-100 text-rose-800',
-      'bg-teal-100 text-teal-800',
-    ];
-
-    return employees.map((emp, idx) => {
-      const att = attendanceMap.get(emp.id);
-      const onLeave = activeLeavesSet.has(emp.id);
+    return employees.map((emp) => {
+      const att = attendanceMap.get(emp.id) || attendanceMap.get(emp.employeeId);
+      const onLeave = activeLeavesSet.has(emp.id) || activeLeavesSet.has(emp.employeeId);
 
       let status: 'On-Time' | 'Late' | 'On-Leave' | 'Absent' = 'Absent';
       let checkIn = '—';
@@ -102,8 +94,7 @@ export const EmployeeAttendanceTable: React.FC = () => {
         checkIn,
         checkOut,
         status,
-        avatarBg: avatarBgs[idx % avatarBgs.length],
-        checkInColor: status === 'Late' ? 'text-amber-700 font-semibold' : undefined,
+        checkInColor: status === 'Late' ? 'text-[var(--studio-error)] font-semibold' : undefined,
       };
     });
   }, [employees, attendance, leaves, todayStr, formattedDate]);
@@ -144,24 +135,29 @@ export const EmployeeAttendanceTable: React.FC = () => {
   }, [filteredRows, currentPage, pageSize]);
 
   return (
-    <section className="dash-card overflow-hidden" data-purpose="employee-attendance-table">
-      {/* Table Header & Summary KPIs */}
-      <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <DashPanel
+      title="Who is in today"
+      className={className}
+      purpose="employee-attendance-table"
+      padded={false}
+      action={
+        <span className="text-[11px] font-semibold text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] px-2.5 py-1 rounded-[7px]">
+          {formattedDate}
+        </span>
+      }
+    >
+      <div className="px-4 pb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-[var(--text-primary)]">Employee Attendance</h2>
           {/* Summary Count Pills */}
-          <div className="flex flex-wrap items-center gap-2.5 mt-3">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => {
                 setStatusFilter(statusFilter === 'On-Time' ? 'all' : 'On-Time');
                 setCurrentPage(1);
               }}
-              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer ${
-                statusFilter === 'On-Time'
-                  ? 'bg-[#047857] text-white ring-2 ring-[#047857]/30'
-                  : 'bg-[#d1fae5] text-[#047857] hover:bg-[#a7f3d0]'
-              }`}
+              className="dash-chip"
+              data-active={statusFilter === 'On-Time' ? 'true' : 'false'}
             >
               {summaryCounts.onTime} On-Time
             </button>
@@ -172,11 +168,8 @@ export const EmployeeAttendanceTable: React.FC = () => {
                 setStatusFilter(statusFilter === 'Late' ? 'all' : 'Late');
                 setCurrentPage(1);
               }}
-              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer ${
-                statusFilter === 'Late'
-                  ? 'bg-[#b45309] text-white ring-2 ring-[#b45309]/30'
-                  : 'bg-[#fef3c7] text-[#b45309] hover:bg-[#fde68a]'
-              }`}
+              className="dash-chip"
+              data-active={statusFilter === 'Late' ? 'true' : 'false'}
             >
               {summaryCounts.late} Late
             </button>
@@ -187,11 +180,8 @@ export const EmployeeAttendanceTable: React.FC = () => {
                 setStatusFilter(statusFilter === 'On-Leave' ? 'all' : 'On-Leave');
                 setCurrentPage(1);
               }}
-              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer ${
-                statusFilter === 'On-Leave'
-                  ? 'bg-[#475569] text-white ring-2 ring-[#475569]/30'
-                  : 'bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0]'
-              }`}
+              className="dash-chip"
+              data-active={statusFilter === 'On-Leave' ? 'true' : 'false'}
             >
               {summaryCounts.onLeave} On Leave
             </button>
@@ -202,11 +192,8 @@ export const EmployeeAttendanceTable: React.FC = () => {
                 setStatusFilter(statusFilter === 'Absent' ? 'all' : 'Absent');
                 setCurrentPage(1);
               }}
-              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer ${
-                statusFilter === 'Absent'
-                  ? 'bg-rose-700 text-white ring-2 ring-rose-700/30'
-                  : 'bg-[#0f172a] text-white hover:bg-slate-800'
-              }`}
+              className="dash-chip"
+              data-active={statusFilter === 'Absent' ? 'true' : 'false'}
             >
               {summaryCounts.absent} Absent
             </button>
@@ -218,7 +205,7 @@ export const EmployeeAttendanceTable: React.FC = () => {
                   setStatusFilter('all');
                   setCurrentPage(1);
                 }}
-                className="text-xs text-blue-600 font-semibold hover:underline ml-1 cursor-pointer"
+                className="text-xs text-[var(--studio-navy)] font-semibold hover:underline ml-1 cursor-pointer"
               >
                 Clear Filter
               </button>
@@ -236,8 +223,8 @@ export const EmployeeAttendanceTable: React.FC = () => {
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              placeholder="Search team..."
-              className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 w-36 sm:w-48"
+              placeholder="Search team"
+              className="pl-8 pr-3 h-9 text-xs rounded-[7px] border border-[var(--border-color)] bg-[var(--bg-surface)] focus:outline-none focus:ring-1 focus:ring-[var(--primary-blue)] focus:border-[var(--primary-blue)] w-40 sm:w-56"
             />
           </div>
         </div>
@@ -247,26 +234,26 @@ export const EmployeeAttendanceTable: React.FC = () => {
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider text-[11px]">
-              <th className="py-3 px-5" scope="col">Name</th>
-              <th className="py-3 px-5" scope="col">Job Title</th>
-              <th className="py-3 px-5" scope="col">Date</th>
-              <th className="py-3 px-5" scope="col">Check In</th>
-              <th className="py-3 px-5" scope="col">Check Out</th>
-              <th className="py-3 px-5" scope="col">Status</th>
+            <tr className="border-b border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-bold text-[11px]">
+              <th className="py-2.5 px-4" scope="col">Name</th>
+              <th className="py-2.5 px-4" scope="col">Job Title</th>
+              <th className="py-2.5 px-4" scope="col">Date</th>
+              <th className="py-2.5 px-4" scope="col">Check In</th>
+              <th className="py-2.5 px-4" scope="col">Check Out</th>
+              <th className="py-2.5 px-4" scope="col">Status</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-[var(--border-color)]">
             {paginatedRows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
+                <td colSpan={6} className="py-8 text-center text-[var(--text-muted)] text-xs">
                   No employee attendance records found
                 </td>
               </tr>
             ) : (
               paginatedRows.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50/90 transition-colors">
-                  <td className="py-3.5 px-5">
+                <tr key={row.id} className="even:bg-[var(--bg-surface-subtle)]/40 hover:bg-[var(--bg-surface-subtle)]">
+                  <td className="py-2.5 px-4">
                     <div className="flex items-center gap-3">
                       <UserAvatar
                         src={row.avatar}
@@ -274,40 +261,40 @@ export const EmployeeAttendanceTable: React.FC = () => {
                         className="w-8 h-8 text-xs shrink-0"
                       />
                       <div>
-                        <span className="font-bold text-[#0f172a] block">{row.name}</span>
-                        <span className="text-[11px] text-slate-400">{row.email}</span>
+                        <span className="font-bold text-[var(--text-primary)] block">{row.name}</span>
+                        <span className="text-[11px] text-[var(--text-muted)]">{row.email}</span>
                       </div>
                     </div>
                   </td>
-                  <td className="py-3.5 px-5">
-                    <span className="font-semibold text-slate-800 block">{row.designation}</span>
-                    <span className="text-[11px] text-slate-400">{row.department}</span>
+                  <td className="py-2.5 px-4">
+                    <span className="font-semibold text-[var(--text-primary)] block">{row.designation}</span>
+                    <span className="text-[11px] text-[var(--text-muted)]">{row.department}</span>
                   </td>
-                  <td className="py-3.5 px-5 text-slate-600 font-medium">{row.date}</td>
-                  <td className={`py-3.5 px-5 tabular-nums ${row.checkInColor || 'text-slate-800'} ${row.checkIn === '—' ? 'text-slate-400' : 'font-semibold'}`}>
+                  <td className="py-2.5 px-4 text-[var(--text-secondary)] font-medium">{row.date}</td>
+                  <td className={`py-2.5 px-4 tabular-nums ${row.checkInColor || 'text-[var(--text-primary)]'} ${row.checkIn === '—' ? 'text-[var(--text-muted)]' : 'font-semibold'}`}>
                     {row.checkIn}
                   </td>
-                  <td className={`py-3.5 px-5 tabular-nums text-slate-800 ${row.checkOut === '—' ? 'text-slate-400' : 'font-semibold'}`}>
+                  <td className={`py-2.5 px-4 tabular-nums text-[var(--text-primary)] ${row.checkOut === '—' ? 'text-[var(--text-muted)]' : 'font-semibold'}`}>
                     {row.checkOut}
                   </td>
-                  <td className="py-3.5 px-5">
+                  <td className="py-2.5 px-4">
                     {row.status === 'On-Time' && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#d1fae5] text-[#047857]">
-                        On-Time
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold dash-status-sage">
+                        On time
                       </span>
                     )}
                     {row.status === 'Late' && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#fef3c7] text-[#b45309]">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold dash-status-error">
                         Late
                       </span>
                     )}
                     {row.status === 'On-Leave' && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#f1f5f9] text-[#475569]">
-                        On-Leave
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold dash-status-navy">
+                        On leave
                       </span>
                     )}
                     {row.status === 'Absent' && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#0f172a] text-white">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold dash-status-muted">
                         Absent
                       </span>
                     )}
@@ -320,16 +307,16 @@ export const EmployeeAttendanceTable: React.FC = () => {
       </div>
 
       {/* Pagination Footer */}
-      <div className="px-5 py-3.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+      <div className="px-4 py-3 border-t border-[var(--border-color)] flex items-center justify-between text-xs text-[var(--text-muted)]">
         <span>
-          Showing <strong className="text-slate-800 font-semibold">{paginatedRows.length}</strong> of <strong className="text-slate-800 font-semibold">{totalMembersCount}</strong> team members
+          Showing <strong className="text-[var(--text-primary)] font-semibold">{paginatedRows.length}</strong> of <strong className="text-[var(--text-primary)] font-semibold">{totalMembersCount}</strong> team members
         </span>
         <div className="flex items-center space-x-1.5">
           <button
             type="button"
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 disabled:opacity-50 font-medium cursor-pointer"
+            className="h-9 px-3 rounded-[7px] border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] disabled:opacity-40 disabled:cursor-not-allowed font-medium cursor-pointer"
           >
             Previous
           </button>
@@ -340,10 +327,10 @@ export const EmployeeAttendanceTable: React.FC = () => {
                 key={pageNum}
                 type="button"
                 onClick={() => setCurrentPage(pageNum)}
-                className={`px-3 py-1.5 rounded-lg border font-medium cursor-pointer ${
+                className={`h-9 px-3 rounded-[7px] border font-medium cursor-pointer ${
                   currentPage === pageNum
-                    ? 'border-[#2563eb] bg-[#2563eb] text-white font-bold'
-                    : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                    ? 'border-[var(--studio-navy)] bg-[var(--studio-navy)] text-white font-bold'
+                    : 'border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)]'
                 }`}
               >
                 {pageNum}
@@ -354,12 +341,12 @@ export const EmployeeAttendanceTable: React.FC = () => {
             type="button"
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium cursor-pointer"
+            className="h-9 px-3 rounded-[7px] border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] disabled:opacity-40 disabled:cursor-not-allowed font-medium cursor-pointer"
           >
             Next
           </button>
         </div>
       </div>
-    </section>
+    </DashPanel>
   );
 };

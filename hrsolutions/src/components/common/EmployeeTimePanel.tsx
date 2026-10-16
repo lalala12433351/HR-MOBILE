@@ -49,7 +49,7 @@ export const EmployeeTimePanel: React.FC<EmployeeTimePanelProps> = ({
 
   if (variant === 'header') {
     return (
-      <div className="flex items-center gap-3 rounded-2xl border border-[#232d44] bg-[#161d2e] px-3.5 py-1.5 shadow-sm">
+      <div className="flex items-center gap-3 rounded-xl border border-[#232d44] bg-[#161d2e] px-3.5 py-1.5 shadow-sm">
         {/* Top: Day and Date */}
         <div className="flex flex-col text-left">
           <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-[#a78bfa] tracking-tight leading-none">
@@ -65,7 +65,7 @@ export const EmployeeTimePanel: React.FC<EmployeeTimePanelProps> = ({
         <div className="h-7 w-[1px] bg-[#232d44]" />
 
         {/* Side: Real-time Live Clock */}
-        <div className="flex items-center gap-1.5 bg-[#0f1422] text-[#2dd4bf] border border-[#232d44] rounded-xl px-2.5 py-1 font-mono text-xs font-bold tabular-nums shadow-xs">
+        <div className="flex items-center gap-1.5 bg-[#0f1422] text-[#2dd4bf] border border-[#232d44] rounded-lg px-2.5 py-1 font-mono text-xs font-bold tabular-nums ">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#2dd4bf] opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-[#2dd4bf]"></span>
@@ -78,7 +78,7 @@ export const EmployeeTimePanel: React.FC<EmployeeTimePanelProps> = ({
 
   if (variant === 'banner' || variant === 'shift_card') {
     return (
-      <div className="rounded-2xl border border-[#232d44] bg-[#161d2e] p-4 sm:p-5 text-white shadow-xl space-y-4">
+      <div className="rounded-xl border border-[#232d44] bg-[#161d2e] p-4 sm:p-5 text-white shadow-lg space-y-4">
         {/* Top Bar with shift info */}
         <div className="flex items-center justify-between border-b border-[#232d44] pb-3">
           <div className="flex items-center gap-2">
@@ -109,13 +109,13 @@ export const EmployeeTimePanel: React.FC<EmployeeTimePanelProps> = ({
             {/* Clock Out Button */}
             <button
               onClick={onClockOut}
-              className="flex items-center justify-center rounded-xl bg-[#ff5e62] hover:bg-[#fa4b50] px-4 py-2.5 text-xs font-bold text-white shadow-md transition-all active:scale-95"
+              className="flex items-center justify-center rounded-lg bg-[#ff5e62] hover:bg-[#fa4b50] px-4 py-2.5 text-xs font-bold text-white shadow-md transition-all active:scale-95"
             >
               Clock Out
             </button>
 
             {/* Live Timer Indicator Box */}
-            <div className="flex items-center gap-2 rounded-xl border border-[#ff5e62]/40 bg-[#131929] px-3.5 py-2">
+            <div className="flex items-center gap-2 rounded-lg border border-[#ff5e62]/40 bg-[#131929] px-3.5 py-2">
               <span className="h-2 w-2 rounded-full bg-[#ff5e62] animate-ping" />
               <div className="text-right font-mono">
                 <p className="text-xs font-bold text-[#ff5e62] leading-none tabular-nums">{timeString}</p>
@@ -126,7 +126,7 @@ export const EmployeeTimePanel: React.FC<EmployeeTimePanelProps> = ({
             {/* Punch Button with Location */}
             <button
               onClick={onPunch}
-              className="flex items-center gap-1.5 rounded-xl border border-[#7c5cfc] bg-[#7c5cfc]/20 hover:bg-[#7c5cfc]/30 px-3.5 py-2.5 text-xs font-bold text-[#c4b5fd] shadow-md transition-all active:scale-95"
+              className="flex items-center gap-1.5 rounded-lg border border-[#7c5cfc] bg-[#7c5cfc]/20 hover:bg-[#7c5cfc]/30 px-3.5 py-2.5 text-xs font-bold text-[#c4b5fd] shadow-md transition-all active:scale-95"
             >
               <MapPin className="h-3.5 w-3.5 text-[#a78bfa]" />
               Punch
@@ -139,7 +139,7 @@ export const EmployeeTimePanel: React.FC<EmployeeTimePanelProps> = ({
 
   // Default 'card' variant
   return (
-    <div className="rounded-2xl border border-[#232d44] bg-[#161d2e] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="rounded-xl border border-[#232d44] bg-[#161d2e] p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div>
         <span className="text-[10px] font-bold uppercase tracking-widest text-[#a78bfa]">Workstation Schedule</span>
         <h3 className="text-sm font-extrabold text-white flex items-center gap-1.5 mt-0.5">
@@ -148,7 +148,7 @@ export const EmployeeTimePanel: React.FC<EmployeeTimePanelProps> = ({
         </h3>
       </div>
 
-      <div className="flex items-center gap-2 bg-[#0f1422] text-[#2dd4bf] border border-[#232d44] font-mono text-sm font-bold px-3 py-1.5 rounded-xl shadow-xs">
+      <div className="flex items-center gap-2 bg-[#0f1422] text-[#2dd4bf] border border-[#232d44] font-mono text-sm font-bold px-3 py-1.5 rounded-lg ">
         <Clock className="h-4 w-4 text-[#2dd4bf]" />
         <span>{timeString}</span>
       </div>

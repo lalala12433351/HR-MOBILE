@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { UserPersona, NotificationItem } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { UserAvatar } from '@/components/common/UserAvatar';
-import { KiteLogoMark } from '@/components/common/KiteLogoMark';
+import { OrgBrandMark } from '@/components/common/PixbeBrand';
 import { GoogleIcon } from '@/components/ui/GoogleIcon';
 import { isInstitutionMode } from '@/utils/organizationMode';
 import { compressAvatarImage } from '@/utils/imageUtils';
@@ -133,6 +133,10 @@ export const Header: React.FC<HeaderProps> = ({
   const handleNotificationNavigate = (n: NotificationItem) => {
     onMarkNotificationRead(n.id);
     setShowNotifMenu(false);
+    if (n.linkUrl) {
+      router.push(n.linkUrl);
+      return;
+    }
     if (n.linkModule) {
       const query = n.linkTab ? `?tab=${n.linkTab}` : '';
       if (onNavigateModule) {
@@ -244,26 +248,21 @@ export const Header: React.FC<HeaderProps> = ({
       : (isInstitution ? 'Kite Institute of Aviation' : 'Pixbe Workspace');
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between bg-transparent backdrop-blur-md border-b border-slate-200/50 dark:border-white/5 px-6 lg:px-8 shrink-0 gap-4 transition-colors">
+    <header className="pixbe-header sticky top-0 z-30 flex h-14 items-center justify-between border-b px-5 lg:px-6 shrink-0 gap-3">
       {/* Left: Institute / School Name Capsule Selector */}
       <div className="flex items-center gap-3">
         <button
           onClick={onToggleMobileSidebar}
-          className="rounded-xl p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:text-[#9e9ea7] dark:hover:bg-white/[0.06] lg:hidden shrink-0 transition-colors cursor-pointer"
+          className="rounded-[7px] p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] lg:hidden shrink-0 transition-colors cursor-pointer"
           title="Toggle Menu"
         >
           <GoogleIcon name="menu" size={20} />
         </button>
 
         {/* Organization / School Pill Badge */}
-        <div className="inline-flex items-center gap-2.5 pl-1.5 pr-3.5 py-1 rounded-full border border-slate-200/90 dark:border-[#282830] bg-white dark:bg-[#161619] shadow-xs select-none">
-          {/* Design Theme Blue Circular Icon */}
-          <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-            <KiteLogoMark className="w-3.5 h-3.5 text-white" />
-          </div>
-
-          {/* Institution / Workspace Name */}
-          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 tracking-tight truncate max-w-[200px] sm:max-w-[320px]">
+        <div className="inline-flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-[8px] border border-[var(--border-color)] bg-[var(--bg-surface)] select-none">
+          <OrgBrandMark src={state.organization?.logo} />
+          <span className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight truncate max-w-[200px] sm:max-w-[320px]">
             {displayOrgName}
           </span>
         </div>
@@ -274,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Search Pill */}
         <div
           onClick={onOpenCommandPalette}
-          className="relative hidden sm:flex items-center bg-white dark:bg-[#161619] border border-slate-200 dark:border-[#282830] rounded-xl px-3.5 py-2 w-64 md:w-72 shadow-xs transition focus-within:border-[#2563eb] cursor-pointer hover:border-slate-300"
+          className="relative hidden sm:flex items-center bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg px-3 py-1.5 w-56 md:w-64 transition-[border-color] duration-150 focus-within:border-[var(--primary-blue)] cursor-pointer hover:border-[var(--border-strong)]"
         >
           <GoogleIcon name="search" size={16} className="text-slate-400 shrink-0 mr-2.5" />
           <input
@@ -299,7 +298,7 @@ export const Header: React.FC<HeaderProps> = ({
               setShowNotifMenu(prev => !prev);
               setShowPersonaMenu(false);
             }}
-            className="relative p-2.5 rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#161619] text-slate-600 dark:text-[#9e9ea7] hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-[#1e1e24] transition cursor-pointer shadow-xs flex items-center justify-center"
+            className="relative p-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-subtle)] transition-[color,background-color] duration-150 cursor-pointer flex items-center justify-center"
             title="Notifications"
           >
             <GoogleIcon name="notifications" size={19} weight={500} />
@@ -313,7 +312,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Notifications Dropdown */}
           {showNotifMenu && (
-            <div className="absolute right-0 mt-3 w-80 sm:w-96 rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#1c1c20] p-4 shadow-xl ring-1 ring-slate-900/5 dark:ring-black/50 z-50 space-y-3 animate-in fade-in zoom-in-95">
+            <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 shadow-lg ring-1 ring-slate-900/5 dark:ring-black/50 z-50 space-y-3 animate-in fade-in zoom-in-95">
               <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-[#282830]">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white">Notifications</h3>
@@ -457,7 +456,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {showPersonaMenu && (
-            <div className="absolute right-0 mt-3 w-80 rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#1c1c20] p-5 shadow-xl ring-1 ring-slate-900/5 dark:ring-black/50 z-50 space-y-4 text-slate-900 dark:text-white animate-in fade-in zoom-in-95">
+            <div className="absolute right-0 mt-2 w-72 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 shadow-lg ring-1 ring-slate-900/5 dark:ring-black/50 z-50 space-y-3 text-[var(--text-primary)] animate-in fade-in zoom-in-95">
               {/* Profile Header Card */}
               <div className="flex items-start gap-3.5 pb-4 border-b border-slate-100 dark:border-[#282830]">
                 <div

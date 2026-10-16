@@ -16,15 +16,18 @@ import {
   createJobRole,
   updateJobRole,
   deleteJobRole,
+  syncOrgReporting,
 } from './org.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 import { requireTenantContext } from '../../middleware/tenant.middleware.js';
 import { requireRole } from '../../middleware/rbac.middleware.js';
+import { resyncTeamChannelsOnWrite } from '../chat/chat.sync.middleware.js';
 
 export const orgRoutes = Router();
 
 orgRoutes.use(authenticateToken);
 orgRoutes.use(requireTenantContext);
+orgRoutes.use(resyncTeamChannelsOnWrite);
 
 const write = requireRole(['super_admin', 'hr_manager']);
 
@@ -47,3 +50,5 @@ orgRoutes.get('/job-roles', getJobRoles);
 orgRoutes.post('/job-roles', write, createJobRole);
 orgRoutes.patch('/job-roles/:id', write, updateJobRole);
 orgRoutes.delete('/job-roles/:id', write, deleteJobRole);
+
+orgRoutes.post('/reporting/sync', write, syncOrgReporting);

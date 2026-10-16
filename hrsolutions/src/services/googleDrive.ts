@@ -1,14 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { Capacitor } from '@capacitor/core';
-import {
-  getAuth,
-  signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  User,
-} from 'firebase/auth';
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Google Drive, Meet, Sheets & Gmail Scopes
@@ -37,25 +28,6 @@ WORKSPACE_SCOPES.forEach((scope) => provider.addScope(scope));
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
-let redirectHandled = false;
-
-async function consumeRedirectResult(): Promise<{ user: User; accessToken: string } | null> {
-  if (redirectHandled) return null;
-  redirectHandled = true;
-  try {
-    const result = await getRedirectResult(auth);
-    if (!result) return null;
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) return null;
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
-  } catch (error) {
-    console.error('Google OAuth redirect result error:', error);
-    return null;
-  }
-}
-
-void consumeRedirectResult();
 
 /**
  * Initialize Google Auth listener
@@ -85,14 +57,6 @@ export const initGoogleWorkspaceAuth = (
 export const googleWorkspaceSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
-    const redirected = await consumeRedirectResult();
-    if (redirected) return redirected;
-
-    if (Capacitor.isNativePlatform()) {
-      await signInWithRedirect(auth, provider);
-      return null;
-    }
-
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
@@ -109,6 +73,11 @@ export const googleWorkspaceSignIn = async (): Promise<{ user: User; accessToken
 };
 
 export const getWorkspaceAccessToken = (): string | null => cachedAccessToken;
+
+export const googleWorkspaceSignOut = async () => {
+  await auth.signOut();
+  cachedAccessToken = null;
+};
 
 export interface DriveFile {
   id: string;

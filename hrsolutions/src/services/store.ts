@@ -144,8 +144,6 @@ export const getDefaultState = (): AppState => {
       offices: [],
       designations: [],
       employmentTypes: ['Full-time', 'Contract', 'Part-time', 'Intern'],
-      defaultInitialPassword: 'Welcome@123',
-      forcePasswordReset: true,
     },
   };
 };

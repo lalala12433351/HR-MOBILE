@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { downloadBlob } from '@/lib/native';
 import { useRouter } from 'next/navigation';
 import {
   ChevronLeft,
@@ -58,6 +57,26 @@ import { WORLD_NATIONALITIES, WORLD_COUNTRIES } from '@/data/nations';
 import { api } from '@/services/apiClient';
 import { isInstitutionMode } from '@/utils/organizationMode';
 import { compressAvatarImage } from '@/utils/imageUtils';
+import { buildEmployeeIdCardDraft, IdCardStudio } from '../print/IdCardStudio';
+import { buildPayslipDraftFromDocument, PayslipStudio } from '../print/PayslipStudio';
+import {
+  SlideOverDrawer,
+  slideOverBodyClass,
+  slideOverCancelClass,
+  slideOverFooterClass,
+  slideOverPrimaryClass,
+} from '@/components/common/SlideOverDrawer';
+
+const moneyInputValue = (n: number | string) => {
+  const v = Number(n);
+  return Number.isFinite(v) && v !== 0 ? v : '';
+};
+
+const parseMoneyInput = (raw: string) => {
+  if (raw.trim() === '') return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+};
 
 const normalizeDateForInput = (d?: string) => {
   if (!d || d === '—' || d.trim() === '') return '';
@@ -70,10 +89,57 @@ const normalizeDateForInput = (d?: string) => {
   return '';
 };
 
+const MAJOR_BANKS = [
+  'HDFC Bank',
+  'State Bank of India (SBI)',
+  'ICICI Bank',
+  'Axis Bank',
+  'Kotak Mahindra Bank',
+  'Punjab National Bank (PNB)',
+  'Bank of Baroda',
+  'Canara Bank',
+  'Union Bank of India',
+  'IndusInd Bank',
+  'IDFC FIRST Bank',
+  'Yes Bank',
+  'Federal Bank',
+  'Bank of India',
+  'Central Bank of India',
+  'Indian Bank',
+  'Standard Chartered Bank',
+  'HSBC Bank',
+  'Citibank',
+  'JPMorgan Chase Bank',
+  'Bank of America',
+  'Wells Fargo',
+  'Barclays',
+  'Other Bank',
+];
+
+const blankBankValue = (value?: string) => {
+  const trimmed = (value || '').trim();
+  if (!trimmed || trimmed === '—' || trimmed === '-') return '';
+  return trimmed;
+};
+
+const suggestIfscPrefix = (bankName: string) => {
+  if (bankName.includes('HDFC')) return 'HDFC0';
+  if (bankName.includes('State Bank of India')) return 'SBIN0';
+  if (bankName.includes('ICICI')) return 'ICIC0';
+  if (bankName.includes('Axis')) return 'UTIB0';
+  if (bankName.includes('Kotak')) return 'KKBK0';
+  if (bankName.includes('Punjab National Bank')) return 'PUNB0';
+  if (bankName.includes('Bank of Baroda')) return 'BARB0';
+  if (bankName.includes('Canara')) return 'CNRB0';
+  if (bankName.includes('Union Bank')) return 'UBIN0';
+  return '';
+};
+
 interface EmployeeDetailViewProps {
   employee: Employee;
   allEmployees: Employee[];
   onSelectEmployee: (emp: Employee) => void;
+  onOpenDepartment?: (departmentName: string) => void;
   onUpdateEmployee: (updated: Employee) => void;
   onBack: () => void;
   state: AppState;
@@ -86,6 +152,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   employee,
   allEmployees,
   onSelectEmployee,
+  onOpenDepartment,
   onUpdateEmployee,
   onBack,
   state,
@@ -118,12 +185,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   // Form State for Payroll & Allowances
   const [formPayrollGroupId, setFormPayrollGroupId] = useState(employee.payrollGroupId || '');
   const [formSalaryType, setFormSalaryType] = useState<SalaryType>(employee.salaryType || 'monthly');
-  const [formBaseSalary, setFormBaseSalary] = useState(employee.salaryDetails?.basic || employee.payrollSummary?.salary || 0);
-  const [formHra, setFormHra] = useState<number>(employee.salaryDetails?.hra ?? Math.round((employee.salaryDetails?.basic || 0) * 0.4));
-  const [formSpecialAllowance, setFormSpecialAllowance] = useState<number>(employee.salaryDetails?.specialAllowance ?? 0);
-  const [formConveyanceAllowance, setFormConveyanceAllowance] = useState<number>(employee.salaryDetails?.conveyanceAllowance ?? 0);
-  const [formMedicalAllowance, setFormMedicalAllowance] = useState<number>(employee.salaryDetails?.medicalAllowance ?? 0);
-  const [formOtherAllowances, setFormOtherAllowances] = useState<number>(employee.salaryDetails?.otherAllowances ?? 0);
+  const [formBaseSalary, setFormBaseSalary] = useState(Number(employee.salaryDetails?.basic || employee.payrollSummary?.salary || 0) || 0);
+  const [formHra, setFormHra] = useState<number>(Number(employee.salaryDetails?.hra ?? Math.round((employee.salaryDetails?.basic || 0) * 0.4)) || 0);
+  const [formSpecialAllowance, setFormSpecialAllowance] = useState<number>(Number(employee.salaryDetails?.specialAllowance ?? 0) || 0);
+  const [formConveyanceAllowance, setFormConveyanceAllowance] = useState<number>(Number(employee.salaryDetails?.conveyanceAllowance ?? 0) || 0);
+  const [formMedicalAllowance, setFormMedicalAllowance] = useState<number>(Number(employee.salaryDetails?.medicalAllowance ?? 0) || 0);
+  const [formOtherAllowances, setFormOtherAllowances] = useState<number>(Number(employee.salaryDetails?.otherAllowances ?? 0) || 0);
   const [formCustomAllowances, setFormCustomAllowances] = useState<{ id: string; name: string; amount: number }[]>(() => {
     return (employee.salaryDetails?.allowanceItems || []).map((a) => ({
       id: a.id || `alw_${Date.now()}_${Math.random()}`,
@@ -144,12 +211,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   useEffect(() => {
     setFormPayrollGroupId(employee.payrollGroupId || '');
     setFormSalaryType(employee.salaryType || 'monthly');
-    setFormBaseSalary(employee.salaryDetails?.basic || employee.payrollSummary?.salary || 0);
-    setFormHra(employee.salaryDetails?.hra ?? Math.round((employee.salaryDetails?.basic || 0) * 0.4));
-    setFormSpecialAllowance(employee.salaryDetails?.specialAllowance ?? 0);
-    setFormConveyanceAllowance(employee.salaryDetails?.conveyanceAllowance ?? 0);
-    setFormMedicalAllowance(employee.salaryDetails?.medicalAllowance ?? 0);
-    setFormOtherAllowances(employee.salaryDetails?.otherAllowances ?? 0);
+    setFormBaseSalary(Number(employee.salaryDetails?.basic || employee.payrollSummary?.salary || 0) || 0);
+    setFormHra(Number(employee.salaryDetails?.hra ?? Math.round((employee.salaryDetails?.basic || 0) * 0.4)) || 0);
+    setFormSpecialAllowance(Number(employee.salaryDetails?.specialAllowance ?? 0) || 0);
+    setFormConveyanceAllowance(Number(employee.salaryDetails?.conveyanceAllowance ?? 0) || 0);
+    setFormMedicalAllowance(Number(employee.salaryDetails?.medicalAllowance ?? 0) || 0);
+    setFormOtherAllowances(Number(employee.salaryDetails?.otherAllowances ?? 0) || 0);
     setFormCustomAllowances((employee.salaryDetails?.allowanceItems || []).map((a) => ({
       id: a.id || `alw_${Date.now()}_${Math.random()}`,
       name: a.name,
@@ -171,7 +238,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   const [showAddJobTimelineModal, setShowAddJobTimelineModal] = useState(false);
   const [showAddContractModal, setShowAddContractModal] = useState(false);
   const [showAddPayslipModal, setShowAddPayslipModal] = useState(false);
-  const [previewPayslip, setPreviewPayslip] = useState<EmployeePayslipDocument | null>(null);
+  const [showBankDetailsModal, setShowBankDetailsModal] = useState(false);
+  const [isEditingBankDetails, setIsEditingBankDetails] = useState(false);
+  const [savingBankDetails, setSavingBankDetails] = useState(false);
+  const [formBankName, setFormBankName] = useState('');
+  const [formAccountNumber, setFormAccountNumber] = useState('');
+  const [formIfscCode, setFormIfscCode] = useState('');
+  const [formAccountHolderName, setFormAccountHolderName] = useState('');
+  const [showIdCard, setShowIdCard] = useState(false);
+  const [payslipToPrint, setPayslipToPrint] = useState<EmployeePayslipDocument | null>(null);
 
   // Check if account is activated
   const isCurrentPersona = Boolean(
@@ -179,8 +254,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
     (employee.name && state.currentPersona?.name && employee.name.toLowerCase().trim() === state.currentPersona.name.toLowerCase().trim()) ||
     (employee.id && state.currentPersona?.id && employee.id === state.currentPersona.id)
   );
+  const selfService = state.customOptions?.profileSelfServiceSettings;
+  const canEditAddress = canEdit || Boolean(isCurrentPersona && (selfService?.allowSelfEditAddress ?? true));
 
-  const isSuperAdmin = employee.role === 'super_admin' || employee.employeeId === 'EMP001' || isCurrentPersona;
+  const isSuperAdmin = employee.role === 'super_admin' || employee.employeeId === 'EMP001';
 
   const isActivated =
     isSuperAdmin ||
@@ -573,11 +650,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
         const m = Math.round((a.workingHours % 1) * 60);
         hoursDisplay = m > 0 ? `${h}h ${m}m` : `${h}h`;
       }
+      const sessions = Array.isArray(a.sessions) && a.sessions.length > 1 ? a.sessions : null;
       return {
         date: a.date,
         day: new Date(a.date).toLocaleDateString('en-US', { weekday: 'long' }),
-        inTime: a.checkIn || '—',
-        outTime: a.checkOut || '—',
+        inTime: sessions ? sessions.map((s) => s.checkIn).join(' · ') : a.checkIn || '—',
+        outTime: sessions ? sessions.map((s) => s.checkOut || '—').join(' · ') : a.checkOut || '—',
         hours: hoursDisplay,
         breakH: typeof a.breakHours === 'number' && a.breakHours > 0 ? `${Math.round(a.breakHours * 60)}m` : '—',
         loc: (a as any).officeLocation || (a as any).location || employee.officeName || employee.location || (isInstitution ? 'Campus' : 'Main Office'),
@@ -691,10 +769,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   const totalEarned = currentEarnedQuota;
   const totalWfh = currentWfhQuota;
 
-  const casualLeft = Math.max(0, totalCasual - casualUsed);
-  const sickLeft = Math.max(0, totalSick - sickUsed);
-  const earnedLeft = Math.max(0, totalEarned - earnedUsed);
-  const wfhLeft = Math.max(0, totalWfh - wfhUsed);
+  // Server ledger balances are already remaining. Do not subtract approved days again.
+  const fromServer = !!effectiveQuotas.balancesFromServer;
+  const casualLeft = fromServer ? totalCasual : Math.max(0, totalCasual - casualUsed);
+  const sickLeft = fromServer ? totalSick : Math.max(0, totalSick - sickUsed);
+  const earnedLeft = fromServer ? totalEarned : Math.max(0, totalEarned - earnedUsed);
+  const wfhLeft = fromServer ? totalWfh : Math.max(0, totalWfh - wfhUsed);
 
   // Present and on-time stats
   const presentDaysCount = employeeAttendanceLogs.filter((l) => l.status === 'Present' || l.status === 'Work From Home').length;
@@ -778,8 +858,8 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   // Helper to save address
   const handleSaveAddress = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEdit) {
-      showToast('Permission denied. Only HR and Super Admin can edit employee records.');
+    if (!canEditAddress) {
+      showToast('You do not have permission to edit this address.');
       return;
     }
     const updated: Employee = {
@@ -1144,6 +1224,77 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
     showToast(`${employee.name} account activated successfully!`);
   };
 
+  const hydrateBankForm = () => {
+    const bank = employee.bankDetails;
+    setFormBankName(blankBankValue(bank?.bankName));
+    setFormAccountNumber(blankBankValue(bank?.accountNumber).replace(/\D/g, '').slice(0, 18));
+    setFormIfscCode(blankBankValue(bank?.ifscCode).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11));
+    setFormAccountHolderName(blankBankValue(bank?.accountHolderName) || employee.fullName || employee.name || '');
+  };
+
+  const handleOpenBankDetailsModal = () => {
+    if (!canEdit) return;
+    hydrateBankForm();
+    setShowBankDetailsModal(true);
+  };
+
+  const handleStartBankEdit = () => {
+    if (!canEdit) return;
+    if (isEditingBankDetails) {
+      setIsEditingBankDetails(false);
+      return;
+    }
+    hydrateBankForm();
+    setIsEditingBankDetails(true);
+  };
+
+  const handleSaveBankDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEdit) {
+      showToast('Permission denied. Only HR and Super Admin can edit bank details.');
+      return;
+    }
+
+    const bankName = formBankName.trim();
+    const accountNumber = formAccountNumber.replace(/\D/g, '');
+    const ifscCode = formIfscCode.trim().toUpperCase();
+    const accountHolderName = formAccountHolderName.trim() || employee.fullName || employee.name || '';
+
+    if (!bankName || !accountNumber || !ifscCode || !accountHolderName) {
+      showToast('Account holder, bank name, account number, and IFSC are required.');
+      return;
+    }
+
+    setSavingBankDetails(true);
+    try {
+      const res = await api.identity.updateBankDetails(employee.id, {
+        accountHolderName,
+        accountNumber,
+        bankName,
+        routingOrIfscCode: ifscCode,
+      });
+      if (!res.success) {
+        throw new Error(res.error?.message || 'Failed to save bank details');
+      }
+
+      onUpdateEmployee({
+        ...employee,
+        bankDetails: {
+          accountNumber,
+          ifscCode,
+          bankName,
+          accountHolderName,
+        },
+      });
+      setShowBankDetailsModal(false);
+      setIsEditingBankDetails(false);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to save bank details');
+    } finally {
+      setSavingBankDetails(false);
+    }
+  };
+
   // Read-only full detail for non-editors (self view). Edit controls stay gated by canEdit.
   // (Previously short-circuited to EmployeeProfileCardModal.)
 
@@ -1162,9 +1313,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 transition-all cursor-pointer group bg-white border border-slate-200 px-3 py-1.5 rounded-xl shadow-2xs"
+            className="flex items-center gap-1.5 text-xs font-bold text-[#5e6c7b] hover:text-[#172234] transition-all cursor-pointer group bg-white border border-[#dde4e9] px-3 py-1.5 rounded-[7px] shadow-2xs"
           >
-            <ChevronLeft className="h-4 w-4 text-slate-500 group-hover:text-slate-900 transition-colors" />
+            <ChevronLeft className="h-4 w-4 text-[#687789] group-hover:text-[#172234] transition-colors" />
             <span>Back to Employees</span>
           </button>
           {!canEdit && (
@@ -1180,7 +1331,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
         {/* ========================================================= */}
         {/* LEFT COLUMN: Employee Profile Card                        */}
         {/* ========================================================= */}
-        <div className="lg:col-span-4 xl:col-span-3 w-full bg-white rounded-3xl p-6 sm:p-7 shadow-xs space-y-5 text-slate-900 border border-slate-200">
+        <div className="lg:col-span-4 xl:col-span-3 w-full bg-white rounded-[12px] p-6 sm:p-7 shadow-xs space-y-5 text-[#172234] border border-[#dde4e9]">
           {/* Avatar & Edit Photo Option */}
           <div className="flex flex-col items-center text-center space-y-2">
             <div className="relative group">
@@ -1209,7 +1360,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     type="button"
                     onClick={() => avatarInputRef.current?.click()}
                     title="Change Profile Photo"
-                    className="absolute bottom-0 right-0 p-2 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-md border-2 border-white transition-all cursor-pointer flex items-center justify-center group-hover:scale-105"
+                    className="absolute bottom-0 right-0 p-2 rounded-full bg-[#17324e] hover:bg-[#285275] active:scale-95 text-white shadow-md border-2 border-white transition-all cursor-pointer flex items-center justify-center group-hover:scale-105"
                   >
                     <Camera className="w-3.5 h-3.5" />
                   </button>
@@ -1218,8 +1369,8 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
             </div>
 
             <div className="pt-2">
-              <h2 className="text-xl font-bold text-slate-900 tracking-tight">{employee.name}</h2>
-              <p className="text-xs text-slate-500 font-semibold mt-0.5">{employee.designation || (isSuperAdmin ? 'Founder & CEO' : '—')}</p>
+              <h2 className="text-xl font-bold text-[#172234] tracking-tight">{employee.name}</h2>
+              <p className="text-xs text-[#5e6c7b] font-semibold mt-0.5">{employee.designation || (isSuperAdmin ? 'Founder & CEO' : '—')}</p>
             </div>
 
             {/* Status Pill (Clickable for Admin/HR) */}
@@ -1251,6 +1402,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 {canEdit && <Edit2 className="w-2.5 h-2.5 opacity-60 ml-0.5" />}
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowIdCard(true)}
+              className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-[7px] border border-[#dde4e9] bg-white px-3 py-2 text-xs font-semibold text-[#172234] hover:bg-[#f3f5f7] cursor-pointer"
+            >
+              <CreditCard className="h-3.5 w-3.5 text-[#2d628e]" />
+              Print ID card
+            </button>
           </div>
 
           {/* Divider */}
@@ -1290,11 +1450,22 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           <div className="space-y-4 text-xs">
             {/* Department */}
             <div>
-              <p className="text-[11px] font-semibold text-slate-400">Department & Team</p>
-              <p className="font-bold text-slate-900 mt-0.5">
-                {employee.department || '—'}
-                {employee.team ? ` • ${employee.team}` : ''}
-              </p>
+              <p className="text-[11px] font-semibold text-[#687789]">Department & Team</p>
+              {employee.department && onOpenDepartment ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenDepartment(employee.department)}
+                  className="font-bold text-[#17324e] mt-0.5 hover:underline text-left cursor-pointer"
+                >
+                  {employee.department}
+                  {employee.team ? ` • ${employee.team}` : ''}
+                </button>
+              ) : (
+                <p className="font-bold text-[#172234] mt-0.5">
+                  {employee.department || '—'}
+                  {employee.team ? ` • ${employee.team}` : ''}
+                </p>
+              )}
             </div>
 
             {/* Office */}
@@ -1432,16 +1603,16 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
         {/* ========================================================= */}
         <div className="lg:col-span-8 xl:col-span-9 space-y-6">
           {/* Top Tab Bar */}
-          <div className="flex items-center gap-6 sm:gap-8 border-b border-slate-200 overflow-x-auto scrollbar-none pb-0 bg-white px-6 pt-3 rounded-3xl shadow-xs">
+          <div className="flex items-center gap-6 sm:gap-8 border-b border-[#dde4e9] overflow-x-auto scrollbar-none pb-0 bg-white px-6 pt-3 rounded-[12px] shadow-xs">
             {(
               [
-                { id: 'general', label: 'General' },
-                { id: 'job', label: 'Job & Role' },
-                { id: 'attendance_leave', label: 'Attendance & Leaves' },
-                { id: 'payroll', label: 'Payroll' },
-                { id: 'documents', label: 'Documents' },
-                { id: 'setting', label: 'Settings' },
-              ] as const
+                { id: 'general' as const, label: 'General' },
+                { id: 'job' as const, label: 'Job & Role' },
+                { id: 'attendance_leave' as const, label: 'Attendance & Leaves' },
+                { id: 'payroll' as const, label: 'Payroll' },
+                { id: 'documents' as const, label: 'Documents' },
+                { id: 'setting' as const, label: 'Settings' },
+              ].filter((tab) => tab.id !== 'payroll' || canEdit)
             ).map((tab) => {
               const isActive = activeTab === tab.id;
               return (
@@ -1450,8 +1621,8 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   onClick={() => setActiveTab(tab.id)}
                   className={`border-b-2 px-1 pb-3 text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                     isActive
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-400 hover:text-slate-700'
+                      ? 'border-[#17324e] text-[#17324e]'
+                      : 'border-transparent text-[#687789] hover:text-[#172234]'
                   }`}
                 >
                   {tab.label}
@@ -1467,7 +1638,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
             <div className="space-y-6">
               {/* Account Not Activated Alert Banner */}
               {!isActivated && (
-                <div className="bg-amber-50/90 border border-amber-200 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 shadow-xs animate-in fade-in">
+                <div className="bg-[#fbf6ea] border border-[#ead9a8] rounded-[12px] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 shadow-xs animate-in fade-in">
                   <div className="flex items-start sm:items-center gap-3">
                     <div className="h-9 w-9 rounded-2xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-700 shrink-0">
                       <AlertTriangle className="h-4.5 w-4.5" />
@@ -1492,7 +1663,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       <button
                         type="button"
                         onClick={handleActivateManually}
-                        className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all cursor-pointer flex items-center gap-1.5 text-xs shadow-2xs"
+                        className="px-3.5 py-1.5 rounded-[7px] bg-[#53886b] hover:bg-[#46725a] text-white font-bold transition-all cursor-pointer flex items-center gap-1.5 text-xs shadow-2xs"
                       >
                         <CheckCircle className="w-3.5 h-3.5" />
                         <span>Activate Now</span>
@@ -1503,9 +1674,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               )}
 
               {/* Section 1: Personal Info Card */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Personal Information</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 shadow-xs text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#f3f5f7]">
+                  <h3 className="text-[15px] font-bold text-[#172234] tracking-tight">Personal Information</h3>
                   {canEdit && (
                     <button
                       onClick={() => setIsEditingPersonalInfo(!isEditingPersonalInfo)}
@@ -1722,9 +1893,156 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer transition-all shadow-xs text-xs"
+                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold cursor-pointer transition-all shadow-xs text-xs"
                       >
                         Save Changes
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+
+              {/* Section 1b: Bank Details */}
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 shadow-xs text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#f3f5f7]">
+                  <h3 className="text-[15px] font-bold text-[#172234] tracking-tight">Bank Details</h3>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={handleStartBankEdit}
+                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f3f5f7] transition-colors cursor-pointer"
+                      title={isEditingBankDetails ? 'Cancel' : 'Edit bank details'}
+                    >
+                      <Edit2 className="w-4 h-4" strokeWidth={1.75} />
+                    </button>
+                  )}
+                </div>
+
+                {!isEditingBankDetails ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 pt-1 text-xs">
+                    <div className="space-y-3.5">
+                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                        <span className="text-[#687789] font-semibold">Account holder</span>
+                        <span className="font-bold text-[#172234] truncate">
+                          {blankBankValue(employee.bankDetails?.accountHolderName) || employee.fullName || employee.name || '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                        <span className="text-[#687789] font-semibold">Bank name</span>
+                        <span className="font-bold text-[#172234] truncate">
+                          {blankBankValue(employee.bankDetails?.bankName) || '—'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-3.5">
+                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                        <span className="text-[#687789] font-semibold">Account number</span>
+                        <span className="font-bold text-[#172234] font-mono">
+                          {(() => {
+                            const accountNumber = blankBankValue(employee.bankDetails?.accountNumber);
+                            return accountNumber ? `•••• ${accountNumber.slice(-4)}` : '—';
+                          })()}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
+                        <span className="text-[#687789] font-semibold">IFSC / routing</span>
+                        <span className="font-bold text-[#172234] font-mono">
+                          {blankBankValue(employee.bankDetails?.ifscCode) || '—'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSaveBankDetails} className="space-y-3.5 text-xs pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="block text-[#5e6c7b] font-bold mb-1">Account holder name</label>
+                        <input
+                          type="text"
+                          required
+                          value={formAccountHolderName}
+                          onChange={(e) => setFormAccountHolderName(e.target.value)}
+                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[#5e6c7b] font-bold mb-1">Bank name</label>
+                        <select
+                          required
+                          value={MAJOR_BANKS.includes(formBankName) ? formBankName : formBankName ? 'Other Bank' : ''}
+                          onChange={(e) => {
+                            const selected = e.target.value;
+                            if (selected === 'Other Bank') {
+                              setFormBankName('');
+                            } else {
+                              setFormBankName(selected);
+                              if (!formIfscCode) {
+                                const prefix = suggestIfscPrefix(selected);
+                                if (prefix) setFormIfscCode(prefix);
+                              }
+                            }
+                          }}
+                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs cursor-pointer"
+                        >
+                          <option value="">Select bank...</option>
+                          {MAJOR_BANKS.map((bank) => (
+                            <option key={bank} value={bank}>
+                              {bank}
+                            </option>
+                          ))}
+                        </select>
+                        {(!MAJOR_BANKS.includes(formBankName) || formBankName === '') && (
+                          <input
+                            type="text"
+                            value={formBankName}
+                            onChange={(e) => setFormBankName(e.target.value)}
+                            placeholder="Specify bank name..."
+                            className="w-full mt-1.5 rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs"
+                          />
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-[#5e6c7b] font-bold mb-1">Account number</label>
+                        <input
+                          type="text"
+                          required
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={18}
+                          value={formAccountNumber}
+                          onChange={(e) => setFormAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 18))}
+                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[#5e6c7b] font-bold mb-1">IFSC / routing code</label>
+                        <input
+                          type="text"
+                          required
+                          maxLength={11}
+                          value={formIfscCode}
+                          onChange={(e) =>
+                            setFormIfscCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11))
+                          }
+                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs uppercase font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#f3f5f7]">
+                      <button
+                        type="button"
+                        disabled={savingBankDetails}
+                        onClick={() => setIsEditingBankDetails(false)}
+                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] font-bold text-[#17324e] hover:bg-[#f3f5f7] cursor-pointer text-xs disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingBankDetails}
+                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold shadow-xs cursor-pointer text-xs disabled:opacity-50"
+                      >
+                        {savingBankDetails ? 'Saving…' : 'Save bank details'}
                       </button>
                     </div>
                   </form>
@@ -1735,7 +2053,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                   <h3 className="text-base font-bold text-slate-900 tracking-tight">Residential Address</h3>
-                  {canEdit && (
+                  {canEditAddress && (
                     <button
                       onClick={() => setIsEditingAddress(!isEditingAddress)}
                       className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
@@ -1973,7 +2291,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Designation</span>
+                      <span className="text-[11px] text-slate-400 font-semibold block">Job Role</span>
                       <span className="font-bold text-slate-900 mt-1 block truncate">
                         {employee.designation || '—'}
                       </span>
@@ -2579,8 +2897,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </h4>
                     <p className="text-xs text-slate-400 mt-0.5">
                       {effectiveQuotas.isMonthlyCycle
-                        ? `Monthly Accrual Policy (Month ${effectiveQuotas.monthsElapsed} of 12 elapsed in ${new Date().getFullYear()})`
-                        : `Annual Quota Policy (Calendar Year ${new Date().getFullYear()})`}
+                        ? effectiveQuotas.enableMonthlyRollover
+                          ? `Monthly grant with unused rollover (month ${effectiveQuotas.monthsElapsed} of 12 in ${new Date().getFullYear()})`
+                          : `Monthly grant — unused days expire each month (month ${effectiveQuotas.monthsElapsed} of 12)`
+                        : `Yearly quota (calendar year ${new Date().getFullYear()})`}
                     </p>
                   </div>
 
@@ -2881,7 +3201,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {/* ===================================================== */}
           {/* TAB 3: PAYROLL & SALARY GROUP STRUCTURE               */}
           {/* ===================================================== */}
-          {activeTab === 'payroll' && (
+          {activeTab === 'payroll' && canEdit && (
             <div className="space-y-6">
               {/* Header with Edit Action */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -3225,8 +3545,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         </label>
                         <input
                           type="number"
-                          value={formHourlyRate}
-                          onChange={(e) => setFormHourlyRate(Number(e.target.value))}
+                          min={0}
+                          value={moneyInputValue(formHourlyRate)}
+                          onChange={(e) => setFormHourlyRate(parseMoneyInput(e.target.value))}
+                          placeholder="0"
                           className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold"
                         />
                       </div>
@@ -3264,11 +3586,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <input
                               type="number"
                               min={0}
-                              value={formBaseSalary}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                setFormBaseSalary(val);
-                              }}
+                              value={moneyInputValue(formBaseSalary)}
+                              onChange={(e) => setFormBaseSalary(parseMoneyInput(e.target.value))}
+                              placeholder="0"
                               className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold"
                             />
                           </div>
@@ -3301,8 +3621,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <input
                               type="number"
                               min={0}
-                              value={formHra}
-                              onChange={(e) => setFormHra(Number(e.target.value))}
+                              value={moneyInputValue(formHra)}
+                              onChange={(e) => setFormHra(parseMoneyInput(e.target.value))}
+                              placeholder="0"
                               className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
                             />
                           </div>
@@ -3318,8 +3639,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <input
                               type="number"
                               min={0}
-                              value={formSpecialAllowance}
-                              onChange={(e) => setFormSpecialAllowance(Number(e.target.value))}
+                              value={moneyInputValue(formSpecialAllowance)}
+                              onChange={(e) => setFormSpecialAllowance(parseMoneyInput(e.target.value))}
+                              placeholder="0"
                               className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
                             />
                           </div>
@@ -3341,8 +3663,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <input
                               type="number"
                               min={0}
-                              value={formConveyanceAllowance}
-                              onChange={(e) => setFormConveyanceAllowance(Number(e.target.value))}
+                              value={moneyInputValue(formConveyanceAllowance)}
+                              onChange={(e) => setFormConveyanceAllowance(parseMoneyInput(e.target.value))}
+                              placeholder="0"
                               className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
                             />
                           </div>
@@ -3364,8 +3687,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <input
                               type="number"
                               min={0}
-                              value={formMedicalAllowance}
-                              onChange={(e) => setFormMedicalAllowance(Number(e.target.value))}
+                              value={moneyInputValue(formMedicalAllowance)}
+                              onChange={(e) => setFormMedicalAllowance(parseMoneyInput(e.target.value))}
+                              placeholder="0"
                               className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
                             />
                           </div>
@@ -3381,8 +3705,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <input
                               type="number"
                               min={0}
-                              value={formOtherAllowances}
-                              onChange={(e) => setFormOtherAllowances(Number(e.target.value))}
+                              value={moneyInputValue(formOtherAllowances)}
+                              onChange={(e) => setFormOtherAllowances(parseMoneyInput(e.target.value))}
+                              placeholder="0"
                               className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
                             />
                           </div>
@@ -3435,12 +3760,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                     <input
                                       type="number"
                                       min={0}
-                                      value={alw.amount}
+                                      value={moneyInputValue(alw.amount)}
                                       onChange={(e) => {
                                         const updated = [...formCustomAllowances];
-                                        updated[index].amount = Number(e.target.value);
+                                        updated[index].amount = parseMoneyInput(e.target.value);
                                         setFormCustomAllowances(updated);
                                       }}
+                                      placeholder="0"
                                       className="w-full pl-6 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none font-bold text-slate-900"
                                     />
                                   </div>
@@ -3490,8 +3816,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <input
                               type="number"
                               min={0}
-                              value={formPfDeduction}
-                              onChange={(e) => setFormPfDeduction(Number(e.target.value))}
+                              value={moneyInputValue(formPfDeduction)}
+                              onChange={(e) => setFormPfDeduction(parseMoneyInput(e.target.value))}
+                              placeholder="0"
                               className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
                             />
                           </div>
@@ -3513,8 +3840,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <input
                               type="number"
                               min={0}
-                              value={formProfessionalTax}
-                              onChange={(e) => setFormProfessionalTax(Number(e.target.value))}
+                              value={moneyInputValue(formProfessionalTax)}
+                              onChange={(e) => setFormProfessionalTax(parseMoneyInput(e.target.value))}
+                              placeholder="0"
                               className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
                             />
                           </div>
@@ -3536,8 +3864,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <input
                               type="number"
                               min={0}
-                              value={formTaxDeduction}
-                              onChange={(e) => setFormTaxDeduction(Number(e.target.value))}
+                              value={moneyInputValue(formTaxDeduction)}
+                              onChange={(e) => setFormTaxDeduction(parseMoneyInput(e.target.value))}
+                              placeholder="0"
                               className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
                             />
                           </div>
@@ -3870,9 +4199,21 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
                         {/* Statutory Identifiers Card */}
                         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
-                          <h4 className="text-xs font-bold text-slate-900 mb-3">
-                            Statutory & Account Identifiers
-                          </h4>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-xs font-bold text-slate-900">
+                              Statutory & Account Identifiers
+                            </h4>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={handleOpenBankDetailsModal}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
+                                title="Edit bank details"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                              </button>
+                            )}
+                          </div>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
                             <div>
                               <span className="text-slate-400 block text-[11px]">PAN / Tax ID</span>
@@ -3894,11 +4235,24 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             </div>
                             <div>
                               <span className="text-slate-400 block text-[11px]">Salary Bank Account</span>
-                              <span className="font-medium text-slate-800">
-                                {employee.bankDetails?.accountNumber
-                                  ? `${employee.bankDetails.bankName || 'Bank'} (•••• ${employee.bankDetails.accountNumber.slice(-4)})`
-                                  : '—'}
-                              </span>
+                              {(() => {
+                                const accountNumber = blankBankValue(employee.bankDetails?.accountNumber);
+                                const bankName = blankBankValue(employee.bankDetails?.bankName) || 'Bank';
+                                const masked = accountNumber
+                                  ? `${bankName} (•••• ${accountNumber.slice(-4)})`
+                                  : 'Not on file';
+                                return canEdit ? (
+                                  <button
+                                    type="button"
+                                    onClick={handleOpenBankDetailsModal}
+                                    className="font-medium text-slate-800 hover:text-blue-700 text-left cursor-pointer underline-offset-2 hover:underline"
+                                  >
+                                    {masked}
+                                  </button>
+                                ) : (
+                                  <span className="font-medium text-slate-800">{masked}</span>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>
@@ -4019,7 +4373,11 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           <button
                             onClick={() => {
                               const blob = new Blob([`Official Record: ${doc.name}\nBelonging to: ${employee.name}`], { type: 'text/plain' });
-                              void downloadBlob(blob, doc.name);
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = doc.name;
+                              a.click();
                             }}
                             className="p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-white transition-colors cursor-pointer"
                             title="Download Document"
@@ -4087,10 +4445,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             <td className="p-3 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 <button
-                                  onClick={() => setPreviewPayslip(ps)}
+                                  onClick={() => setPayslipToPrint(ps)}
                                   className="px-3 py-1 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold transition-colors cursor-pointer"
                                 >
-                                  View PDF
+                                  Print
                                 </button>
                                 {canEdit && (
                                   <button
@@ -4249,21 +4607,115 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
       {/* MODALS (Only operable by HR / Super Admin)                 */}
       {/* ========================================================= */}
 
+      {/* Bank Details Modal */}
+      {showBankDetailsModal && canEdit && (
+        <SlideOverDrawer
+          title="Salary Bank Details"
+          onClose={() => !savingBankDetails && setShowBankDetailsModal(false)}
+        >
+            <form onSubmit={handleSaveBankDetails} className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className={slideOverBodyClass}>
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Account holder name</label>
+                <input
+                  type="text"
+                  required
+                  value={formAccountHolderName}
+                  onChange={(e) => setFormAccountHolderName(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Bank name</label>
+                <select
+                  required
+                  value={MAJOR_BANKS.includes(formBankName) ? formBankName : formBankName ? 'Other Bank' : ''}
+                  onChange={(e) => {
+                    const selected = e.target.value;
+                    if (selected === 'Other Bank') {
+                      setFormBankName('');
+                    } else {
+                      setFormBankName(selected);
+                      if (!formIfscCode) {
+                        const prefix = suggestIfscPrefix(selected);
+                        if (prefix) setFormIfscCode(prefix);
+                      }
+                    }
+                  }}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs cursor-pointer"
+                >
+                  <option value="">Select bank...</option>
+                  {MAJOR_BANKS.map((bank) => (
+                    <option key={bank} value={bank}>
+                      {bank}
+                    </option>
+                  ))}
+                </select>
+                {(!MAJOR_BANKS.includes(formBankName) || formBankName === '') && (
+                  <input
+                    type="text"
+                    value={formBankName}
+                    onChange={(e) => setFormBankName(e.target.value)}
+                    placeholder="Specify bank name..."
+                    className="w-full mt-1.5 rounded-2xl border border-slate-200 bg-white px-4 py-2 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Account number</label>
+                <input
+                  type="text"
+                  required
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={18}
+                  value={formAccountNumber}
+                  onChange={(e) => setFormAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 18))}
+                  placeholder="e.g. 50100234567890"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">IFSC / routing code</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={11}
+                  value={formIfscCode}
+                  onChange={(e) =>
+                    setFormIfscCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11))
+                  }
+                  placeholder="e.g. HDFC0001234"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs uppercase"
+                />
+              </div>
+
+              </div>
+              <div className={slideOverFooterClass}>
+                <button
+                  type="button"
+                  disabled={savingBankDetails}
+                  onClick={() => setShowBankDetailsModal(false)}
+                  className={slideOverCancelClass}
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={savingBankDetails} className={slideOverPrimaryClass}>
+                  {savingBankDetails ? 'Saving…' : 'Save bank details'}
+                </button>
+              </div>
+            </form>
+        </SlideOverDrawer>
+      )}
+
       {/* Add Job Timeline Modal */}
       {showAddJobTimelineModal && canEdit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200 p-6 shadow-2xl text-slate-900 space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-bold text-sm text-slate-900">Add Progression Milestone</h3>
-              <button
-                onClick={() => setShowAddJobTimelineModal(false)}
-                className="text-slate-400 hover:text-slate-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddJobTimeline} className="space-y-3.5 text-xs">
+        <SlideOverDrawer title="Add Progression Milestone" onClose={() => setShowAddJobTimelineModal(false)}>
+            <form onSubmit={handleAddJobTimeline} className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className={slideOverBodyClass}>
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Effective Date</label>
                 <input
@@ -4317,41 +4769,24 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 />
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowAddJobTimelineModal(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 font-bold text-slate-700 hover:bg-slate-50 cursor-pointer text-xs"
-                >
+              </div>
+              <div className={slideOverFooterClass}>
+                <button type="button" onClick={() => setShowAddJobTimelineModal(false)} className={slideOverCancelClass}>
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs cursor-pointer text-xs"
-                >
+                <button type="submit" className={slideOverPrimaryClass}>
                   Add Entry
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </SlideOverDrawer>
       )}
 
       {/* Add Contract Modal */}
       {showAddContractModal && canEdit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200 p-6 shadow-2xl text-slate-900 space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-bold text-sm text-slate-900">Add Contract Record</h3>
-              <button
-                onClick={() => setShowAddContractModal(false)}
-                className="text-slate-400 hover:text-slate-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddContract} className="space-y-3.5 text-xs">
+        <SlideOverDrawer title="Add Contract Record" onClose={() => setShowAddContractModal(false)}>
+            <form onSubmit={handleAddContract} className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className={slideOverBodyClass}>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Contract #</label>
@@ -4409,41 +4844,24 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowAddContractModal(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 font-bold text-slate-700 hover:bg-slate-50 cursor-pointer text-xs"
-                >
+              </div>
+              <div className={slideOverFooterClass}>
+                <button type="button" onClick={() => setShowAddContractModal(false)} className={slideOverCancelClass}>
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs cursor-pointer text-xs"
-                >
+                <button type="submit" className={slideOverPrimaryClass}>
                   Save Contract
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </SlideOverDrawer>
       )}
 
       {/* Add Payslip Modal */}
       {showAddPayslipModal && canEdit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200 p-6 shadow-2xl text-slate-900 space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-bold text-sm text-slate-900">Issue New Payslip</h3>
-              <button
-                onClick={() => setShowAddPayslipModal(false)}
-                className="text-slate-400 hover:text-slate-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddPayslip} className="space-y-3.5 text-xs">
+        <SlideOverDrawer title="Issue New Payslip" onClose={() => setShowAddPayslipModal(false)}>
+            <form onSubmit={handleAddPayslip} className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className={slideOverBodyClass}>
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Document File Name</label>
                 <input
@@ -4488,111 +4906,47 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 />
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowAddPayslipModal(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 font-bold text-slate-700 hover:bg-slate-50 cursor-pointer text-xs"
-                >
+              </div>
+              <div className={slideOverFooterClass}>
+                <button type="button" onClick={() => setShowAddPayslipModal(false)} className={slideOverCancelClass}>
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs cursor-pointer text-xs"
-                >
+                <button type="submit" className={slideOverPrimaryClass}>
                   Generate Payslip
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </SlideOverDrawer>
       )}
 
-      {/* Preview Payslip Modal */}
-      {previewPayslip && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-lg bg-white rounded-3xl border border-slate-200 p-7 shadow-2xl text-slate-900 space-y-5 animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-600" />
-                <h3 className="font-bold text-sm text-slate-900">{previewPayslip.name}</h3>
-              </div>
-              <button
-                onClick={() => setPreviewPayslip(null)}
-                className="text-slate-400 hover:text-slate-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {showIdCard && (
+        <IdCardStudio
+          key={employee.id}
+          title={isInstitution ? 'Staff ID card' : 'Employee ID card'}
+          roleFieldLabel="Designation"
+          audience="employee"
+          initial={buildEmployeeIdCardDraft(employee, state.organization)}
+          onClose={() => setShowIdCard(false)}
+        />
+      )}
 
-            <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 space-y-3.5 text-xs font-mono">
-              <div className="flex justify-between border-b border-slate-200/60 pb-2.5">
-                <span className="text-slate-500 font-sans font-semibold">Employee</span>
-                <span className="font-bold text-slate-900 font-sans">{employee.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-sans font-semibold">Period</span>
-                <span className="font-bold text-slate-900">{previewPayslip.period}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-sans font-semibold">Disbursed Date</span>
-                <span className="font-bold text-slate-900">{previewPayslip.date}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-sans font-semibold">Bank Account</span>
-                <span className="font-bold text-slate-900">{employee.bankDetails?.accountNumber || 'HDFC-918234100120'}</span>
-              </div>
-              <div className="flex justify-between border-t border-slate-200/80 pt-3 text-emerald-600 font-bold text-sm">
-                <span className="font-sans">Net Paid</span>
-                <span>{previewPayslip.amount}</span>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2.5 pt-2">
-              <button
-                onClick={() => setPreviewPayslip(null)}
-                className="px-4 py-2.5 rounded-2xl border border-slate-200 bg-white font-bold text-xs text-slate-700 hover:bg-slate-50 cursor-pointer"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => {
-                  const blob = new Blob(
-                    [
-                      `OFFICIAL PAYSLIP\n====================\nEmployee: ${employee.name}\nDesignation: ${employee.designation}\nPeriod: ${previewPayslip.period}\nDisbursed Date: ${previewPayslip.date}\nAmount: ${previewPayslip.amount}\nStatus: Paid`,
-                    ],
-                    { type: 'text/plain' }
-                  );
-                  void downloadBlob(blob, previewPayslip.name);
-                }}
-                className="px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5 text-white" />
-                <span>Download Payslip PDF</span>
-              </button>
-            </div>
-          </div>
-        </div>
+      {payslipToPrint && (
+        <PayslipStudio
+          key={payslipToPrint.id}
+          initial={buildPayslipDraftFromDocument(employee, payslipToPrint, state.organization)}
+          onClose={() => setPayslipToPrint(null)}
+        />
       )}
 
       {/* Change Employment Status Modal (Admin / HR) */}
       {showStatusModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-5 animate-in zoom-in-95 text-slate-900">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Change Employment Status</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Update status for {employee.name}</p>
-              </div>
-              <button
-                onClick={() => setShowStatusModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveStatusModal} className="space-y-4">
+        <SlideOverDrawer
+          title="Change Employment Status"
+          description={`Update status for ${employee.name}`}
+          onClose={() => setShowStatusModal(false)}
+        >
+            <form onSubmit={handleSaveStatusModal} className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className={slideOverBodyClass}>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">Employment Status</label>
                 <select
@@ -4677,24 +5031,17 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowStatusModal(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
-                >
+              </div>
+              <div className={slideOverFooterClass}>
+                <button type="button" onClick={() => setShowStatusModal(false)} className={slideOverCancelClass}>
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-semibold text-white cursor-pointer shadow-xs"
-                >
+                <button type="submit" className={slideOverPrimaryClass}>
                   Save Status
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </SlideOverDrawer>
       )}
     </div>
   );

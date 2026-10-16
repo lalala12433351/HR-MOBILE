@@ -1,18 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import {
-  X,
-  FileText,
-  Printer,
-  Calendar,
-  Filter,
-  CheckCircle2,
-  Clock,
-  Users,
-  Building2,
-  Layers,
-} from 'lucide-react';
+import { X, Printer } from 'lucide-react';
 import { AppState } from '@/services/store';
 
 interface AttendanceReportsModalProps {
@@ -532,149 +521,108 @@ export const AttendanceReportsModal: React.FC<AttendanceReportsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in">
-      <div className="w-full max-w-xl bg-white rounded-3xl border border-slate-200 p-6 space-y-5 shadow-2xl text-slate-900 animate-in zoom-in-95">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-              <FileText className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">
-                Export Attendance & HR Reports
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Generate high-definition, printable PDF reports with compliance formatting
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
-          >
+    <div className="att-overlay" role="presentation" onClick={onClose}>
+      <div className="att-dialog max-w-xl overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="att-dialog-head">
+          <h2>Export report</h2>
+          <button type="button" onClick={onClose} className="att-dialog-close" aria-label="Close">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Report Type Selector */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-bold text-slate-700">
-            Select Report Type
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { id: 'daily' as const, label: 'Daily Punch Log', desc: 'Punch in/out, hours & location' },
-              { id: 'monthly' as const, label: 'Monthly Summary', desc: 'Working days, punctuality %' },
-              { id: 'leaves' as const, label: 'Leaves & Balances', desc: 'Leave requests & quotas' },
-              { id: 'roster' as const, label: 'Roster Shifts Schedule', desc: 'Weekly rotational shift plan' },
-            ].map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setReportType(t.id)}
-                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                  reportType === t.id
-                    ? 'border-blue-600 bg-blue-50/50 shadow-xs ring-1 ring-blue-600/30'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
-                }`}
-              >
-                <div className="text-xs font-bold text-slate-900">{t.label}</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">{t.desc}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Parameters: Date / Month & Department Filter */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 p-3.5 rounded-2xl bg-slate-50/75 border border-slate-200 text-xs">
-          {reportType === 'daily' ? (
-            <div>
-              <label className="text-[11px] font-bold text-slate-600">Select Date</label>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
-              />
-            </div>
-          ) : (
-            <div>
-              <label className="text-[11px] font-bold text-slate-600">Select Month</label>
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="text-[11px] font-bold text-slate-600">Department Scope</label>
-            <select
-              value={selectedDepartment}
-              onChange={(e) => setSelectedDepartment(e.target.value)}
-              className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
-            >
-              {departments.map((dept) => (
-                <option key={dept} value={dept}>
-                  {dept === 'All' ? 'All Departments' : dept}
-                </option>
+        <div className="p-4 space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-[740] text-[var(--text-secondary)]">Report type</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'daily' as const, label: 'Daily punch log', desc: 'Punch in/out, hours, location' },
+                { id: 'monthly' as const, label: 'Monthly summary', desc: 'Working days and punctuality' },
+                { id: 'leaves' as const, label: 'Leaves and balances', desc: 'Requests and quotas' },
+                { id: 'roster' as const, label: 'Roster schedule', desc: 'Weekly shift plan' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setReportType(t.id)}
+                  className={`att-stat${reportType === t.id ? ' is-active' : ''}`}
+                >
+                  <div className="text-[13px] font-semibold text-[var(--text-primary)]">{t.label}</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">{t.desc}</div>
+                </button>
               ))}
-            </select>
+            </div>
           </div>
-        </div>
 
-        {/* Document Formatting Options */}
-        <div className="space-y-2 text-xs">
-          <label className="text-xs font-bold text-slate-700">Document Layout Options</label>
-          <div className="flex flex-wrap items-center gap-4 pt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {reportType === 'daily' ? (
+              <div>
+                <label className="text-[11px] font-[740] text-[var(--text-secondary)]">Date</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="work-field mt-1 w-full"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-[11px] font-[740] text-[var(--text-secondary)]">Month</label>
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="work-field mt-1 w-full"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="text-[11px] font-[740] text-[var(--text-secondary)]">Department</label>
+              <select
+                value={selectedDepartment}
+                onChange={(e) => setSelectedDepartment(e.target.value)}
+                className="work-field mt-1 w-full"
+              >
+                {departments.map((dept) => (
+                  <option key={dept} value={dept}>
+                    {dept === 'All' ? 'All departments' : dept}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-[13px]">
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={includeSummaryKPIs}
                 onChange={(e) => setIncludeSummaryKPIs(e.target.checked)}
-                className="rounded text-blue-600 cursor-pointer"
               />
-              <span className="text-slate-700 font-medium">Include KPI Statistics Strip</span>
+              <span className="text-[var(--text-secondary)]">Include summary counts</span>
             </label>
-
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={includeSignatureBlock}
                 onChange={(e) => setIncludeSignatureBlock(e.target.checked)}
-                className="rounded text-blue-600 cursor-pointer"
               />
-              <span className="text-slate-700 font-medium">Include Authorization Sign-off Block</span>
+              <span className="text-[var(--text-secondary)]">Include sign-off block</span>
             </label>
           </div>
         </div>
 
-        {/* Summary Info & Action Buttons */}
-        <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-          <span className="text-xs text-slate-500 font-medium">
-            {filteredEmployees.length} staff records included
+        <div className="att-dialog-foot">
+          <span className="text-[12px] text-[var(--text-muted)]">
+            {filteredEmployees.length} staff records
           </span>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
-            >
+          <div className="flex items-center gap-2 ml-auto">
+            <button type="button" onClick={onClose} className="work-btn-secondary">
               Cancel
             </button>
-            <button
-              type="button"
-              onClick={handleExportPDF}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs"
-              style={{ color: '#ffffff' }}
-            >
+            <button type="button" onClick={handleExportPDF} className="work-btn-primary">
               <Printer className="w-3.5 h-3.5" />
-              <span>Export PDF Report</span>
+              Export PDF
             </button>
           </div>
         </div>

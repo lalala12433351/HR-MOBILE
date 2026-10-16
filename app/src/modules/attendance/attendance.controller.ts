@@ -4,10 +4,12 @@ import {
   applyEmployeeScopeFilter,
   canAccessEmployee,
   getAccessScope,
+  getManageableEmployeeIds,
   isOrgWideRole,
   resolveCallerEmployee,
 } from '../../utils/employeeScope.js';
 import { withTenantContext } from '../../db/queryRunner.js';
+import { isManagerOf } from '../../utils/orgLeads.js';
 import {
   adjustLeaveBalance,
   assertSufficientBalance,
@@ -16,9 +18,26 @@ import {
   ensureLeaveBalance,
   ensureLeaveBalancesBatch,
   isDebitableLeaveType,
-  serializeBalance,
+  loadConsumedDaysBatch,
+  serializeBalances,
   withTenantTransaction,
 } from './leaveBalances.js';
+import {
+  applyAutoClockOut,
+  assertClockingDeviceAllowed,
+  clientIp,
+  createOfficeQrToken,
+  ensurePunchPhotoColumn,
+  findOpenCheckIn,
+  isGeofenceRequired,
+  isIpAllowed,
+  isRemoteAttendanceDevice,
+  loadAttendancePolicy,
+  officeAllowsQr,
+  officePolicyFor,
+  selfieLooksPresent,
+  verifyOfficeQrToken,
+} from './attendancePolicy.js';
 
 // Haversine formula to determine distance in meters between user punch coordinates and office coordinates
 function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -45,6 +64,9 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
       checkInTime,
       checkOutTime,
       attendanceStatus,
+      selfiePhoto,
+      qrToken,
+      workFromHome,
     } = req.body;
 
     // Non-admin users may only punch for themselves
@@ -184,9 +206,82 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    const policy = await loadAttendancePolicy(req);
+    try {
+      await applyAutoClockOut(req, validEmpId, policy);
+    } catch (autoErr) {
+      console.warn('Auto clock-out skipped:', autoErr);
+    }
+    const hasSelfieColumn = await ensurePunchPhotoColumn(req);
+
+    const ipAddress = clientIp(req) || '127.0.0.1';
+    if (!isIpAllowed(policy, ipAddress)) {
+      res.status(403).json({
+        success: false,
+        error: {
+          code: 'IP_NOT_ALLOWED',
+          message: 'This network is not on the office Wi-Fi allowlist. Connect to an approved network or ask HR to update Attendance Settings.',
+        },
+      });
+      return;
+    }
+
+    const isRemote = workFromHome === true || String(deviceInfo || '').toLowerCase().includes('wfh') || String(deviceInfo || '').toLowerCase().includes('remote');
+    const usedQr = Boolean(qrToken);
+    if (usedQr) {
+      if (!officeAllowsQr(policy, office)) {
+        res.status(403).json({
+          success: false,
+          error: { code: 'QR_DISABLED', message: 'QR attendance is not enabled for this office.' },
+        });
+        return;
+      }
+      const qr = verifyOfficeQrToken(String(qrToken), String(req.tenant?.id || req.dbSchema || ''), office.id);
+      if (!qr.ok) {
+        res.status(400).json({
+          success: false,
+          error: { code: 'QR_INVALID', message: qr.message },
+        });
+        return;
+      }
+    }
+
+    const deviceGate = assertClockingDeviceAllowed(policy, office, req, usedQr);
+    if (!deviceGate.ok) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'DEVICE_NOT_ALLOWED', message: deviceGate.message },
+      });
+      return;
+    }
+
     const latRaw = latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : NaN;
     const lngRaw = longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : NaN;
-    if (!Number.isFinite(latRaw) || !Number.isFinite(lngRaw)) {
+    const geofenceRequired = isGeofenceRequired(policy, office, isRemote) && !usedQr;
+    const validPunchType = String(punchType).toLowerCase().trim() === 'check_out' ? 'check_out' : 'check_in';
+
+    const selfieRequired =
+      validPunchType === 'check_out' ? policy.requireSelfieCheckOut : policy.requireSelfieCheckIn;
+    if (selfieRequired && !selfieLooksPresent(selfiePhoto)) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'SELFIE_REQUIRED',
+          message:
+            validPunchType === 'check_out'
+              ? 'A check-out selfie is required by attendance policy.'
+              : 'A check-in selfie is required by attendance policy.',
+        },
+      });
+      return;
+    }
+
+    validOfficeId = office.id;
+    const officeLat = Number(office.latitude);
+    const officeLng = Number(office.longitude);
+    const officeHasCoords = Number.isFinite(officeLat) && Number.isFinite(officeLng);
+
+    if (geofenceRequired && (!Number.isFinite(latRaw) || !Number.isFinite(lngRaw))) {
       res.status(400).json({
         success: false,
         error: {
@@ -196,14 +291,8 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
       });
       return;
     }
-    const latNum = latRaw;
-    const lngNum = lngRaw;
-    const validPunchType = String(punchType).toLowerCase().trim() === 'check_out' ? 'check_out' : 'check_in';
 
-    validOfficeId = office.id;
-    const officeLat = Number(office.latitude);
-    const officeLng = Number(office.longitude);
-    if (!Number.isFinite(officeLat) || !Number.isFinite(officeLng)) {
+    if (geofenceRequired && !officeHasCoords) {
       res.status(400).json({
         success: false,
         error: {
@@ -213,10 +302,32 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
       });
       return;
     }
-    distanceMeters = calculateDistanceMeters(latNum, lngNum, officeLat, officeLng);
-    isWithinGeofence = distanceMeters <= (office.geofence_radius_meters || 100);
 
-    const ipAddress = req.ip || req.socket?.remoteAddress || '127.0.0.1';
+    const latNum = Number.isFinite(latRaw) ? latRaw : officeHasCoords ? officeLat : 0;
+    const lngNum = Number.isFinite(lngRaw) ? lngRaw : officeHasCoords ? officeLng : 0;
+
+    if (geofenceRequired && officeHasCoords) {
+      const match = officePolicyFor(policy, office);
+      const radius =
+        Number(match?.radiusMeters) || Number(office.geofence_radius_meters) || policy.geofenceRadiusMeters || 100;
+      distanceMeters = Math.min(999999.99, calculateDistanceMeters(latNum, lngNum, officeLat, officeLng));
+      isWithinGeofence = distanceMeters <= radius;
+      if (!isWithinGeofence && policy.outOfRadiusAction === 'Block') {
+        res.status(403).json({
+          success: false,
+          error: {
+            code: 'GEOFENCE_VIOLATION',
+            message: `Punch blocked: you are ${distanceMeters}m from ${office.name || 'the office'} (limit ${radius}m).`,
+            distanceMeters,
+            radiusMeters: radius,
+          },
+        });
+        return;
+      }
+    } else {
+      distanceMeters = 0;
+      isWithinGeofence = true;
+    }
 
     // Calculate server-derived logged hours if checkIn and checkOut timestamps provided
     let loggedHours = 0;
@@ -232,18 +343,51 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
       statusEnum = loggedHours >= 7.5 ? 'PRESENT' : loggedHours >= 3.5 ? 'HALF_DAY' : 'PRESENT';
     }
 
-    const result = await req.tenantQuery!(
-      `INSERT INTO attendance_punches (
-        employee_id, office_id, punch_type, latitude, longitude, distance_from_office_meters, is_within_geofence, device_info, ip_address
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING *`,
-      [validEmpId, validOfficeId, validPunchType, latNum, lngNum, distanceMeters, isWithinGeofence, deviceInfo || null, ipAddress]
-    );
+    const photo = selfieLooksPresent(selfiePhoto) ? String(selfiePhoto) : null;
+    const result = hasSelfieColumn
+      ? await req.tenantQuery!(
+          `INSERT INTO attendance_punches (
+            employee_id, office_id, punch_type, latitude, longitude, distance_from_office_meters, is_within_geofence, device_info, ip_address, selfie_photo
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           RETURNING *`,
+          [
+            validEmpId,
+            validOfficeId,
+            validPunchType,
+            latNum,
+            lngNum,
+            distanceMeters,
+            isWithinGeofence,
+            deviceInfo || null,
+            ipAddress,
+            photo,
+          ]
+        )
+      : await req.tenantQuery!(
+          `INSERT INTO attendance_punches (
+            employee_id, office_id, punch_type, latitude, longitude, distance_from_office_meters, is_within_geofence, device_info, ip_address
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING *`,
+          [
+            validEmpId,
+            validOfficeId,
+            validPunchType,
+            latNum,
+            lngNum,
+            distanceMeters,
+            isWithinGeofence,
+            deviceInfo || null,
+            ipAddress,
+          ]
+        );
 
+    const saved = result.rows[0] || {};
+    const { selfie_photo: _omitSelfie, ...savedPublic } = saved;
     res.status(201).json({
       success: true,
       data: {
-        ...result.rows[0],
+        ...savedPublic,
+        hasSelfie: Boolean(_omitSelfie),
         checkInTime: checkInTime || null,
         checkOutTime: checkOutTime || null,
         loggedHours,
@@ -253,6 +397,7 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
         isWithinGeofence,
         distanceMeters,
         officeName: office?.name || 'Office',
+        enforced: geofenceRequired,
       },
     });
   } catch (err: any) {
@@ -261,13 +406,256 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
   }
 }
 
+export async function verifyWorkplaceLocation(req: Request, res: Response): Promise<void> {
+  try {
+    const me = await resolveCallerEmployee(req);
+    if (!me?.id) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Unable to resolve your employee record.' },
+      });
+      return;
+    }
+
+    const lat = Number(req.body?.latitude);
+    const lng = Number(req.body?.longitude);
+    const accuracy = Number(req.body?.accuracy);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'LOCATION_REQUIRED', message: 'Device latitude and longitude are required.' },
+      });
+      return;
+    }
+
+    const policy = await loadAttendancePolicy(req);
+    try {
+      await applyAutoClockOut(req, me.id, policy);
+    } catch (autoErr) {
+      console.warn('Auto clock-out skipped:', autoErr);
+    }
+
+    const open = await findOpenCheckIn(req, me.id);
+    if (!open) {
+      res.json({
+        success: true,
+        data: { clockedIn: false, clockedOut: false },
+      });
+      return;
+    }
+
+    if (isRemoteAttendanceDevice(open.device_info)) {
+      res.json({
+        success: true,
+        data: { clockedIn: true, clockedOut: false, skipped: true, reason: 'remote' },
+      });
+      return;
+    }
+
+    const offices: any[] = [];
+    const seen = new Set<string>();
+    const pushOffice = (row: any) => {
+      if (!row?.id) return;
+      const id = String(row.id);
+      if (seen.has(id)) return;
+      seen.add(id);
+      offices.push(row);
+    };
+
+    if (open.office_id) {
+      const punchOffice = await req.tenantQuery!(
+        `SELECT * FROM offices WHERE id = $1 AND is_active = true LIMIT 1`,
+        [open.office_id]
+      );
+      pushOffice(punchOffice.rows[0]);
+    }
+
+    try {
+      const assigned = await req.tenantQuery!(
+        `SELECT o.* FROM employee_offices eo
+         JOIN offices o ON o.id = eo.office_id
+         WHERE eo.employee_id = $1 AND o.is_active = true`,
+        [me.id]
+      );
+      assigned.rows.forEach(pushOffice);
+    } catch {
+      // Junction table may be missing on older tenants.
+    }
+
+    const workplaces = offices.filter((office) => {
+      const officeLat = Number(office.latitude);
+      const officeLng = Number(office.longitude);
+      return Number.isFinite(officeLat) && Number.isFinite(officeLng) && officeLat !== 0 && officeLng !== 0;
+    });
+
+    if (workplaces.length === 0) {
+      res.json({
+        success: true,
+        data: { clockedIn: true, clockedOut: false, skipped: true, reason: 'no_office_coords' },
+      });
+      return;
+    }
+
+    const gpsSlack = Number.isFinite(accuracy) ? Math.min(50, Math.max(0, accuracy)) : 0;
+    let best: { office: any; distanceMeters: number; radius: number; within: boolean } | null = null;
+    for (const office of workplaces) {
+      const match = officePolicyFor(policy, office);
+      const radius =
+        Number(match?.radiusMeters) ||
+        Number(office.geofence_radius_meters) ||
+        policy.geofenceRadiusMeters ||
+        150;
+      const distanceMeters = Math.min(
+        999999.99,
+        calculateDistanceMeters(lat, lng, Number(office.latitude), Number(office.longitude))
+      );
+      const within = distanceMeters <= radius + gpsSlack;
+      if (!best || distanceMeters < best.distanceMeters) {
+        best = { office, distanceMeters, radius, within };
+      }
+      if (within) {
+        best = { office, distanceMeters, radius, within };
+        break;
+      }
+    }
+
+    if (best?.within) {
+      res.json({
+        success: true,
+        data: {
+          clockedIn: true,
+          clockedOut: false,
+          isWithinGeofence: true,
+          distanceMeters: best.distanceMeters,
+          radiusMeters: best.radius,
+          officeName: best.office.name || 'Office',
+        },
+      });
+      return;
+    }
+
+    const distanceMeters = best?.distanceMeters || 0;
+    const radiusMeters = best?.radius || policy.geofenceRadiusMeters || 150;
+    const officeName = best?.office?.name || 'the office';
+    const ipAddress = clientIp(req) || '127.0.0.1';
+
+    await req.tenantQuery!(
+      `INSERT INTO attendance_punches (
+         employee_id, office_id, punch_type, punch_timestamp, latitude, longitude,
+         distance_from_office_meters, is_within_geofence, device_info, ip_address
+       ) VALUES ($1, $2, 'check_out', NOW(), $3, $4, $5, false, $6, $7)`,
+      [
+        open.employee_id,
+        open.office_id,
+        lat,
+        lng,
+        distanceMeters,
+        'Auto Clock-Out · Left workplace',
+        ipAddress,
+      ]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        clockedIn: false,
+        clockedOut: true,
+        isWithinGeofence: false,
+        distanceMeters,
+        radiusMeters,
+        officeName,
+        message: `Clocked out because you are ${Math.round(distanceMeters)}m from ${officeName} (limit ${radiusMeters}m). Punch in again when you return.`,
+      },
+    });
+  } catch (err: any) {
+    console.error('Error verifying workplace location:', err);
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
+export async function getOfficeQrToken(req: Request, res: Response): Promise<void> {
+  try {
+    const policy = await loadAttendancePolicy(req);
+    if (!policy.allowQrCodeAttendance) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'QR_DISABLED', message: 'QR attendance is disabled in Attendance Settings.' },
+      });
+      return;
+    }
+
+    const officeId = String(req.query.officeId || '');
+    let office: any = null;
+    if (officeId) {
+      const officeRes = await req.tenantQuery!(
+        `SELECT * FROM offices WHERE (id::text = $1 OR code = $1) AND is_active = true LIMIT 1`,
+        [officeId]
+      );
+      office = officeRes.rows[0] || null;
+    }
+    if (!office) {
+      const fallback = await req.tenantQuery!(
+        `SELECT * FROM offices WHERE is_active = true ORDER BY created_at ASC NULLS LAST LIMIT 1`
+      );
+      office = fallback.rows[0] || null;
+    }
+    if (!office) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'OFFICE_NOT_CONFIGURED', message: 'No office is configured for QR attendance.' },
+      });
+      return;
+    }
+    if (!officeAllowsQr(policy, office)) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'QR_DISABLED', message: 'QR attendance is not enabled for this office.' },
+      });
+      return;
+    }
+
+    const issued = createOfficeQrToken(
+      String(req.tenant?.id || req.dbSchema || ''),
+      String(office.id),
+      policy.qrRefreshIntervalSeconds
+    );
+    res.json({
+      success: true,
+      data: {
+        ...issued,
+        officeId: office.id,
+        officeName: office.name,
+        refreshSeconds: policy.qrRefreshIntervalSeconds,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
 export async function getPunches(req: Request, res: Response): Promise<void> {
   try {
     const { employeeId, date } = req.query;
+    const policy = await loadAttendancePolicy(req);
+    const hasSelfieColumn = await ensurePunchPhotoColumn(req);
+    const me = await resolveCallerEmployee(req);
+    if (me?.id) {
+      try {
+        await applyAutoClockOut(req, me.id, policy);
+      } catch (autoErr) {
+        console.warn('Auto clock-out skipped:', autoErr);
+      }
+    }
     const scope = await getAccessScope(req);
+    const selfieSelect = hasSelfieColumn
+      ? `(p.selfie_photo IS NOT NULL AND length(p.selfie_photo) > 0) AS has_selfie,`
+      : `false AS has_selfie,`;
     let sql = `
       SELECT 
-        p.*,
+        p.id, p.employee_id, p.office_id, p.punch_type, p.punch_timestamp,
+        p.latitude, p.longitude, p.distance_from_office_meters, p.is_within_geofence,
+        p.device_info, p.ip_address,
+        ${selfieSelect}
         p.punch_timestamp as punch_time,
         e.first_name || ' ' || e.last_name as employee_name,
         e.employee_code,
@@ -331,7 +719,8 @@ export async function requestLeave(req: Request, res: Response): Promise<void> {
       }
 
       const isSelf = String(access.target.id) === String(me.id);
-      const isDirectReport = String(access.target.reporting_manager_id || '') === String(me.id);
+      const isDirectReport =
+        !isSelf && (await isManagerOf(req.tenantQuery!, String(me.id), String(access.target.id)));
       if (!isSelf && !isDirectReport) {
         res.status(403).json({
           success: false,
@@ -426,14 +815,15 @@ export async function decideLeave(req: Request, res: Response): Promise<void> {
 
         const leave = leaveRes.rows[0];
 
+        if (me?.id && String(leave.employee_id) === String(me.id)) {
+          throw Object.assign(new Error('You cannot approve your own leave request'), { code: 'FORBIDDEN' });
+        }
+
         if (!isOrgWideRole(req.user?.role)) {
           if (!me?.id) {
             throw Object.assign(new Error('Unable to resolve your employee record'), { code: 'FORBIDDEN' });
           }
-          if (String(leave.employee_id) === String(me.id)) {
-            throw Object.assign(new Error('You cannot approve your own leave request'), { code: 'FORBIDDEN' });
-          }
-          const isDirectReport = String(leave.reporting_manager_id || '') === String(me.id);
+          const isDirectReport = await isManagerOf(query, String(me.id), String(leave.employee_id));
           if (!isDirectReport) {
             throw Object.assign(new Error('You can only decide leave for your direct reports'), { code: 'FORBIDDEN' });
           }
@@ -462,6 +852,13 @@ export async function decideLeave(req: Request, res: Response): Promise<void> {
         // Debit only when transitioning into approved for debitable types
         if (validStatus === 'approved' && prevStatus !== 'approved' && isDebitableLeaveType(nextLeaveType)) {
           const year = Number(String(leave.start_date).slice(0, 4)) || new Date().getFullYear();
+          await assertSufficientBalance(
+            query,
+            leave.employee_id,
+            nextLeaveType,
+            Number(leave.days_count) || 1,
+            year
+          );
           await debitLeaveBalance(query, {
             employeeId: leave.employee_id,
             leaveType: nextLeaveType,
@@ -568,14 +965,19 @@ async function ensureHolidaysTable(req: Request): Promise<void> {
   if (schema) holidaysTableEnsured.add(schema);
 }
 
-function mapHolidayRow(row: any) {
-  const rawDate = row.holiday_date ?? row.date;
-  let dateStr = '';
+function calendarDateString(rawDate: unknown): string {
   if (typeof rawDate === 'string') {
-    dateStr = rawDate.slice(0, 10);
-  } else if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
-    dateStr = rawDate.toISOString().slice(0, 10);
+    const match = rawDate.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : rawDate.slice(0, 10);
   }
+  if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+    return `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, '0')}-${String(rawDate.getDate()).padStart(2, '0')}`;
+  }
+  return '';
+}
+
+function mapHolidayRow(row: any) {
+  const dateStr = calendarDateString(row.holiday_date ?? row.date);
 
   return {
     id: row.id,
@@ -629,6 +1031,8 @@ export async function saveHolidays(req: Request, res: Response): Promise<void> {
     const saved = await withTenantContext(schema, async (client, query) => {
       await client.query('BEGIN');
       try {
+        // Full-replace saves must not interleave, or the second insert hits uq_holidays_date
+        await query(`LOCK TABLE holidays IN EXCLUSIVE MODE`);
         await query(`DELETE FROM holidays`);
         if (list.length === 0) {
           await client.query('COMMIT');
@@ -729,10 +1133,10 @@ export async function bulkUpdateLeaveStatus(req: Request, res: Response): Promis
           if (leaveRes.rows.length === 0) return null;
 
           const leave = leaveRes.rows[0];
+          if (me?.id && String(leave.employee_id) === String(me.id)) return null;
           if (!isOrgWideRole(req.user?.role)) {
             if (!me?.id) return null;
-            if (String(leave.employee_id) === String(me.id)) return null;
-            if (String(leave.reporting_manager_id || '') !== String(me.id)) return null;
+            if (!(await isManagerOf(query, String(me.id), String(leave.employee_id)))) return null;
           }
 
           const nextLeaveType = mapped === 'approved' && forceUnpaid ? 'unpaid' : String(leave.leave_type);
@@ -748,6 +1152,13 @@ export async function bulkUpdateLeaveStatus(req: Request, res: Response): Promis
 
           if (mapped === 'approved' && prevStatus !== 'approved' && isDebitableLeaveType(nextLeaveType)) {
             const year = Number(String(leave.start_date).slice(0, 4)) || new Date().getFullYear();
+            await assertSufficientBalance(
+              query,
+              leave.employee_id,
+              nextLeaveType,
+              Number(leave.days_count) || 1,
+              year
+            );
             await debitLeaveBalance(query, {
               employeeId: leave.employee_id,
               leaveType: nextLeaveType,
@@ -859,7 +1270,9 @@ export async function getLeaveBalances(req: Request, res: Response): Promise<voi
         return;
       }
       const bal = await ensureLeaveBalance(req.tenantQuery!, access.target.id, year, me?.id);
-      res.json({ success: true, data: serializeBalance(bal) });
+      const consumed = await loadConsumedDaysBatch(req.tenantQuery!, [access.target.id], year);
+      const [data] = await serializeBalances(req.tenantQuery!, [bal], consumed);
+      res.json({ success: true, data });
       return;
     }
 
@@ -869,13 +1282,13 @@ export async function getLeaveBalances(req: Request, res: Response): Promise<voi
     sql = applyEmployeeScopeFilter(scope, sql, params, 'id');
     sql += ` ORDER BY created_at ASC LIMIT 500`;
     const emps = await req.tenantQuery!(sql, params);
-    const balances = await ensureLeaveBalancesBatch(
-      req.tenantQuery!,
-      emps.rows.map((emp: any) => String(emp.id)),
-      year,
-      me?.id
-    );
-    res.json({ success: true, data: balances.map(serializeBalance) });
+    const empIds = emps.rows.map((emp: any) => String(emp.id));
+    const balances = await ensureLeaveBalancesBatch(req.tenantQuery!, empIds, year, me?.id);
+    const consumed = await loadConsumedDaysBatch(req.tenantQuery!, empIds, year);
+    res.json({
+      success: true,
+      data: await serializeBalances(req.tenantQuery!, balances, consumed),
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
@@ -911,11 +1324,16 @@ export async function postAdjustLeaveBalance(req: Request, res: Response): Promi
       });
     });
 
-    res.json({ success: true, data: serializeBalance(bal) });
+    const consumed = await loadConsumedDaysBatch(req.tenantQuery!, [access.target.id], y);
+    const [data] = await serializeBalances(req.tenantQuery!, [bal], consumed);
+    res.json({ success: true, data });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
 }
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseTimeToSqlTime(timeStr: string | undefined | null): string | null {
   if (!timeStr) return null;
@@ -924,6 +1342,26 @@ function parseTimeToSqlTime(timeStr: string | undefined | null): string | null {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+}
+
+function valueToSqlTime(value: unknown): string | null {
+  if (value == null || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}:00`;
+  }
+  const s = String(value).trim();
+  const iso = s.match(/T(\d{2}):(\d{2})/);
+  if (iso) return `${iso[1]}:${iso[2]}:00`;
+  const clock = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (clock && !/am|pm/i.test(s)) {
+    return `${String(parseInt(clock[1], 10)).padStart(2, '0')}:${clock[2]}:${clock[3] || '00'}`;
+  }
+  return parseTimeToSqlTime(s);
+}
+
+function clampCoord(value: number, min: number, max: number): number {
+  const n = Number.isFinite(value) ? value : 0;
+  return Math.round(Math.max(min, Math.min(max, n)) * 1e6) / 1e6;
 }
 
 function combineDateAndTime(dateStr: string, timeStr: string): Date | null {
@@ -944,11 +1382,10 @@ async function upsertDayPunches(
 ): Promise<void> {
   const officeRes = await req.tenantQuery!(`SELECT id, latitude, longitude FROM offices ORDER BY created_at ASC NULLS LAST LIMIT 1`);
   const office = officeRes.rows[0];
-  const officeId = office?.id || null;
-  const lat = Number(office?.latitude);
-  const lng = Number(office?.longitude);
-  const safeLat = Number.isFinite(lat) ? lat : 0;
-  const safeLng = Number.isFinite(lng) ? lng : 0;
+  const officeId = office?.id && UUID_RE.test(String(office.id)) ? office.id : null;
+  const safeLat = clampCoord(Number(office?.latitude), -90, 90);
+  const safeLng = clampCoord(Number(office?.longitude), -180, 180);
+  const ip = clientIp(req) || req.ip || '127.0.0.1';
 
   await req.tenantQuery!(
     `DELETE FROM attendance_punches
@@ -964,7 +1401,7 @@ async function upsertDayPunches(
           employee_id, office_id, punch_type, punch_timestamp, latitude, longitude,
           distance_from_office_meters, is_within_geofence, device_info, ip_address
          ) VALUES ($1, $2, 'check_in', $3, $4, $5, 0, true, 'Manual Edit', $6)`,
-        [employeeId, officeId, inTs.toISOString(), safeLat, safeLng, req.ip || '127.0.0.1']
+        [employeeId, officeId, inTs.toISOString(), safeLat, safeLng, ip]
       );
     }
   }
@@ -977,7 +1414,7 @@ async function upsertDayPunches(
           employee_id, office_id, punch_type, punch_timestamp, latitude, longitude,
           distance_from_office_meters, is_within_geofence, device_info, ip_address
          ) VALUES ($1, $2, 'check_out', $3, $4, $5, 0, true, 'Manual Edit', $6)`,
-        [employeeId, officeId, outTs.toISOString(), safeLat, safeLng, req.ip || '127.0.0.1']
+        [employeeId, officeId, outTs.toISOString(), safeLat, safeLng, ip]
       );
     }
   }
@@ -1018,7 +1455,7 @@ export async function getRegularizations(req: Request, res: Response): Promise<v
     }
     if (status) {
       params.push(String(status).toLowerCase());
-      sql += ` AND r.status = $${params.length}`;
+      sql += ` AND LOWER(r.status) = $${params.length}`;
     }
 
     sql += ` ORDER BY r.created_at DESC LIMIT 200`;
@@ -1046,15 +1483,15 @@ export async function requestRegularization(req: Request, res: Response): Promis
       validEmpId = me.id;
     } else {
       const empCheck = await req.tenantQuery!(
-        `SELECT id FROM employees WHERE id::text = $1 OR employee_code = $1 LIMIT 1`,
+        `SELECT id FROM employees WHERE id::text = $1 OR employee_code = $1 OR LOWER(email) = LOWER($1) LIMIT 1`,
         [employeeId]
       );
       if (empCheck.rows[0]) validEmpId = empCheck.rows[0].id;
       else if (me?.id) validEmpId = me.id;
     }
 
-    const inTime = parseTimeToSqlTime(requestedCheckIn);
-    const outTime = parseTimeToSqlTime(requestedCheckOut);
+    const inTime = valueToSqlTime(requestedCheckIn);
+    const outTime = valueToSqlTime(requestedCheckOut);
     const reasonText = [reason, remarks].filter(Boolean).join(' — ').slice(0, 1000) || 'Regularization request';
 
     const result = await req.tenantQuery!(
@@ -1074,6 +1511,14 @@ export async function requestRegularization(req: Request, res: Response): Promis
 export async function updateRegularizationStatus(req: Request, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+    if (!id || !UUID_RE.test(String(id))) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Regularization not found' },
+      });
+      return;
+    }
+
     const mapped = normalizeLeaveDecisionStatus(req.body?.status);
     if (!mapped) {
       res.status(400).json({
@@ -1087,7 +1532,7 @@ export async function updateRegularizationStatus(req: Request, res: Response): P
       `SELECT r.*, r.date::text AS date_str, e.reporting_manager_id
        FROM attendance_regularizations r
        JOIN employees e ON r.employee_id = e.id
-       WHERE r.id = $1 LIMIT 1`,
+       WHERE r.id = $1::uuid LIMIT 1`,
       [id]
     );
     if (regRes.rows.length === 0) {
@@ -1097,23 +1542,29 @@ export async function updateRegularizationStatus(req: Request, res: Response): P
 
     const reg = regRes.rows[0];
     const me = await resolveCallerEmployee(req);
+    const ownerId = String(reg.employee_id);
+
+    if (me?.id && ownerId === String(me.id) && !isOrgWideRole(req.user?.role)) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'You cannot approve your own regularization' },
+      });
+      return;
+    }
 
     if (!isOrgWideRole(req.user?.role)) {
       if (!me?.id) {
         res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Unable to resolve employee' } });
         return;
       }
-      if (String(reg.employee_id) === String(me.id)) {
+      const manageable = await getManageableEmployeeIds(req);
+      const canManage =
+        (await isManagerOf(req.tenantQuery!, String(me.id), ownerId)) ||
+        (manageable != null && manageable.has(ownerId) && ownerId !== String(me.id));
+      if (!canManage) {
         res.status(403).json({
           success: false,
-          error: { code: 'FORBIDDEN', message: 'You cannot approve your own regularization' },
-        });
-        return;
-      }
-      if (String(reg.reporting_manager_id || '') !== String(me.id)) {
-        res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: 'You can only decide regularizations for your direct reports' },
+          error: { code: 'FORBIDDEN', message: 'You can only decide regularizations for your team' },
         });
         return;
       }
@@ -1122,21 +1573,25 @@ export async function updateRegularizationStatus(req: Request, res: Response): P
     const result = await req.tenantQuery!(
       `UPDATE attendance_regularizations
        SET status = $1, approver_id = $2
-       WHERE id = $3
+       WHERE id = $3::uuid
        RETURNING *, date::text AS date`,
       [mapped, me?.id || null, id]
     );
 
     if (mapped === 'approved') {
-      const dateStr = String(reg.date_str || reg.date).slice(0, 10);
-      const checkIn = reg.requested_check_in
-        ? String(reg.requested_check_in).slice(0, 8)
-        : null;
-      const checkOut = reg.requested_check_out
-        ? String(reg.requested_check_out).slice(0, 8)
-        : null;
-      // Convert TIME "HH:MM:SS" to displayable for upsert helper
-      await upsertDayPunches(req, reg.employee_id, dateStr, checkIn, checkOut);
+      const rawDate = String(reg.date_str || '');
+      const dateStr = /^\d{4}-\d{2}-\d{2}/.test(rawDate)
+        ? rawDate.slice(0, 10)
+        : String(reg.date || '').slice(0, 10);
+      const checkIn = valueToSqlTime(reg.requested_check_in);
+      const checkOut = valueToSqlTime(reg.requested_check_out);
+      try {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          await upsertDayPunches(req, reg.employee_id, dateStr, checkIn, checkOut);
+        }
+      } catch {
+        // Keep the decision even if rewriting punches fails (coords/schema drift).
+      }
     }
 
     res.json({ success: true, data: result.rows[0] });
@@ -1188,12 +1643,8 @@ export async function updateAttendanceRecord(req: Request, res: Response): Promi
     const me = await resolveCallerEmployee(req);
     if (!isOrgWideRole(req.user?.role)) {
       if (!me?.id || String(access.target.id) !== String(me.id)) {
-        // Managers: allow if direct report
-        const emp = await req.tenantQuery!(
-          `SELECT reporting_manager_id FROM employees WHERE id = $1`,
-          [access.target.id]
-        );
-        if (!me?.id || String(emp.rows[0]?.reporting_manager_id || '') !== String(me.id)) {
+        // Managers: allow for direct reports and department/team co-lead members
+        if (!me?.id || !(await isManagerOf(req.tenantQuery!, String(me.id), String(access.target.id)))) {
           res.status(403).json({
             success: false,
             error: { code: 'FORBIDDEN', message: 'You cannot edit this attendance record' },

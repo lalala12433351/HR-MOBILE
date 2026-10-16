@@ -9,7 +9,6 @@ import {
   EyeOff,
   User,
   MapPin,
-  CreditCard,
   ShieldCheck,
   ArrowRight,
   ArrowLeft,
@@ -66,14 +65,12 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
     return initialOnboardingFields;
   }, [state.customOptions?.onboardingFields]);
 
-  // Current Step: 1 to 6
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
+  // Current Step: 1 to 5
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
 
   // STEP 1: Change / Set Password State
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showCurrentPass, setShowCurrentPass] = useState(false);
   const [showNewPass, setShowNewPass] = useState(false);
   const [showConfirmPass, setShowConfirmPass] = useState(false);
   const [step1Error, setStep1Error] = useState('');
@@ -102,84 +99,7 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
   const [emergencyPhone, setEmergencyPhone] = useState('');
   const [step3Error, setStep3Error] = useState('');
 
-  // POPULAR ACTUAL BANKS LIST
-  const MAJOR_BANKS = [
-    'HDFC Bank',
-    'State Bank of India (SBI)',
-    'ICICI Bank',
-    'Axis Bank',
-    'Kotak Mahindra Bank',
-    'Punjab National Bank (PNB)',
-    'Bank of Baroda',
-    'Canara Bank',
-    'Union Bank of India',
-    'IndusInd Bank',
-    'IDFC FIRST Bank',
-    'Yes Bank',
-    'Federal Bank',
-    'Bank of India',
-    'Central Bank of India',
-    'Indian Bank',
-    'Standard Chartered Bank',
-    'HSBC Bank',
-    'Citibank',
-    'JPMorgan Chase Bank',
-    'Bank of America',
-    'Wells Fargo',
-    'Barclays',
-    'Other Bank',
-  ];
-
-  // STEP 4: Bank & Payroll Payout State
-  const [bankName, setBankName] = useState('');
-  const [isCustomBank, setIsCustomBank] = useState(false);
-  const [accountNumber, setAccountNumber] = useState('');
-  const [confirmAccountNumber, setConfirmAccountNumber] = useState('');
-  const [ifscCode, setIfscCode] = useState('');
-  const [accountHolderName, setAccountHolderName] = useState('');
-  const [taxId, setTaxId] = useState('');
-  const [pfUan, setPfUan] = useState('');
-  const [step4Error, setStep4Error] = useState('');
-
-  const handleBankSelect = (selected: string) => {
-    if (selected === 'Other Bank') {
-      setIsCustomBank(true);
-      setBankName('');
-    } else {
-      setIsCustomBank(false);
-      setBankName(selected);
-      // Auto-suggest IFSC prefix if currently empty
-      if (!ifscCode) {
-        if (selected.includes('HDFC')) setIfscCode('HDFC0');
-        else if (selected.includes('State Bank of India')) setIfscCode('SBIN0');
-        else if (selected.includes('ICICI')) setIfscCode('ICIC0');
-        else if (selected.includes('Axis')) setIfscCode('UTIB0');
-        else if (selected.includes('Kotak')) setIfscCode('KKBK0');
-        else if (selected.includes('Punjab National Bank')) setIfscCode('PUNB0');
-        else if (selected.includes('Bank of Baroda')) setIfscCode('BARB0');
-        else if (selected.includes('Canara')) setIfscCode('CNRB0');
-        else if (selected.includes('Union Bank')) setIfscCode('UBIN0');
-        else if (selected.includes('IndusInd')) setIfscCode('INDB0');
-        else if (selected.includes('IDFC')) setIfscCode('IDFB0');
-        else if (selected.includes('Yes Bank')) setIfscCode('YESB0');
-      }
-    }
-    if (step4Error) setStep4Error('');
-  };
-
-  const handleAccountNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 18);
-    setAccountNumber(digitsOnly);
-    if (step4Error) setStep4Error('');
-  };
-
-  const handleConfirmAccountNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 18);
-    setConfirmAccountNumber(digitsOnly);
-    if (step4Error) setStep4Error('');
-  };
-
-  // STEP 5: Document Uploads State
+  // STEP 4: Document Uploads State
   const [uploadedFiles, setUploadedFiles] = useState<
     Record<string, { id: string; name: string; size: string; type: string; uploadDate: string }>
   >({});
@@ -188,9 +108,9 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
   // Custom User-Defined Field Values Map: { [fieldId]: value }
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
 
-  // STEP 6: Review & Confirmation State
+  // STEP 5: Review & Confirmation State
   const [agreedToDeclaration, setAgreedToDeclaration] = useState(true);
-  const [step6Error, setStep6Error] = useState('');
+  const [step5ReviewError, setStep5ReviewError] = useState('');
 
   // Hydrate fields from target employee
   useEffect(() => {
@@ -198,7 +118,6 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
       setFullName(targetEmployee.name || '');
       setEmail(targetEmployee.email || '');
       setPhone(targetEmployee.phone && targetEmployee.phone !== '—' ? targetEmployee.phone : '');
-      setAccountHolderName(targetEmployee.name || '');
       if (targetEmployee.dateOfBirth) setDateOfBirth(targetEmployee.dateOfBirth);
       if (targetEmployee.gender) setGender(targetEmployee.gender);
       if (targetEmployee.bloodGroup) setBloodGroup(targetEmployee.bloodGroup);
@@ -209,8 +128,6 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
       if (targetEmployee.stateProvince) setStateProvince(targetEmployee.stateProvince);
       if (targetEmployee.postalCode) setPostalCode(targetEmployee.postalCode);
       if (targetEmployee.country) setCountry(targetEmployee.country);
-      if (targetEmployee.personalTaxId) setTaxId(targetEmployee.personalTaxId);
-      if (targetEmployee.socialInsurance) setPfUan(targetEmployee.socialInsurance);
 
       if (targetEmployee.emergencyContact?.name && targetEmployee.emergencyContact.name !== '—') {
         setEmergencyName(targetEmployee.emergencyContact.name);
@@ -220,16 +137,6 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
       }
       if (targetEmployee.emergencyContact?.phone && targetEmployee.emergencyContact.phone !== '—') {
         setEmergencyPhone(targetEmployee.emergencyContact.phone);
-      }
-      if (targetEmployee.bankDetails?.bankName && targetEmployee.bankDetails.bankName !== '—') {
-        setBankName(targetEmployee.bankDetails.bankName);
-      }
-      if (targetEmployee.bankDetails?.accountNumber && targetEmployee.bankDetails.accountNumber !== '—') {
-        setAccountNumber(targetEmployee.bankDetails.accountNumber);
-        setConfirmAccountNumber(targetEmployee.bankDetails.accountNumber);
-      }
-      if (targetEmployee.bankDetails?.ifscCode && targetEmployee.bankDetails.ifscCode !== '—') {
-        setIfscCode(targetEmployee.bankDetails.ifscCode);
       }
       if (targetEmployee.customFieldValues) {
         setCustomFieldValues(targetEmployee.customFieldValues);
@@ -267,8 +174,10 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
   const handleNextStep = () => {
     // Step 1: Password Change
     if (step === 1) {
-      if (!newPassword.trim()) {
-        setStep1Error('Please enter a new password');
+      // Optional: the account password was already created from the invite link.
+      if (!newPassword.trim() && !confirmPassword.trim()) {
+        setStep1Error('');
+        setStep(2);
         return;
       }
       const strength = evaluateCognitoPassword(newPassword);
@@ -376,63 +285,8 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
       return;
     }
 
-    // Step 4: Banking & Direct Deposit
+    // Step 4: Document Uploads
     if (step === 4) {
-      const bankingFields = configuredFields.filter((f) => f.enabled && f.section === 'banking');
-      for (const field of bankingFields) {
-        if (!field.required) continue;
-        if (field.name === 'bankName' && !bankName.trim()) {
-          setStep4Error('Please select or specify your Bank Name');
-          return;
-        }
-        if (field.name === 'accountNumber' && !accountNumber.trim()) {
-          setStep4Error('Bank Account Number is required');
-          return;
-        }
-        if (field.name === 'accountHolderName' && !accountHolderName.trim()) {
-          setStep4Error('Account Holder Name is required');
-          return;
-        }
-        if (field.name === 'ifscCode' && !ifscCode.trim()) {
-          setStep4Error('Routing / IFSC / Sort Code is required');
-          return;
-        }
-        if (!field.isSystemDefault) {
-          const val = customFieldValues[field.id];
-          if (!val || String(val).trim() === '') {
-            setStep4Error(`"${field.label}" is required`);
-            return;
-          }
-        }
-      }
-
-      // Check numeric validity
-      if (accountNumber && !/^\d+$/.test(accountNumber)) {
-        setStep4Error('Account number must contain digits only');
-        return;
-      }
-      if (accountNumber && (accountNumber.length < 8 || accountNumber.length > 18)) {
-        setStep4Error('Account number must be between 8 and 18 digits long');
-        return;
-      }
-
-      if (accountNumber && !confirmAccountNumber) {
-        setStep4Error('Please confirm your account number');
-        return;
-      }
-
-      if (accountNumber && confirmAccountNumber && accountNumber !== confirmAccountNumber) {
-        setStep4Error('Bank account numbers do not match');
-        return;
-      }
-
-      setStep4Error('');
-      setStep(5);
-      return;
-    }
-
-    // Step 5: Document Uploads
-    if (step === 5) {
       const docFields = configuredFields.filter((f) => f.enabled && f.section === 'documents');
       for (const field of docFields) {
         if (field.required && !uploadedFiles[field.id]) {
@@ -441,17 +295,17 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
         }
       }
       setStep5Error('');
-      setStep(6);
+      setStep(5);
       return;
     }
 
-    // Step 6: Review & Final Submission
-    if (step === 6) {
+    // Step 5: Review & Final Submission
+    if (step === 5) {
       if (!agreedToDeclaration) {
-        setStep6Error('Please confirm the profile accuracy declaration');
+        setStep5ReviewError('Please confirm the profile accuracy declaration');
         return;
       }
-      setStep6Error('');
+      setStep5ReviewError('');
       handleFinishOnboarding();
     }
   };
@@ -469,7 +323,8 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
     }
 
     setIsSubmitting(true);
-    const finalPass = newPassword.trim() || targetEmployee.password || 'Welcome@123';
+    // The password was set from the invite email; only change it if the user chose a new one here.
+    const changedPassword = newPassword.trim() || undefined;
 
     const docsArray = Object.entries(uploadedFiles).map(([fieldId, file]) => {
       const fieldDef = configuredFields.find((f) => f.id === fieldId);
@@ -493,7 +348,7 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
       await api.identity.updateEmployee(targetEmployee.id, {
         firstName: fName,
         lastName: lName,
-        password: finalPass,
+        password: changedPassword,
         isActivated: true,
         accountStatus: 'Active',
         hasCompletedProfile: true,
@@ -509,8 +364,6 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
         stateProvince: stateProvince || undefined,
         postalCode: postalCode || undefined,
         country: country || undefined,
-        personalTaxId: taxId || undefined,
-        socialInsurance: pfUan || undefined,
         emergencyContact: {
           name: emergencyName.trim(),
           relation: emergencyRelation.trim(),
@@ -521,29 +374,10 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
         employmentStatus: 'active',
       });
 
-      if (bankName.trim() || accountNumber.trim()) {
-        try {
-          await api.identity.updateBankDetails(targetEmployee.id, {
-            accountHolderName: fullName.trim(),
-            accountNumber: accountNumber.trim(),
-            bankName: bankName.trim(),
-            routingOrIfscCode: ifscCode.trim(),
-          });
-        } catch (bankErr: any) {
-          console.warn('[Onboarding] Bank details save failed:', bankErr);
-          triggerToast({
-            title: 'Bank details not saved',
-            message: bankErr?.message || 'You can add bank details later in profile settings.',
-            type: 'warning',
-          });
-        }
-      }
-
       const updatedEmployees: Employee[] = (state.employees || []).map((emp) => {
         if (emp.id === targetEmployee.id || emp.employeeId === targetEmployee.employeeId) {
           return {
             ...emp,
-            password: finalPass,
             name: fullName.trim(),
             fullName: fullName.trim(),
             phone: phone.trim(),
@@ -557,8 +391,6 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
             stateProvince: stateProvince || emp.stateProvince,
             postalCode: postalCode || emp.postalCode,
             country: country || emp.country,
-            personalTaxId: taxId || emp.personalTaxId,
-            socialInsurance: pfUan || emp.socialInsurance,
             customFieldValues: {
               ...(emp.customFieldValues || {}),
               ...customFieldValues,
@@ -569,11 +401,6 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
             status: 'Active',
             accountStatus: 'Active',
             onboardingProgress: 100,
-            bankDetails: {
-              bankName: bankName.trim() || emp.bankDetails?.bankName || '',
-              accountNumber: accountNumber.trim() || emp.bankDetails?.accountNumber || '',
-              ifscCode: ifscCode.trim() || emp.bankDetails?.ifscCode || '',
-            },
             emergencyContact: {
               name: emergencyName.trim() || emp.emergencyContact?.name || '',
               relation: emergencyRelation.trim() || emp.emergencyContact?.relation || '',
@@ -588,7 +415,6 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
         id: targetEmployee.id,
         name: fullName.trim(),
         email: targetEmployee.email,
-        password: finalPass,
         role: (targetEmployee.role as any) || 'employee',
         designation: targetEmployee.designation,
         department: targetEmployee.department,
@@ -730,10 +556,10 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
         {/* Left Area (Step Progress & Typography) */}
         <div className="w-full lg:w-[38%] bg-white dark:bg-[#121214] p-6 sm:p-8 md:p-12 lg:p-14 flex flex-col justify-between overflow-y-auto shrink-0 border-r border-slate-100 dark:border-[#282830]">
           <div>
-            {/* 6 Step Progress Indicators */}
+            {/* 5 Step Progress Indicators */}
             <div className="space-y-3 mb-6 sm:mb-8">
               <div className="flex items-center gap-1.5">
-                {[1, 2, 3, 4, 5, 6].map((i) => (
+                {[1, 2, 3, 4, 5].map((i) => (
                   <div
                     key={i}
                     className={`h-2 rounded-sm transition-all ${
@@ -743,7 +569,7 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
                 ))}
               </div>
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest pt-1">
-                STEP {step} OF 6
+                STEP {step} OF 5
               </p>
             </div>
 
@@ -752,10 +578,10 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
               {step === 1 && (
                 <>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-snug tracking-tight">
-                    Change & Set Password
+                    Account Security
                   </h1>
                   <p className="text-slate-500 dark:text-[#9e9ea7] text-xs sm:text-sm leading-relaxed">
-                    As part of your first-time employee onboarding, please create a secure personal password to replace the temporary invitation code.
+                    You created your password from the invitation email. You can change it here, or continue to your profile.
                   </p>
                 </>
               )}
@@ -785,10 +611,10 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
               {step === 4 && (
                 <>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-snug tracking-tight">
-                    Direct Deposit & Banking
+                    Document Uploads
                   </h1>
                   <p className="text-slate-500 dark:text-[#9e9ea7] text-xs sm:text-sm leading-relaxed">
-                    Enter your verified bank account and statutory tax identification details for automated payroll disbursements.
+                    Upload official copies of your government photo ID, academic certificates, and signed NDA for verification.
                   </p>
                 </>
               )}
@@ -796,21 +622,10 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
               {step === 5 && (
                 <>
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-snug tracking-tight">
-                    Document Uploads
-                  </h1>
-                  <p className="text-slate-500 dark:text-[#9e9ea7] text-xs sm:text-sm leading-relaxed">
-                    Upload official copies of your government photo ID, academic certificates, signed NDA, and bank passbook for verification.
-                  </p>
-                </>
-              )}
-
-              {step === 6 && (
-                <>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-snug tracking-tight">
                     Review & Complete Setup
                   </h1>
                   <p className="text-slate-500 dark:text-[#9e9ea7] text-xs sm:text-sm leading-relaxed">
-                    Review your configured credentials and profile summary, accept the accuracy declaration, and launch your workspace.
+                    Review your profile summary, accept the accuracy declaration, and enter your workspace.
                   </p>
                 </>
               )}
@@ -836,8 +651,8 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
               disabled={isSubmitting}
               className="flex-1 py-3 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs sm:text-sm transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] cursor-pointer shadow-md flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <span>{isSubmitting ? 'Saving & Activating Profile...' : step === 6 ? 'Complete Onboarding & Enter' : 'Continue'}</span>
-              {!isSubmitting && step < 6 && <ArrowRight className="w-4 h-4" />}
+              <span>{isSubmitting ? 'Saving & Activating Profile...' : step === 5 ? 'Complete Onboarding & Enter' : 'Continue'}</span>
+              {!isSubmitting && step < 5 && <ArrowRight className="w-4 h-4" />}
             </button>
           </div>
         </div>
@@ -852,8 +667,8 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
             {step === 1 && (
               <div className="bg-white dark:bg-[#121214] rounded-3xl p-6 sm:p-8 md:p-9 border border-slate-200/80 dark:border-[#282830] shadow-2xs space-y-5 animate-fade-in text-slate-900 dark:text-white">
                 <div className="border-b border-slate-100 dark:border-[#282830] pb-4">
-                  <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">Security & Password Setup</h3>
-                  <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1">Set a new, secure password for your employee account.</p>
+                  <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">Change password (optional)</h3>
+                  <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1">Leave these fields empty to keep the password you just created.</p>
                 </div>
 
                 {step1Error && (
@@ -864,42 +679,18 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
                 )}
 
                 <div className="space-y-4">
-                  {/* Current / Temporary Password */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Temporary / Initial Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showCurrentPass ? 'text' : 'password'}
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        placeholder="e.g. Welcome@123"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium bg-white dark:bg-[#18181d] text-slate-900 dark:text-white transition-all pr-11"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowCurrentPass(!showCurrentPass)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 cursor-pointer"
-                      >
-                        {showCurrentPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-1">Default initial password assigned by administrator.</p>
-                  </div>
-
                   {/* New Password */}
                   <div>
                     <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      New Password <span className="text-red-500">*</span>
+                      New Password
                     </label>
                     <div className="relative">
                       <input
                         type={showNewPass ? 'text' : 'password'}
-                        required
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Enter secure new password (min. 6 chars)"
+                        placeholder="Leave empty to keep your current password"
+                        autoComplete="new-password"
                         className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium bg-white dark:bg-[#18181d] text-slate-900 dark:text-white transition-all pr-11"
                       />
                       <button
@@ -915,12 +706,12 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
                   {/* Confirm New Password */}
                   <div>
                     <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Confirm New Password <span className="text-red-500">*</span>
+                      Confirm New Password
                     </label>
                     <div className="relative">
                       <input
                         type={showConfirmPass ? 'text' : 'password'}
-                        required
+                        autoComplete="new-password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="Re-enter new password"
@@ -1284,179 +1075,9 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
             )}
 
             {/* ========================================================================= */}
-            {/* STEP 4: BANKING & PAYOUT DETAILS                                          */}
+            {/* STEP 4: DOCUMENT UPLOADS                                                  */}
             {/* ========================================================================= */}
             {step === 4 && (
-              <div className="bg-white dark:bg-[#121214] rounded-3xl p-6 sm:p-8 md:p-9 border border-slate-200/80 dark:border-[#282830] shadow-2xs space-y-5 animate-fade-in text-slate-900 dark:text-white">
-                <div className="border-b border-slate-100 dark:border-[#282830] pb-4">
-                  <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">Direct Deposit & Banking Details</h3>
-                  <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1">Bank account information for automated monthly salary disbursements.</p>
-                </div>
-
-                {step4Error && (
-                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-300 text-xs font-bold flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{step4Error}</span>
-                  </div>
-                )}
-
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Bank Name <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        required
-                        value={MAJOR_BANKS.includes(bankName) ? bankName : (isCustomBank || bankName ? 'Other Bank' : '')}
-                        onChange={(e) => handleBankSelect(e.target.value)}
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all cursor-pointer"
-                      >
-                        <option value="">Select your bank...</option>
-                        {MAJOR_BANKS.map((b) => (
-                          <option key={b} value={b}>
-                            {b}
-                          </option>
-                        ))}
-                      </select>
-
-                      {(isCustomBank || (bankName && !MAJOR_BANKS.includes(bankName))) && (
-                        <input
-                          type="text"
-                          required
-                          value={bankName}
-                          onChange={(e) => {
-                            setBankName(e.target.value);
-                            if (step4Error) setStep4Error('');
-                          }}
-                          placeholder="Type your bank name..."
-                          className="w-full mt-2 rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-2.5 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                          autoFocus
-                        />
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Account Holder Name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={accountHolderName}
-                        onChange={(e) => {
-                          setAccountHolderName(e.target.value);
-                          if (step4Error) setStep4Error('');
-                        }}
-                        placeholder="e.g. Alex Mercer"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Account Number <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={18}
-                        required
-                        value={accountNumber}
-                        onChange={handleAccountNumberChange}
-                        onKeyDown={(e) => {
-                          if (
-                            !/[0-9]/.test(e.key) &&
-                            !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) &&
-                            !e.ctrlKey &&
-                            !e.metaKey
-                          ) {
-                            e.preventDefault();
-                          }
-                        }}
-                        placeholder="Enter numeric account number"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm font-mono outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Confirm Account Number <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={18}
-                        required
-                        value={confirmAccountNumber}
-                        onChange={handleConfirmAccountNumberChange}
-                        onKeyDown={(e) => {
-                          if (
-                            !/[0-9]/.test(e.key) &&
-                            !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) &&
-                            !e.ctrlKey &&
-                            !e.metaKey
-                          ) {
-                            e.preventDefault();
-                          }
-                        }}
-                        placeholder="Re-type account number"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm font-mono outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Routing / IFSC / Sort Code <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        maxLength={11}
-                        value={ifscCode}
-                        onChange={(e) => {
-                          setIfscCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11));
-                          if (step4Error) setStep4Error('');
-                        }}
-                        placeholder="e.g. HDFC0001824"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm font-mono uppercase outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Tax ID / PAN / SSN
-                      </label>
-                      <input
-                        type="text"
-                        maxLength={10}
-                        value={taxId}
-                        onChange={(e) => {
-                          setTaxId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10));
-                          if (step4Error) setStep4Error('');
-                        }}
-                        placeholder="e.g. ABCDE1234F"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm font-mono uppercase outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Dynamic Custom Fields for Banking section */}
-                {renderCustomFieldsForSection('banking')}
-              </div>
-            )}
-
-            {/* ========================================================================= */}
-            {/* STEP 5: DOCUMENT UPLOADS                                                  */}
-            {/* ========================================================================= */}
-            {step === 5 && (
               <div className="bg-white dark:bg-[#121214] rounded-3xl p-6 sm:p-8 md:p-9 border border-slate-200/80 dark:border-[#282830] shadow-2xs space-y-6 animate-fade-in text-slate-900 dark:text-white">
                 <div className="border-b border-slate-100 dark:border-[#282830] pb-4">
                   <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">
@@ -1549,19 +1170,19 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
             )}
 
             {/* ========================================================================= */}
-            {/* STEP 6: REVIEW & DECLARATION                                              */}
+            {/* STEP 5: REVIEW & DECLARATION                                              */}
             {/* ========================================================================= */}
-            {step === 6 && (
+            {step === 5 && (
               <div className="bg-white dark:bg-[#121214] rounded-3xl p-6 sm:p-8 md:p-9 border border-slate-200/80 dark:border-[#282830] shadow-2xs space-y-5 animate-fade-in text-slate-900 dark:text-white">
                 <div className="border-b border-slate-100 dark:border-[#282830] pb-4">
                   <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">Review Profile & Credentials</h3>
                   <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1">Please review your submitted profile details before completing onboarding.</p>
                 </div>
 
-                {step6Error && (
+                {step5ReviewError && (
                   <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-300 text-xs font-bold flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{step6Error}</span>
+                    <span>{step5ReviewError}</span>
                   </div>
                 )}
 
@@ -1623,27 +1244,9 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#16161a] border border-slate-200/90 dark:border-[#282830] space-y-3 shadow-2xs">
-                    <div className="text-xs font-bold text-slate-900 dark:text-white pb-2 border-b border-slate-100 dark:border-[#24242c]">4. Direct Deposit Banking</div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 text-xs">
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Bank Name</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">{bankName}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Account Number</span>
-                        <span className="font-semibold font-mono text-slate-900 dark:text-white">••••{accountNumber.slice(-4)}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">IFSC / Code</span>
-                        <span className="font-semibold font-mono text-slate-900 dark:text-white">{ifscCode}</span>
-                      </div>
-                    </div>
-                  </div>
-
                   {/* Uploaded Documents Summary */}
                   <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#16161a] border border-slate-200/90 dark:border-[#282830] space-y-3 shadow-2xs">
-                    <div className="text-xs font-bold text-slate-900 dark:text-white pb-2 border-b border-slate-100 dark:border-[#24242c]">5. Uploaded Verification Documents</div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white pb-2 border-b border-slate-100 dark:border-[#24242c]">4. Uploaded Verification Documents</div>
                     <div className="space-y-2">
                       {Object.values(uploadedFiles).length === 0 ? (
                         <span className="text-xs text-slate-400 font-normal">No documents attached</span>
@@ -1676,7 +1279,7 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
                     />
                     <div className="text-xs leading-relaxed text-slate-700 dark:text-slate-300">
                       <span className="font-bold text-slate-900 dark:text-white block mb-0.5">Profile Accuracy Confirmation</span>
-                      I confirm that all personal, residential, banking, and document uploads submitted are accurate, authentic, and up to date.
+                      I confirm that all personal, residential, and document uploads submitted are accurate, authentic, and up to date.
                     </div>
                   </label>
                 </div>

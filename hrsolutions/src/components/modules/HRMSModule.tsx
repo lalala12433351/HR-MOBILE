@@ -2,7 +2,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  Users,
   Clock,
   Calendar,
   DollarSign,
@@ -15,6 +14,7 @@ import {
   FileText,
   Building2,
   Download,
+  Printer,
   Filter,
   User,
   Mail,
@@ -30,15 +30,8 @@ import {
   EyeOff,
   UserPlus,
   Send,
-  Network,
-  Settings,
   FileUp,
   MoreVertical,
-  GraduationCap,
-  LayoutGrid,
-  UserCheck,
-  SlidersHorizontal,
-  Workflow,
 } from 'lucide-react';
 import { AppState } from '../../services/store';
 import { useApp } from '../../context/AppContext';
@@ -57,16 +50,16 @@ import {
   isPaidLeaveType,
   validateLeaveApproval,
 } from '@/utils/leaveRules';
-import { AttendanceSettingsView } from './AttendanceSettingsView';
-import { EmployeeSettingsView } from './EmployeeSettingsView';
 import { EmployeeDetailView } from './EmployeeDetailView';
+import { DepartmentDetailView } from './DepartmentDetailView';
+import { applyDepartmentLocalUpdate, removeDepartmentLocal } from '@/utils/departmentRecords';
 import { OrgChartModule } from './OrgChartModule';
 import { EmployeeTableTab } from './hrms/EmployeeTableTab';
 import { StaffCardsTab } from './hrms/StaffCardsTab';
+import { BulkIdCardStudio } from '../print/BulkIdCardStudio';
 import { StudentDirectoryModule } from './StudentDirectoryModule';
 import { AddEmployeeModal } from './hrms/AddEmployeeModal';
 import { AddOfficeModal, OfficeModalData } from '../common/AddOfficeModal';
-import { PayrollSettingsView } from './PayrollSettingsView';
 import {
   isExecutiveOrAdmin,
   isHRPersona,
@@ -87,25 +80,13 @@ interface HRMSModuleProps {
   moduleScope?: 'employees' | 'attendance' | 'all';
 }
 
-// Avatar Palette matching screenshot
+// Avatar Palette — consistent neutral theme
 const AVATAR_PALETTE = [
-  { bg: 'bg-orange-500/20 text-orange-300 border-orange-500/30' },
-  { bg: 'bg-teal-500/20 text-teal-300 border-teal-500/30' },
-  { bg: 'bg-sky-500/20 text-sky-300 border-sky-500/30' },
-  { bg: 'bg-rose-500/20 text-rose-300 border-rose-500/30' },
-  { bg: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
-  { bg: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
-  { bg: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' },
-  { bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+  { bg: 'bg-slate-100 text-slate-600 border-slate-200' },
 ];
 
-const getEmployeeAvatarStyle = (empId: string, name: string) => {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const index = Math.abs(hash) % AVATAR_PALETTE.length;
-  return AVATAR_PALETTE[index];
+const getEmployeeAvatarStyle = (_empId: string, _name: string) => {
+  return AVATAR_PALETTE[0];
 };
 
 const getInitials = (name: string): string => {
@@ -156,11 +137,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
   const [teamScopeFilter, setTeamScopeFilter] = useState<'team' | 'all'>(
     isSuperAdmin || isHR ? 'all' : 'team'
   );
-  const [payrollViewMode, setPayrollViewMode] = useState<'runs' | 'settings'>('runs');
-
   const isInstitution = isInstitutionMode(state.organization, state.currentPersona);
 
-  const validEmployeeTabs = ['employees', 'my_team', 'organization', 'directory', 'employee_settings'];
+  const validEmployeeTabs = ['employees', 'my_team', 'organization', 'directory', 'org_chart'];
   const getSanitizedTab = (tab?: string) => {
     if (moduleScope === 'employees') {
       if (tab && validEmployeeTabs.includes(tab)) {
@@ -193,6 +172,22 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     | 'employee_settings'
   >(resolvedDefaultTab as any);
 
+  useEffect(() => {
+    if (moduleScope !== 'employees') return;
+    const allowed = new Set(
+      canEditProfiles
+        ? isInstitution
+          ? ['employees', 'students', 'directory', 'org_chart']
+          : ['employees', 'directory', 'org_chart']
+        : isInstitution
+          ? ['my_team', 'organization', 'org_chart', 'students']
+          : ['my_team', 'organization', 'org_chart']
+    );
+    if (!allowed.has(activeTab)) {
+      setActiveTab((canEditProfiles ? 'employees' : 'my_team') as any);
+    }
+  }, [moduleScope, canEditProfiles, isInstitution, activeTab]);
+
   const isSelfEmployee = (emp: Employee | null | undefined) => {
     if (!emp || !state.currentPersona) return false;
     const persona = state.currentPersona;
@@ -213,18 +208,42 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     }
   };
 
+  const [selectedDepartmentName, setSelectedDepartmentName] = useState<string | null>(null);
+
+  const handleSelectDepartment = (deptName: string) => {
+    if (!deptName || deptName === 'Unassigned') return;
+    setSelectedEmployee(null);
+    setSelectedDepartmentName(deptName);
+  };
+
   const [showApplyLeaveModal, setShowApplyLeaveModal] = useState(
     moduleScope !== 'employees' && !!initialOpenApplyModal
   );
   const [showLogTimesheetModal, setShowLogTimesheetModal] = useState(false);
   const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
   const [showAddOfficeModal, setShowAddOfficeModal] = useState(false);
+  const [idCardBatch, setIdCardBatch] = useState<Employee[] | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleResendInvite = async (emp: Employee) => {
+    try {
+      await api.identity.resendInvite(emp.id);
+      onUpdateState((prev) => ({
+        ...prev,
+        employees: prev.employees.map((e) =>
+          e.id === emp.id ? { ...e, accountStatus: 'Invited' as const } : e
+        ),
+      }));
+      showToast(`Invite sent to ${emp.email}`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not resend the invite');
+    }
   };
 
   const handleSaveOfficeModalFromHRMS = async (data: OfficeModalData) => {
@@ -336,10 +355,13 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     return getEffectiveLeaveQuotas(currentEmpObj, state.customOptions?.leaveSettings);
   }, [currentEmpObj, state.customOptions?.leaveSettings]);
 
-  const casualQuota = formatLeaveDays(effectiveQuotas.effectiveQuotas.casualLeave);
-  const sickQuota = formatLeaveDays(effectiveQuotas.effectiveQuotas.sickLeave);
-  const earnedQuota = formatLeaveDays(effectiveQuotas.effectiveQuotas.earnedLeave);
-  const wfhQuota = formatLeaveDays(effectiveQuotas.effectiveQuotas.compOff);
+  // Server balances are already net of approved leave; the ledger total is the quota.
+  const fromServer = effectiveQuotas.balancesFromServer;
+  const quotaSource = fromServer ? effectiveQuotas.annualQuotas : effectiveQuotas.effectiveQuotas;
+  const casualQuota = formatLeaveDays(quotaSource.casualLeave);
+  const sickQuota = formatLeaveDays(quotaSource.sickLeave);
+  const earnedQuota = formatLeaveDays(quotaSource.earnedLeave);
+  const wfhQuota = formatLeaveDays(quotaSource.compOff);
 
   const casualUsed = formatLeaveDays(userLeaves
     .filter((l) => l.leaveType === 'Casual Leave' && l.status !== 'Rejected')
@@ -347,7 +369,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
   const casualPending = formatLeaveDays(userLeaves
     .filter((l) => l.leaveType === 'Casual Leave' && l.status === 'Pending')
     .reduce((sum, l) => sum + (l.daysCount || 1), 0));
-  const casualLeft = formatLeaveDays(Math.max(0, casualQuota - casualUsed));
+  const casualLeft = formatLeaveDays(
+    fromServer ? effectiveQuotas.effectiveQuotas.casualLeave : Math.max(0, casualQuota - casualUsed)
+  );
 
   const sickUsed = formatLeaveDays(userLeaves
     .filter((l) => l.leaveType === 'Sick Leave' && l.status !== 'Rejected')
@@ -355,7 +379,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
   const sickPending = formatLeaveDays(userLeaves
     .filter((l) => l.leaveType === 'Sick Leave' && l.status === 'Pending')
     .reduce((sum, l) => sum + (l.daysCount || 1), 0));
-  const sickLeft = formatLeaveDays(Math.max(0, sickQuota - sickUsed));
+  const sickLeft = formatLeaveDays(
+    fromServer ? effectiveQuotas.effectiveQuotas.sickLeave : Math.max(0, sickQuota - sickUsed)
+  );
 
   const earnedUsed = formatLeaveDays(userLeaves
     .filter((l) => ((l.leaveType as string) === 'Earned Leave' || (l.leaveType as string) === 'Earned / Privilege') && l.status !== 'Rejected')
@@ -363,7 +389,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
   const earnedPending = formatLeaveDays(userLeaves
     .filter((l) => ((l.leaveType as string) === 'Earned Leave' || (l.leaveType as string) === 'Earned / Privilege') && l.status === 'Pending')
     .reduce((sum, l) => sum + (l.daysCount || 1), 0));
-  const earnedLeft = formatLeaveDays(Math.max(0, earnedQuota - earnedUsed));
+  const earnedLeft = formatLeaveDays(
+    fromServer ? effectiveQuotas.effectiveQuotas.earnedLeave : Math.max(0, earnedQuota - earnedUsed)
+  );
 
   const wfhUsed = formatLeaveDays(userLeaves
     .filter((l) => l.leaveType === 'Work From Home' && l.status !== 'Rejected')
@@ -371,7 +399,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
   const wfhPending = formatLeaveDays(userLeaves
     .filter((l) => l.leaveType === 'Work From Home' && l.status === 'Pending')
     .reduce((sum, l) => sum + (l.daysCount || 1), 0));
-  const wfhLeft = formatLeaveDays(Math.max(0, wfhQuota - wfhUsed));
+  const wfhLeft = formatLeaveDays(
+    fromServer ? effectiveQuotas.effectiveQuotas.compOff : Math.max(0, wfhQuota - wfhUsed)
+  );
 
   const computedLeaveDays = useMemo(() => {
     if (dayMode === 'single') {
@@ -398,7 +428,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         .concat(
           state.employees.map(
             (e) =>
-              `"${e.employeeId}","${e.name}","${e.email}","${e.designation}","${e.department}","${e.location || 'Bengaluru HQ'}","${e.status}"`
+              `"${e.employeeId}","${e.name}","${e.email}","${e.designation}","${e.department}","${e.location || ''}","${e.status}"`
           )
         )
         .join('\n');
@@ -558,7 +588,14 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
   const handleApproveAllPending = async () => {
     setIsSaving(true);
     try {
-      const pendingIds = state.leaves.filter((l) => l.status === 'Pending').map((l) => l.id);
+      const pendingIds = state.leaves
+        .filter((l) => l.status === 'Pending' && canApproveLeave(state.currentPersona, l, state.employees))
+        .map((l) => l.id);
+      if (pendingIds.length === 0) {
+        showToast('No leave requests you can approve.');
+        setIsSaving(false);
+        return;
+      }
       
       // Execute all decideLeave calls concurrently
       await Promise.all(
@@ -573,7 +610,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       onUpdateState((prev) => ({
         ...prev,
         leaves: prev.leaves.map((l) =>
-          l.status === 'Pending'
+          pendingIds.includes(l.id)
             ? { ...l, status: 'Approved', approvedBy: state.currentPersona.name }
             : l
         ),
@@ -766,7 +803,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     }
   };
 
-  const handleAddEmployee = async (newEmpData: Partial<Employee>, password: string) => {
+  const handleAddEmployee = async (newEmpData: Partial<Employee>) => {
     const cleanEmail = (newEmpData.email || '').trim().toLowerCase();
     const cleanName = (newEmpData.name || '').trim().toLowerCase();
     const cleanPhone = (newEmpData.phone || '').trim();
@@ -787,8 +824,16 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       return;
     }
 
-    const selectedMgr = newEmpData.managerId
-      ? state.employees.find((e) => e.id === newEmpData.managerId)
+    const selectedMgrIds = Array.from(
+      new Set(
+        [
+          newEmpData.managerId,
+          ...((newEmpData.managerIds || []) as string[]),
+        ].filter(Boolean) as string[]
+      )
+    );
+    const selectedMgr = selectedMgrIds.length
+      ? state.employees.find((e) => e.id === selectedMgrIds[0])
       : undefined;
 
     let mappedRole: Role = 'employee';
@@ -812,7 +857,6 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       name: (newEmpData.name || '').trim(),
       fullName: (newEmpData.name || '').trim(),
       email: cleanEmail,
-      password: password.trim() || 'Welcome@123',
       phone: newEmpData.phone || '—',
       avatar: newEmpData.avatar || '',
       department: (newEmpData.department as any) || (isInstitution ? 'Faculty' : 'Development'),
@@ -821,12 +865,13 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       role: mappedRole,
       joiningDate: new Date().toISOString().substring(0, 10),
       employmentType: (newEmpData.employmentType as any) || 'Full-time',
-      location: newEmpData.location || 'Bengaluru HQ',
-      officeName: newEmpData.officeName || 'Bengaluru HQ',
+      location: newEmpData.location || '',
+      officeName: newEmpData.officeName || '',
       officeId: newEmpData.officeId,
       officeIds: newEmpData.officeIds || [],
       offices: newEmpData.offices,
       managerId: selectedMgr ? selectedMgr.id : '',
+      managerIds: selectedMgrIds,
       managerName: selectedMgr ? selectedMgr.name : '',
       lineManager: selectedMgr
         ? {
@@ -906,7 +951,6 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         firstName,
         lastName,
         email: newEmp.email,
-        password: (password && password.trim()) || 'Welcome@123',
         phone: newEmp.phone,
         officeName: newEmp.officeName,
         officeId: newEmp.officeId,
@@ -916,9 +960,12 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         designation: newEmp.designation,
         role: toApiAuthRole(newEmp.role),
         reportingManagerId: selectedMgr?.id,
+        managerIds: selectedMgrIds,
+        employmentType: newEmp.employmentType,
         employmentStatus: newEmp.status?.toLowerCase() === 'active' ? 'active' : newEmp.status?.toLowerCase() === 'probation' ? 'on_probation' : 'active',
         accountStatus: 'Not Activated',
         dateOfJoining: newEmp.joiningDate,
+        sendInvite: state.customOptions?.onboardingAutomation?.autoSendWelcomeEmail !== false,
       });
 
       if (!createRes.success) {
@@ -927,6 +974,10 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
 
       if (createRes.data?.id) {
         newEmp.id = createRes.data.id;
+      }
+      const inviteSent = Boolean((createRes.data as any)?.invite_sent);
+      if (inviteSent) {
+        newEmp.accountStatus = 'Invited';
       }
 
       if (newEmp.salaryDetails) {
@@ -963,8 +1014,10 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         notifications: [
           {
             id: `notif_${Date.now()}`,
-            title: 'Employee Invitation Sent',
-            message: `Invitation sent to ${newEmp.name} (${newEmp.email}). Account status: Not Activated.`,
+            title: inviteSent ? 'Employee Invitation Sent' : 'Employee Added',
+            message: inviteSent
+              ? `Setup email sent to ${newEmp.name} (${newEmp.email}). They'll create their own password from the link.`
+              : `${newEmp.name} was added, but the invite email could not be sent. Use "Resend invite" in the directory.`,
             timestamp: 'Just now',
             category: 'HR' as const,
             priority: 'medium' as const,
@@ -978,12 +1031,12 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         ],
       }));
 
-      if (newEmp.accountStatus === 'Not Activated' || !newEmp.isActivated) {
-        showToast(`Invitation automatically sent to ${newEmp.email} via Cognito.`);
-      }
-
       setShowAddEmployeeModal(false);
-      showToast('Employee added successfully');
+      showToast(
+        inviteSent
+          ? `Invite sent to ${newEmp.email}`
+          : `Employee added. Invite email failed, so use "Resend invite" to try again.`
+      );
     } catch (err) {
       console.error('Failed to add employee', err);
       showToast(err instanceof Error ? err.message : 'Failed to add employee');
@@ -1076,7 +1129,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
 
       if (mergedEmp.bankDetails && mergedEmp.bankDetails.accountNumber && mergedEmp.bankDetails.accountNumber !== '—') {
         await api.identity.updateBankDetails(mergedEmp.id, {
-          accountHolderName: mergedEmp.name,
+          accountHolderName: mergedEmp.bankDetails.accountHolderName || mergedEmp.name,
           accountNumber: mergedEmp.bankDetails.accountNumber,
           bankName: mergedEmp.bankDetails.bankName,
           routingOrIfscCode: mergedEmp.bankDetails.ifscCode,
@@ -1171,6 +1224,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
             setSelectedEmployee(emp);
           }
         }}
+        onOpenDepartment={handleSelectDepartment}
         onUpdateEmployee={handleUpdateEmployee}
         onBack={() => {
           setSelectedEmployee(null);
@@ -1178,6 +1232,28 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         }}
         state={state}
         initialTab={selectedEmployeeTab}
+      />
+    );
+  }
+
+  if (selectedDepartmentName) {
+    return (
+      <DepartmentDetailView
+        departmentName={selectedDepartmentName}
+        state={state}
+        canEdit={canEditProfiles}
+        onBack={() => setSelectedDepartmentName(null)}
+        onSelectEmployee={(emp) => {
+          handleSelectEmployee(emp);
+        }}
+        onSaved={(patch) => {
+          onUpdateState((prev) => applyDepartmentLocalUpdate(prev, patch));
+          setSelectedDepartmentName(patch.name);
+        }}
+        onDeleted={(id, name) => {
+          onUpdateState((prev) => removeDepartmentLocal(prev, id, name));
+          setSelectedDepartmentName(null);
+        }}
       />
     );
   }
@@ -1217,117 +1293,151 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     );
   };
 
+  const peopleTabs =
+    moduleScope === 'employees'
+      ? canEditProfiles
+        ? isInstitution
+          ? [
+              { id: 'employees', label: 'Staff & Faculty' },
+              { id: 'students', label: 'Students' },
+              { id: 'directory', label: 'Staff Cards' },
+              { id: 'org_chart', label: 'Org Chart' },
+            ]
+          : [
+              { id: 'employees', label: 'Employees' },
+              { id: 'directory', label: 'Directory' },
+              { id: 'org_chart', label: 'Org Chart' },
+            ]
+        : isInstitution
+          ? [
+              { id: 'my_team', label: 'My Team' },
+              { id: 'organization', label: 'Organization' },
+              { id: 'org_chart', label: 'Org Chart' },
+              { id: 'students', label: 'Students' },
+            ]
+          : [
+              { id: 'my_team', label: 'My Team' },
+              { id: 'organization', label: 'Organization' },
+              { id: 'org_chart', label: 'Org Chart' },
+            ]
+      : canEditProfiles
+        ? isInstitution
+          ? [
+              { id: 'employees', label: 'Staff & Faculty' },
+              { id: 'students', label: 'Students' },
+              { id: 'directory', label: 'Staff Cards' },
+              { id: 'org_chart', label: 'Org Chart' },
+              { id: 'attendance', label: 'Staff Attendance' },
+              { id: 'leaves', label: 'Leave Applications' },
+            ]
+          : [
+              { id: 'employees', label: 'Employees' },
+              { id: 'directory', label: 'Directory' },
+              { id: 'org_chart', label: 'Org Chart' },
+              { id: 'attendance', label: 'Attendance' },
+              { id: 'leaves', label: 'Leave Applications' },
+            ]
+        : isInstitution
+          ? [
+              { id: 'my_team', label: 'My Team' },
+              { id: 'organization', label: 'Organization' },
+              { id: 'org_chart', label: 'Org Chart' },
+              { id: 'students', label: 'Students' },
+              { id: 'attendance', label: 'Staff Attendance' },
+              { id: 'leaves', label: 'Leave Applications' },
+            ]
+          : [
+              { id: 'my_team', label: 'My Team' },
+              { id: 'organization', label: 'Organization' },
+              { id: 'org_chart', label: 'Org Chart' },
+              { id: 'attendance', label: 'Time & Attendance' },
+              { id: 'leaves', label: 'Leave Applications' },
+            ];
+
   return (
-    <div className="space-y-3.5 w-full max-w-full min-w-0">
-      {/* 1. Header & Quick Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg sm:text-xl font-bold tracking-tight text-[#0f172a]">
-            {moduleScope === 'attendance'
-              ? 'Attendance & Leaves'
-              : isInstitution
-              ? 'Directory & Records'
-              : 'Employees'}
-          </h1>
-          <p className="text-xs text-[#64748b] mt-0.5 font-medium">
-            Manage organization members, reporting structure, and staff profiles
-          </p>
-        </div>
+    <div className={moduleScope === 'employees' ? 'people-studio' : 'w-full min-w-0 max-w-full space-y-3.5'}>
+      <div className={moduleScope === 'employees' ? 'people-studio__head' : 'flex flex-col justify-between gap-3 sm:flex-row sm:items-center'}>
+        <h1 className={moduleScope === 'employees' ? 'people-studio__title' : 'text-lg font-bold tracking-tight text-[#0f172a] sm:text-xl'}>
+          {activeTab === 'directory'
+            ? (isInstitution ? 'Staff directory' : 'People directory')
+            : activeTab === 'org_chart'
+            ? 'Organization chart'
+            : (activeTab as string) === 'my_team'
+            ? 'My team'
+            : (activeTab as string) === 'organization'
+            ? 'Organization'
+            : moduleScope === 'attendance'
+            ? 'Attendance & Leaves'
+            : isInstitution
+            ? 'Staff'
+            : 'Employees'}
+        </h1>
 
-        <div className="flex items-center gap-2 shrink-0">
-          {canEditProfiles && (
-            <>
-              <button
-                onClick={handleDownloadCSV}
-                className="flex items-center gap-1.5 rounded-lg border border-[#e2e8f0] bg-white hover:bg-slate-50 px-3 py-1.5 text-xs font-bold text-[#0f172a] shadow-2xs transition-all cursor-pointer"
-              >
-                <Download className="h-3.5 w-3.5 text-slate-500" /> Export CSV
-              </button>
+        {canEditProfiles && moduleScope === 'employees' && (
+          <div className="people-studio__actions">
+            <button type="button" onClick={handleDownloadCSV} className="people-studio__btn people-studio__btn--secondary">
+              <Download className="h-3.5 w-3.5" /> Export CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => setIdCardBatch(state.employees || [])}
+              disabled={!(state.employees && state.employees.length)}
+              className="people-studio__btn people-studio__btn--secondary"
+            >
+              <Printer className="h-3.5 w-3.5" /> Print ID cards
+            </button>
+            <button type="button" onClick={() => setShowAddEmployeeModal(true)} className="people-studio__btn people-studio__btn--primary">
+              <Plus className="h-3.5 w-3.5" /> {isInstitution ? 'Add staff' : 'Add employee'}
+            </button>
+          </div>
+        )}
 
-              <button
-                onClick={() => setShowAddEmployeeModal(true)}
-                className="flex items-center gap-1.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] px-3.5 py-1.5 text-xs font-bold text-white shadow-sm transition-all cursor-pointer active:scale-98"
-              >
-                <Plus className="h-3.5 w-3.5" /> {isInstitution ? 'Add Staff' : 'Add Employee'}
-              </button>
-            </>
-          )}
-        </div>
+        {canEditProfiles && moduleScope !== 'employees' && (
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={handleDownloadCSV}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 transition-all hover:-translate-y-px hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
+            >
+              <Download className="h-3.5 w-3.5 text-slate-500" /> Export CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => setIdCardBatch(state.employees || [])}
+              disabled={!(state.employees && state.employees.length)}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 transition-all hover:-translate-y-px hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Printer className="h-3.5 w-3.5 text-slate-500" /> Print ID cards
+            </button>
+            <button
+              onClick={() => setShowAddEmployeeModal(true)}
+              className="flex items-center gap-1.5 rounded-xl bg-[#2563eb] px-4 py-2.5 text-xs font-bold text-white shadow-[0_12px_22px_-14px_rgba(37,99,235,0.9)] transition-all hover:-translate-y-px hover:bg-[#1d4ed8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer"
+            >
+              <Plus className="h-3.5 w-3.5" /> {isInstitution ? 'Add Staff' : 'Add Employee'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* 2. Compact Modern Tab Switcher */}
       {moduleScope !== 'attendance' && (
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar touch-pan-x py-0.5 w-full">
-          {(moduleScope === 'employees'
-            ? (canEditProfiles
-              ? (isInstitution
-                  ? [
-                      { id: 'employees', label: 'Staff & Faculty', icon: Users },
-                      { id: 'students', label: 'Students', icon: GraduationCap },
-                      { id: 'directory', label: 'Staff Cards', icon: LayoutGrid },
-                      { id: 'employee_settings', label: 'Settings', icon: SlidersHorizontal },
-                    ]
-                  : [
-                      { id: 'employees', label: 'Employees', icon: Users },
-                      { id: 'directory', label: 'Directory', icon: LayoutGrid },
-                      { id: 'employee_settings', label: 'Settings', icon: SlidersHorizontal },
-                    ])
-              : (isInstitution
-                  ? [
-                      { id: 'my_team', label: 'My Team', icon: UserCheck },
-                      { id: 'organization', label: 'Organization', icon: Users },
-                      { id: 'students', label: 'Students', icon: GraduationCap },
-                    ]
-                  : [
-                      { id: 'my_team', label: 'My Team', icon: UserCheck },
-                      { id: 'organization', label: 'Organization', icon: Users },
-                    ]))
-            : (canEditProfiles
-              ? (isInstitution
-                  ? [
-                      { id: 'employees', label: 'Staff & Faculty', icon: Users },
-                      { id: 'students', label: 'Students', icon: GraduationCap },
-                      { id: 'directory', label: 'Staff Cards', icon: LayoutGrid },
-                      { id: 'attendance', label: 'Staff Attendance', icon: Clock },
-                      { id: 'leaves', label: 'Leave Applications', icon: Calendar },
-                      { id: 'employee_settings', label: 'Settings', icon: SlidersHorizontal },
-                    ]
-                  : [
-                      { id: 'employees', label: 'Employees', icon: Users },
-                      { id: 'directory', label: 'Directory', icon: LayoutGrid },
-                      { id: 'attendance', label: 'Attendance', icon: Clock },
-                      { id: 'leaves', label: 'Leave Applications', icon: Calendar },
-                      { id: 'employee_settings', label: 'Settings', icon: SlidersHorizontal },
-                    ])
-              : (isInstitution
-                  ? [
-                      { id: 'my_team', label: 'My Team', icon: UserCheck },
-                      { id: 'organization', label: 'Organization', icon: Users },
-                      { id: 'students', label: 'Students', icon: GraduationCap },
-                      { id: 'attendance', label: 'Staff Attendance', icon: Clock },
-                      { id: 'leaves', label: 'Leave Applications', icon: Calendar },
-                    ]
-                  : [
-                      { id: 'my_team', label: 'My Team', icon: UserCheck },
-                      { id: 'organization', label: 'Organization', icon: Users },
-                      { id: 'attendance', label: 'Time & Attendance', icon: Clock },
-                      { id: 'leaves', label: 'Leave Applications', icon: Calendar },
-                    ]))
-          ).map((tab) => {
-            const Icon = tab.icon;
+        <div className={moduleScope === 'employees' ? 'people-studio__tabs no-scrollbar touch-pan-x' : 'flex w-full items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100/80 p-1.5 no-scrollbar touch-pan-x'}>
+          {peopleTabs.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                  isActive
-                    ? 'bg-[#2563eb] text-white shadow-sm'
-                    : 'bg-white hover:bg-slate-50 text-slate-700 border border-[#e2e8f0] shadow-2xs'
-                }`}
+                className={
+                  moduleScope === 'employees'
+                    ? `people-studio__tab${isActive ? ' is-active' : ''}`
+                    : `flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold whitespace-nowrap transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer ${
+                        isActive
+                          ? 'bg-white text-[#0f172a] shadow-sm'
+                          : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
+                      }`
+                }
               >
-                {Icon && <Icon className={`h-3.5 w-3.5 shrink-0 ${isActive ? 'text-white stroke-[2.2]' : 'text-slate-500 stroke-[1.8]'}`} />}
-                <span>{tab.label}</span>
+                {tab.label}
               </button>
             );
           })}
@@ -1354,6 +1464,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
             else setActiveTab(canEditProfiles ? 'employees' : ('organization' as any));
           }}
           onSelectEmployee={handleSelectEmployee}
+          onSelectDepartment={handleSelectDepartment}
+          onResendInvite={isSuperAdmin || isHR ? handleResendInvite : undefined}
+          onPrintIdCards={isSuperAdmin || isHR || isManager ? setIdCardBatch : undefined}
         />
       )}
 
@@ -1372,6 +1485,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
           isInstitution={isInstitution}
           accessibleEmployees={canEditProfiles ? state.employees : accessibleEmployees}
           onSelectEmployee={handleSelectEmployee}
+          onPrintIdCards={isSuperAdmin || isHR || isManager ? setIdCardBatch : undefined}
         />
       )}
 
@@ -1883,65 +1997,29 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         />
       )}
 
-      {/* TAB: ATTENDANCE SETTINGS */}
-      {activeTab === 'settings' && (
-        <AttendanceSettingsView
-          state={state}
-          onUpdateState={onUpdateState}
-        />
-      )}
-
-      {/* TAB: EMPLOYEE SETTINGS */}
-      {activeTab === 'employee_settings' && (
-        <EmployeeSettingsView
-          state={state}
-          onUpdateState={onUpdateState}
-        />
-      )}
-
       {/* TAB 5: PAYROLL */}
       {activeTab === 'payroll' && (
         <div className="space-y-4">
           <div className="flex items-center gap-2 border-b border-[#282830] pb-2">
-            <button
-              onClick={() => setPayrollViewMode('runs')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                payrollViewMode === 'runs'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-[#9e9ea7] hover:bg-[#18181d]'
-              }`}
-            >
+            <span className="px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 text-white shadow-sm">
               Payroll Processing & Runs
-            </button>
-            <button
-              onClick={() => setPayrollViewMode('settings')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-                payrollViewMode === 'settings'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-[#9e9ea7] hover:bg-[#18181d]'
-              }`}
-            >
-              <Settings className="h-3.5 w-3.5" />
-              <span>Payroll Settings & Groups</span>
-            </button>
+            </span>
+            <a href="/settings?section=payroll" className="px-4 py-2 text-xs font-bold text-[#9e9ea7] transition-colors hover:bg-[#18181d]">Payroll settings &amp; groups</a>
           </div>
 
-          {payrollViewMode === 'settings' ? (
-            <PayrollSettingsView state={state} onUpdateState={onUpdateState} />
-          ) : (
-            <div className="rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#121214] p-5 shadow-2xs space-y-4">
+          <div className="rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#121214] p-5 shadow-2xs space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-bold text-slate-900 dark:text-white">Monthly Payroll Processing (August 2026)</h2>
                   <p className="text-xs text-slate-500 dark:text-[#9e9ea7]">Multi-group disbursement records across Monthly, Hourly, and Statutory structures</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setPayrollViewMode('settings')}
-                    className="rounded-xl border border-slate-200 dark:border-[#383842] bg-white dark:bg-[#18181d] px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-[#222228] cursor-pointer transition-all"
+                  <a
+                    href="/settings?section=payroll"
+                    className="rounded-xl border border-slate-200 dark:border-[#383842] bg-white dark:bg-[#18181d] px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-[#222228]"
                   >
                     Configure Groups
-                  </button>
+                  </a>
                   <button
                     onClick={async () => {
                       setIsSaving(true);
@@ -2025,8 +2103,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+          </div>
         </div>
       )}
 
@@ -2356,6 +2433,15 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         onClose={() => setShowAddOfficeModal(false)}
         onSave={handleSaveOfficeModalFromHRMS}
       />
+
+      {idCardBatch && (
+        <BulkIdCardStudio
+          employees={idCardBatch}
+          organization={state.organization}
+          isInstitution={isInstitution}
+          onClose={() => setIdCardBatch(null)}
+        />
+      )}
 
       {/* Toast Alert */}
       {toastMessage && (

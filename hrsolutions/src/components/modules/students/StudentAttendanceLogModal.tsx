@@ -89,11 +89,11 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900 cursor-default"
+        className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)] border-l border-[var(--border-color)] shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-[var(--text-primary)] cursor-default"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Simplified Header */}
-        <div className="p-4 sm:p-6 pb-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 gap-2">
+        <div className="p-4 sm:p-6 pb-4 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0 gap-2">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <img
               src={
@@ -101,16 +101,16 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
                 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2394a3b8"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>'
               }
               alt={student.name}
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover ring-2 ring-slate-100 bg-slate-50 shrink-0"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover ring-2 ring-slate-100 bg-[var(--bg-surface-subtle)] shrink-0"
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">{student.name}</h3>
-                <span className="bg-slate-100 text-slate-700 font-mono text-[10px] sm:text-[11px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md shrink-0">
+                <h3 className="text-base sm:text-lg font-bold text-[var(--text-primary)] tracking-tight truncate">{student.name}</h3>
+                <span className="bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-mono text-[10px] sm:text-[11px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md shrink-0">
                   #{student.rollNumber}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 font-medium mt-0.5 truncate">
+              <p className="text-xs text-[var(--text-muted)] font-medium mt-0.5 truncate">
                 {student.grade || '—'} {student.section ? `• Sec ${student.section}` : ''} • STU-{student.rollNumber}
               </p>
             </div>
@@ -129,7 +129,7 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
                   </span>
                 )}
               </div>
-              <span className="text-[10px] font-semibold text-slate-400">
+              <span className="text-[10px] font-semibold text-[var(--text-muted)]">
                 {presentDays + lateDays}/{totalDays} Present
               </span>
             </div>
@@ -137,7 +137,7 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
             <button
               type="button"
               onClick={onClose}
-              className="h-8 w-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors cursor-pointer"
+              className="h-8 w-8 rounded-full bg-[var(--bg-surface-subtle)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] flex items-center justify-center transition-colors cursor-pointer"
               title="Close"
             >
               <X className="h-4 w-4 stroke-[2.2]" />
@@ -146,11 +146,11 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
         </div>
 
         {/* Content Body */}
-        <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar flex-1 text-xs bg-white">
+        <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar flex-1 text-xs bg-[var(--bg-surface)]">
           {/* Low Attendance Alert Banner */}
           {isBelowThreshold && (
-            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-900 shadow-2xs animate-in fade-in">
-              <div className="w-8 h-8 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center shrink-0 text-amber-700">
+            <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-900 shadow-2xs animate-in fade-in">
+              <div className="w-8 h-8 rounded-lg bg-amber-100 border border-amber-200 flex items-center justify-center shrink-0 text-amber-700">
                 <AlertTriangle className="h-4 w-4" />
               </div>
               <div className="flex-1 min-w-0">
@@ -168,11 +168,11 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
           )}
 
           {/* Streamlined Stats Strip & Progress Bar */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-3">
+          <div className="p-4 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] space-y-3">
             <div className="grid grid-cols-4 gap-2 text-center">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Class Days</span>
-                <span className="text-lg font-extrabold text-slate-900">{totalDays}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] block">Class Days</span>
+                <span className="text-lg font-extrabold text-[var(--text-primary)]">{totalDays}</span>
               </div>
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block">Present</span>
@@ -210,7 +210,7 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
 
           {/* Filter Tabs & Search */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1">
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+            <div className="flex items-center gap-1 bg-[var(--bg-surface-subtle)] p-1 rounded-lg">
               {['All', 'Present', 'Late', 'On Leave'].map((st) => {
                 const isSel = statusFilter === st;
                 return (
@@ -220,8 +220,8 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
                     onClick={() => setStatusFilter(st)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       isSel
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-500 hover:text-slate-900'
+                        ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] '
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     {st}
@@ -231,21 +231,21 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
             </div>
 
             <div className="relative w-full sm:w-52">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
               <input
                 type="text"
                 placeholder="Filter date..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 transition-colors font-medium"
+                className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] pl-8 pr-3 py-1.5 text-xs text-[var(--text-primary)] placeholder-slate-400 outline-none focus:border-blue-500 transition-colors font-medium"
               />
             </div>
           </div>
 
           {/* Clean Minimal Table */}
-          <div className="rounded-2xl border border-slate-100 bg-white overflow-hidden text-xs">
+          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-hidden text-xs">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50 text-slate-400 uppercase font-bold text-[10px] border-b border-slate-100">
+              <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] uppercase font-bold text-[10px] border-b border-[var(--border-color)]">
                 <tr>
                   <th className="p-3 pl-4">Date</th>
                   <th className="p-3">Check-In</th>
@@ -254,26 +254,26 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
                   <th className="p-3 text-right pr-4">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50 text-slate-700 font-medium">
+              <tbody className="divide-y divide-slate-50 text-[var(--text-secondary)] font-medium">
                 {filteredLogs.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-6 text-center text-slate-400">
+                    <td colSpan={5} className="p-6 text-center text-[var(--text-muted)]">
                       No logs found.
                     </td>
                   </tr>
                 ) : (
                   filteredLogs.map((log) => (
-                    <tr key={log.id} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="p-3 pl-4 font-bold text-slate-900 whitespace-nowrap">
+                    <tr key={log.id} className="hover:bg-[var(--bg-surface-subtle)]/60 transition-colors">
+                      <td className="p-3 pl-4 font-bold text-[var(--text-primary)] whitespace-nowrap">
                         {formatDateDisplay(log.date)}
                       </td>
-                      <td className="p-3 font-mono text-slate-700 whitespace-nowrap">
+                      <td className="p-3 font-mono text-[var(--text-secondary)] whitespace-nowrap">
                         {log.checkIn || '—'}
                       </td>
-                      <td className="p-3 font-mono text-slate-500 whitespace-nowrap">
+                      <td className="p-3 font-mono text-[var(--text-muted)] whitespace-nowrap">
                         {log.checkOut || '—'}
                       </td>
-                      <td className="p-3 font-mono text-slate-500 whitespace-nowrap">
+                      <td className="p-3 font-mono text-[var(--text-muted)] whitespace-nowrap">
                         {log.workingHours ? `${Math.floor(log.workingHours)}h ${Math.round((log.workingHours % 1) * 60)}m` : '—'}
                       </td>
                       <td className="p-3 text-right pr-4 whitespace-nowrap">
@@ -300,7 +300,7 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
         </div>
 
         {/* Minimal Footer */}
-        <div className="p-4 sm:p-5 sm:px-6 border-t border-slate-100 bg-white flex items-center justify-between shrink-0 pb-7 sm:pb-5">
+        <div className="p-4 sm:p-5 sm:px-6 border-t border-[var(--border-color)] bg-[var(--bg-surface)] flex items-center justify-between shrink-0 pb-7 sm:pb-5">
           <Link
             href="/student-attendance"
             className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 transition-colors"
@@ -311,7 +311,7 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-colors cursor-pointer"
+            className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-colors cursor-pointer"
           >
             Close
           </button>

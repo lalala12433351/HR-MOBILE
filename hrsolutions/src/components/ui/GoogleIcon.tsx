@@ -27,6 +27,7 @@ export const GoogleIcon: React.FC<GoogleIconProps> = ({
         fontSize: sizePx,
         width: sizePx,
         height: sizePx,
+        fontFeatureSettings: '"liga" 1',
         fontVariationSettings: `'FILL' ${filled ? 1 : 0}, 'wght' ${weight}, 'GRAD' 0, 'opsz' 24`,
       }}
       aria-hidden="true"

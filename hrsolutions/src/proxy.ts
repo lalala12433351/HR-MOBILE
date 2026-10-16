@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const APP_ORIGIN = (process.env.NEXT_PUBLIC_APP_ORIGIN || 'http://localhost:3000').replace(/\/+$/, '');
-const MASTER_ADMIN_ORIGIN = (process.env.NEXT_PUBLIC_MASTER_ADMIN_ORIGIN || 'http://localhost:3000').replace(
-  /\/+$/,
-  ''
-);
+const LOCAL_APP_ORIGIN = 'http://localhost:3000';
+const APP_ORIGIN = (
+  process.env.NEXT_PUBLIC_APP_ORIGIN ||
+  (process.env.NODE_ENV === 'production' ? 'https://app.pixbe.in' : LOCAL_APP_ORIGIN)
+).replace(/\/+$/, '');
+const MASTER_ADMIN_ORIGIN = (
+  process.env.NEXT_PUBLIC_MASTER_ADMIN_ORIGIN ||
+  (process.env.NODE_ENV === 'production' ? 'https://masteradmin.pixbe.in' : LOCAL_APP_ORIGIN)
+).replace(/\/+$/, '');
 
 function hostOf(origin: string): string {
   try {
@@ -46,6 +50,18 @@ function requestHost(request: NextRequest): string {
   return (request.headers.get('host') || request.nextUrl.host || '').toLowerCase();
 }
 
+/** Public origin as the browser sees it (not the loopback URL behind nginx). */
+function requestPublicOrigin(request: NextRequest): string {
+  const host = requestHost(request);
+  if (!host) return request.nextUrl.origin;
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  const proto = (
+    forwardedProto?.split(',')[0].trim() ||
+    (isLoopbackHost(host) ? request.nextUrl.protocol.replace(/:$/, '') : 'https')
+  ).replace(/:$/, '');
+  return `${proto}://${host}`;
+}
+
 function isMasterAdminRequest(request: NextRequest): boolean {
   const host = hostnameOnly(requestHost(request));
   if (looksLikeMasterAdminHostname(host)) return true;
@@ -58,8 +74,11 @@ function isAppRequest(request: NextRequest): boolean {
   const host = hostnameOnly(requestHost(request));
   if (looksLikeMasterAdminHostname(host)) return false;
   const appHost = hostnameOnly(hostOf(APP_ORIGIN));
-  if (SAME_HOST) return host === appHost || isLoopbackHost(host);
-  return host === appHost;
+  if (host === appHost) return true;
+  if (SAME_HOST && isLoopbackHost(host)) return true;
+  // Public host while APP_ORIGIN still defaults to localhost (missing NEXT_PUBLIC_*).
+  if (isLoopbackHost(appHost) && !isLoopbackHost(host)) return true;
+  return false;
 }
 
 const TENANT_PREFIXES = [
@@ -72,10 +91,32 @@ const TENANT_PREFIXES = [
   '/student-login',
   '/student-attendance',
   '/impersonate',
+  '/accept-invite',
+  '/forgot-password',
+  '/reset-password',
 ];
 
 function isTenantPath(pathname: string): boolean {
   return TENANT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+function publicProto(request: NextRequest): string {
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  const host = hostnameOnly(requestHost(request));
+  const proto = (
+    forwardedProto?.split(',')[0].trim() ||
+    (isLoopbackHost(host) ? request.nextUrl.protocol.replace(/:$/, '') : 'https')
+  ).replace(/:$/, '');
+  return `${proto}:`;
+}
+
+/** Never send a public visitor to a loopback URL baked into env defaults. */
+function publicRedirectBase(preferred: string, request: NextRequest): string {
+  const host = hostnameOnly(requestHost(request));
+  if (!isLoopbackHost(host) && isLoopbackHost(hostOf(preferred))) {
+    return requestPublicOrigin(request);
+  }
+  return preferred;
 }
 
 /** Prefer configured APP_ORIGIN; if unset, derive app.<root> from masteradmin.<root>. */
@@ -84,8 +125,10 @@ function resolveAppOrigin(request: NextRequest): string {
   const host = hostnameOnly(requestHost(request));
   if (looksLikeMasterAdminHostname(host) && host.includes('.')) {
     const root = host.replace(/^(masteradmin|masteadmin)\./, '');
-    const proto = request.nextUrl.protocol === 'http:' ? 'http:' : 'https:';
-    return `${proto}//app.${root}`;
+    return `${publicProto(request)}//app.${root}`;
+  }
+  if (!isLoopbackHost(host) && host.includes('.')) {
+    return requestPublicOrigin(request);
   }
   return APP_ORIGIN;
 }
@@ -94,10 +137,12 @@ function resolveMasterAdminOrigin(request: NextRequest): string {
   if (process.env.NEXT_PUBLIC_MASTER_ADMIN_ORIGIN) return MASTER_ADMIN_ORIGIN;
   const host = hostnameOnly(requestHost(request));
   if (!isLoopbackHost(host) && host.includes('.')) {
-    const proto = request.nextUrl.protocol === 'http:' ? 'http:' : 'https:';
     // app.pixbe.in → masteradmin.pixbe.in
     if (host.startsWith('app.')) {
-      return `${proto}//masteradmin.${host.slice(4)}`;
+      return `${publicProto(request)}//masteradmin.${host.slice(4)}`;
+    }
+    if (looksLikeMasterAdminHostname(host)) {
+      return requestPublicOrigin(request);
     }
   }
   return MASTER_ADMIN_ORIGIN;
@@ -108,6 +153,10 @@ export function proxy(request: NextRequest) {
   const onMasterHost = isMasterAdminRequest(request);
   const onAppHost = isAppRequest(request);
   const host = hostnameOnly(requestHost(request));
+  const publicOrigin = requestPublicOrigin(request);
+  // Loopback browser (local next dev) always serves both apps, even if NEXT_PUBLIC_*
+  // points at production split hosts for emails and deployed links.
+  const sameHost = isLoopbackHost(host);
   // Apply split-host rules whenever the request is clearly on the platform console,
   // even if NEXT_PUBLIC_* origins are unset (both defaulting to localhost).
   const enforceMasterHost = onMasterHost && !isLoopbackHost(host);
@@ -115,20 +164,20 @@ export function proxy(request: NextRequest) {
   const masterOrigin = resolveMasterAdminOrigin(request);
 
   // --- Split-host enforcement ---
-  if (!SAME_HOST || enforceMasterHost) {
+  if (!sameHost || enforceMasterHost) {
     // App host: never serve the platform console
     if (onAppHost && (pathname === '/master-admin' || pathname.startsWith('/master-admin/'))) {
-      return NextResponse.redirect(new URL('/master-admin', masterOrigin));
+      return NextResponse.redirect(new URL('/master-admin', publicRedirectBase(masterOrigin, request)));
     }
 
     // Master-admin host: console only — redirect (not rewrite) so client pathname is /master-admin
     if (onMasterHost) {
       if (pathname === '/' || pathname === '') {
-        const dest = new URL('/master-admin', request.url);
+        const dest = new URL('/master-admin', publicOrigin);
         return NextResponse.redirect(dest);
       }
       if (isTenantPath(pathname)) {
-        const appBase = SAME_HOST && !enforceMasterHost ? request.url : appOrigin;
+        const appBase = sameHost && !enforceMasterHost ? publicOrigin : publicRedirectBase(appOrigin, request);
         return NextResponse.redirect(new URL(pathname + request.nextUrl.search, appBase));
       }
     }
@@ -139,7 +188,7 @@ export function proxy(request: NextRequest) {
     const token = request.cookies.get('BOS_AUTH_TOKEN')?.value;
 
     if (!token && !pathname.startsWith('/register') && !pathname.startsWith('/login')) {
-      const loginBase = SAME_HOST || onAppHost ? request.url : appOrigin;
+      const loginBase = publicRedirectBase(sameHost || onAppHost ? publicOrigin : appOrigin, request);
       return NextResponse.redirect(new URL('/login', loginBase));
     }
   }
@@ -168,5 +217,8 @@ export const config = {
     '/student-attendance/:path*',
     '/impersonate',
     '/impersonate/:path*',
+    '/accept-invite',
+    '/forgot-password',
+    '/reset-password',
   ],
 };

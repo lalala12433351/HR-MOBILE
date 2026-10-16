@@ -34,7 +34,7 @@ export function AdminPageSkeleton({
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
-            className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3"
+            className="rounded-lg border border-[var(--border-color)]/80 bg-[var(--bg-surface)] p-4 space-y-3"
           >
             <SkeletonText width="45%" />
             <Skeleton height={28} width="40%" borderRadius="0.375rem" />
@@ -49,8 +49,8 @@ export function AdminPageSkeleton({
         <Skeleton height={36} width={100} borderRadius="0.5rem" />
       </div>
 
-      <div className="rounded-xl border border-slate-200/80 bg-white overflow-hidden">
-        <div className="flex items-center gap-4 px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+      <div className="rounded-lg border border-[var(--border-color)]/80 bg-[var(--bg-surface)] overflow-hidden">
+        <div className="flex items-center gap-4 px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/80">
           <Skeleton height={12} width="20%" borderRadius="0.25rem" />
           <Skeleton height={12} width="14%" borderRadius="0.25rem" className="hidden sm:block" />
           <Skeleton height={12} width="12%" borderRadius="0.25rem" className="hidden md:block" />

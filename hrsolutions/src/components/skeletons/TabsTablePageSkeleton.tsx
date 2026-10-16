@@ -33,7 +33,7 @@ export function TabsTablePageSkeleton({
       </div>
 
       {/* Tab strip */}
-      <div className="flex gap-2 overflow-hidden border-b border-slate-200 pb-3">
+      <div className="flex gap-2 overflow-hidden border-b border-[var(--border-color)] pb-3">
         {Array.from({ length: tabCount }).map((_, i) => (
           <Skeleton
             key={i}
@@ -54,9 +54,9 @@ export function TabsTablePageSkeleton({
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-slate-200/80 bg-white overflow-hidden">
+      <div className="rounded-lg border border-[var(--border-color)]/80 bg-[var(--bg-surface)] overflow-hidden">
         {/* Header row */}
-        <div className="flex items-center gap-4 px-4 py-3 border-b border-slate-100 bg-slate-50/80">
+        <div className="flex items-center gap-4 px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/80">
           <Skeleton height={12} width={24} borderRadius="0.25rem" />
           <Skeleton height={12} width="18%" borderRadius="0.25rem" />
           <Skeleton height={12} width="14%" borderRadius="0.25rem" className="hidden sm:block" />

@@ -36,7 +36,7 @@ export function ListFeedPageSkeleton({
         {Array.from({ length: itemCount }).map((_, i) => (
           <div
             key={i}
-            className="rounded-xl border border-slate-200/80 bg-white p-4 flex gap-3"
+            className="rounded-lg border border-[var(--border-color)]/80 bg-[var(--bg-surface)] p-4 flex gap-3"
           >
             <SkeletonAvatar size={40} />
             <div className="flex-1 min-w-0 space-y-2">

@@ -1,4 +1,4 @@
-import { AttendanceRecord } from '@/types';
+import { AttendanceRecord, AttendanceSession } from '@/types';
 
 /** Raw punch row shape returned by GET /attendance/punches */
 export interface RawAttendancePunch {
@@ -30,7 +30,7 @@ export interface AggregatePunchOptions {
   employeeLookup?: Record<string, { name?: string; avatar?: string }>;
 }
 
-function toLocalDateKey(d: Date): string {
+export function toLocalDateKey(d: Date = new Date()): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -85,6 +85,168 @@ export function calculateLoggedHours(checkInStr: string, checkOutStr: string): n
   return parseFloat(Math.min(24, Math.max(0, diffM / 60)).toFixed(2));
 }
 
+export function parseClockToDate(timeStr: string | undefined, refDate: Date = new Date()): Date | null {
+  if (!timeStr || timeStr === '—' || timeStr.includes('--:--')) return null;
+  const cleanStr = timeStr.replace(/\s*\(GMT[^\)]*\)/gi, '').trim();
+  const match = cleanStr.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!match) return null;
+
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const seconds = match[3] ? parseInt(match[3], 10) : 0;
+  const meridian = match[4]?.toUpperCase();
+
+  if (meridian === 'PM' && hours < 12) hours += 12;
+  else if (meridian === 'AM' && hours === 12) hours = 0;
+
+  const d = new Date(refDate);
+  d.setHours(hours, minutes, seconds, 0);
+  return d;
+}
+
+export function sessionsFromRecord(record?: AttendanceRecord | null): AttendanceSession[] {
+  if (!record?.checkIn) return [];
+  if (Array.isArray(record.sessions) && record.sessions.length > 0) {
+    return record.sessions.map((s) => ({ ...s }));
+  }
+  return [
+    {
+      checkIn: record.checkIn,
+      checkOut: record.checkOut,
+      locationName: record.locationName,
+      workingHours: record.workingHours || 0,
+    },
+  ];
+}
+
+export function hasOpenAttendanceSession(record?: AttendanceRecord | null): boolean {
+  if (!record?.checkIn) return false;
+  const sessions = sessionsFromRecord(record);
+  if (sessions.length === 0) return false;
+  return sessions.some((s) => !s.checkOut);
+}
+
+function looksRemotePlace(value?: string | null): boolean {
+  const text = String(value || '').toLowerCase();
+  return text.includes('wfh') || text.includes('work from home') || text.includes('remote');
+}
+
+export function isRemoteAttendanceRecord(record?: AttendanceRecord | null): boolean {
+  if (!record) return false;
+  if (looksRemotePlace(record.locationName) || looksRemotePlace(record.status) || looksRemotePlace(record.device)) {
+    return true;
+  }
+  const open = sessionsFromRecord(record).find((session) => !session.checkOut);
+  return looksRemotePlace(open?.locationName);
+}
+
+export function openSessionCheckInDate(record?: AttendanceRecord | null, now: Date = new Date()): Date | null {
+  if (!record?.checkIn) return null;
+  const sessions = sessionsFromRecord(record);
+  const open = [...sessions].reverse().find((session) => !session.checkOut);
+  return parseClockToDate(open?.checkIn || record.checkIn, now);
+}
+
+export function attendanceElapsedSeconds(record: AttendanceRecord | undefined, now: Date = new Date()): number {
+  if (!record?.checkIn) return 0;
+  const sessions = sessionsFromRecord(record);
+  let secs = 0;
+  for (const session of sessions) {
+    const inDate = parseClockToDate(session.checkIn, now);
+    if (!inDate) continue;
+    if (session.checkOut) {
+      const outDate = parseClockToDate(session.checkOut, now);
+      if (outDate) {
+        let diff = outDate.getTime() - inDate.getTime();
+        if (diff < 0) diff += 24 * 3600 * 1000;
+        secs += Math.max(0, Math.floor(diff / 1000));
+      } else {
+        secs += Math.max(0, Math.round((session.workingHours || 0) * 3600));
+      }
+    } else {
+      secs += Math.max(0, Math.floor((now.getTime() - inDate.getTime()) / 1000));
+    }
+  }
+  return secs;
+}
+
+export function applyPunchToDailyRecord(
+  existing: AttendanceRecord | undefined,
+  punch: {
+    type: 'check_in' | 'check_out';
+    time: string;
+    date: string;
+    employeeId: string;
+    employeeName: string;
+    avatar?: string;
+    locationName?: string;
+    latitude?: number;
+    longitude?: number;
+    isWithinGeofence?: boolean;
+    ipAddress?: string;
+    device?: string;
+    status?: AttendanceRecord['status'];
+    id?: string;
+    selfiePhoto?: string | null;
+  }
+): AttendanceRecord {
+  const sessions = sessionsFromRecord(existing);
+  const loc = punch.locationName || existing?.locationName || 'Office';
+
+  if (punch.type === 'check_in') {
+    if (!sessions.some((s) => !s.checkOut)) {
+      sessions.push({
+        checkIn: punch.time,
+        locationName: loc,
+        workingHours: 0,
+      });
+    }
+  } else {
+    const openIdx = sessions.findIndex((s) => !s.checkOut);
+    if (openIdx >= 0) {
+      const hours = calculateLoggedHours(sessions[openIdx].checkIn, punch.time);
+      sessions[openIdx] = {
+        ...sessions[openIdx],
+        checkOut: punch.time,
+        workingHours: hours,
+        locationName: loc || sessions[openIdx].locationName,
+      };
+    }
+  }
+
+  const completedHours = sessions
+    .filter((s) => s.checkOut)
+    .reduce((sum, s) => sum + (s.workingHours || calculateLoggedHours(s.checkIn, s.checkOut!)), 0);
+  const first = sessions[0];
+  const last = sessions[sessions.length - 1];
+  const open = sessions.some((s) => !s.checkOut);
+
+  return {
+    id: existing?.id || punch.id || `att_${punch.employeeId}_${punch.date}`,
+    employeeId: punch.employeeId,
+    employeeName: punch.employeeName,
+    avatar: punch.avatar || existing?.avatar || '',
+    date: punch.date,
+    checkIn: first?.checkIn || punch.time,
+    checkOut: open ? undefined : last?.checkOut,
+    sessions,
+    status: punch.status || existing?.status || 'Present',
+    locationName: last?.locationName || loc,
+    latitude: punch.latitude ?? existing?.latitude ?? 0,
+    longitude: punch.longitude ?? existing?.longitude ?? 0,
+    isWithinGeofence: punch.isWithinGeofence ?? existing?.isWithinGeofence ?? true,
+    ipAddress: punch.ipAddress || existing?.ipAddress || '',
+    device: punch.device || existing?.device || 'Web',
+    workingHours: Number(completedHours.toFixed(2)),
+    breakHours: existing?.breakHours || 0,
+    ...(punch.selfiePhoto
+      ? punch.type === 'check_in'
+        ? { selfiePhoto: punch.selfiePhoto, checkInPhoto: punch.selfiePhoto }
+        : { checkOutPhoto: punch.selfiePhoto }
+      : {}),
+  };
+}
+
 function punchTimestamp(p: RawAttendancePunch): Date | null {
   const raw = p.punch_time || p.punch_timestamp;
   if (!raw) return null;
@@ -124,9 +286,48 @@ function deriveStatus(
   return 'Present';
 }
 
+type TimedPunch = {
+  type: 'check_in' | 'check_out';
+  at: Date;
+  punch: RawAttendancePunch;
+};
+
+function pairDaySessions(events: TimedPunch[]): { checkIn: Date; checkOut: Date | null; inPunch: RawAttendancePunch; outPunch: RawAttendancePunch | null }[] {
+  const ordered = [...events].sort((a, b) => a.at.getTime() - b.at.getTime());
+  const sessions: { checkIn: Date; checkOut: Date | null; inPunch: RawAttendancePunch; outPunch: RawAttendancePunch | null }[] = [];
+  let open: TimedPunch | null = null;
+
+  for (const event of ordered) {
+    if (event.type === 'check_in') {
+      if (open) continue;
+      open = event;
+      continue;
+    }
+    if (!open) continue;
+    sessions.push({
+      checkIn: open.at,
+      checkOut: event.at,
+      inPunch: open.punch,
+      outPunch: event.punch,
+    });
+    open = null;
+  }
+
+  if (open) {
+    sessions.push({
+      checkIn: open.at,
+      checkOut: null,
+      inPunch: open.punch,
+      outPunch: null,
+    });
+  }
+
+  return sessions;
+}
+
 /**
  * Collapse raw punch rows into one AttendanceRecord per employee per local calendar day.
- * Earliest check_in → checkIn; latest check_out → checkOut.
+ * Multiple check-in/out pairs become sessions; an unpaired check-in stays open so the clock keeps running.
  */
 export function aggregatePunchesToDaily(
   punches: RawAttendancePunch[],
@@ -137,10 +338,7 @@ export function aggregatePunchesToDaily(
   type DayBucket = {
     employeeId: string;
     date: string;
-    checkIns: Date[];
-    checkOuts: Date[];
-    firstCheckInPunch: RawAttendancePunch | null;
-    lastCheckOutPunch: RawAttendancePunch | null;
+    events: TimedPunch[];
   };
 
   const buckets = new Map<string, DayBucket>();
@@ -156,66 +354,50 @@ export function aggregatePunchesToDaily(
     const key = `${punch.employee_id}|${date}`;
     let bucket = buckets.get(key);
     if (!bucket) {
-      bucket = {
-        employeeId: punch.employee_id,
-        date,
-        checkIns: [],
-        checkOuts: [],
-        firstCheckInPunch: null,
-        lastCheckOutPunch: null,
-      };
+      bucket = { employeeId: punch.employee_id, date, events: [] };
       buckets.set(key, bucket);
     }
-
-    if (type === 'check_in') {
-      bucket.checkIns.push(ts);
-      if (
-        !bucket.firstCheckInPunch ||
-        ts < (punchTimestamp(bucket.firstCheckInPunch) as Date)
-      ) {
-        bucket.firstCheckInPunch = punch;
-      }
-    } else {
-      bucket.checkOuts.push(ts);
-      if (
-        !bucket.lastCheckOutPunch ||
-        ts > (punchTimestamp(bucket.lastCheckOutPunch) as Date)
-      ) {
-        bucket.lastCheckOutPunch = punch;
-      }
-    }
+    bucket.events.push({ type, at: ts, punch });
   }
 
   const records: AttendanceRecord[] = [];
 
   for (const bucket of buckets.values()) {
-    if (bucket.checkIns.length === 0) continue;
+    const paired = pairDaySessions(bucket.events);
+    if (paired.length === 0) continue;
 
-    const earliestIn = new Date(Math.min(...bucket.checkIns.map((d) => d.getTime())));
-    const latestOut =
-      bucket.checkOuts.length > 0
-        ? new Date(Math.max(...bucket.checkOuts.map((d) => d.getTime())))
-        : null;
+    const sessions: AttendanceSession[] = paired.map((s) => {
+      const checkInStr = formatTime12h(s.checkIn);
+      const checkOutStr = s.checkOut ? formatTime12h(s.checkOut) : undefined;
+      return {
+        checkIn: checkInStr,
+        checkOut: checkOutStr,
+        locationName: (s.outPunch || s.inPunch).office_name || 'Office',
+        workingHours: checkOutStr ? calculateLoggedHours(checkInStr, checkOutStr) : 0,
+      };
+    });
 
-    const checkInStr = formatTime12h(earliestIn);
-    const checkOutStr = latestOut ? formatTime12h(latestOut) : undefined;
-    const workingHours =
-      checkOutStr != null ? calculateLoggedHours(checkInStr, checkOutStr) : 0;
-
-    const metaPunch = bucket.firstCheckInPunch || bucket.lastCheckOutPunch;
+    const earliestIn = paired[0].checkIn;
+    const last = paired[paired.length - 1];
+    const hasOpen = !last.checkOut;
+    const workingHours = Number(
+      sessions.filter((s) => s.checkOut).reduce((sum, s) => sum + s.workingHours, 0).toFixed(2)
+    );
+    const metaPunch = last.inPunch || last.outPunch;
     const lookup = options.employeeLookup?.[bucket.employeeId];
     const lat = Number(metaPunch?.latitude);
     const lng = Number(metaPunch?.longitude);
 
     records.push({
-      id: metaPunch?.id || `day_${bucket.employeeId}_${bucket.date}`,
+      id: paired[0].inPunch.id || `day_${bucket.employeeId}_${bucket.date}`,
       employeeId: bucket.employeeId,
       employeeName: lookup?.name || metaPunch?.employee_name || '',
       avatar: lookup?.avatar || '',
       date: bucket.date,
-      checkIn: checkInStr,
-      checkOut: checkOutStr,
-      status: deriveStatus(earliestIn, workingHours, !!latestOut, options),
+      checkIn: sessions[0].checkIn,
+      checkOut: hasOpen ? undefined : last.checkOut ? formatTime12h(last.checkOut) : undefined,
+      sessions,
+      status: deriveStatus(earliestIn, workingHours, !hasOpen, options),
       locationName: metaPunch?.office_name || 'Office',
       latitude: Number.isFinite(lat) ? lat : 0,
       longitude: Number.isFinite(lng) ? lng : 0,

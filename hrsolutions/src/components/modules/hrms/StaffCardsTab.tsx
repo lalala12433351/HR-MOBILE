@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { Search, X, Mail, Phone, Building2, Eye } from 'lucide-react';
+import { Printer, Search, X } from 'lucide-react';
 import { Employee, AccountStatus } from '../../../types';
 import { AppState } from '../../../services/store';
 import { UserAvatar } from '@/components/common/UserAvatar';
@@ -11,6 +11,7 @@ interface StaffCardsTabProps {
   isInstitution: boolean;
   accessibleEmployees?: Employee[];
   onSelectEmployee: (emp: Employee) => void;
+  onPrintIdCards?: (employees: Employee[]) => void;
 }
 
 export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
@@ -18,6 +19,7 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
   isInstitution,
   accessibleEmployees,
   onSelectEmployee,
+  onPrintIdCards,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [branchFilter, setBranchFilter] = useState('All');
@@ -175,187 +177,166 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
     const isSuper = emp.role === 'super_admin' || emp.employeeId === 'EMP001';
     const accStatus = (isSuper ? 'Active' : (emp.accountStatus || 'Not Activated')) as AccountStatus;
 
-    let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+    let tone = 'people-studio__status--wait';
     if (accStatus === 'Active' || accStatus === 'Activated') {
-      badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    } else if (accStatus === 'In Probation' || accStatus === 'Notice Period') {
-      badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
-    } else if (accStatus === 'Not Activated') {
-      badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
+      tone = 'people-studio__status--ok';
+    } else if (accStatus === 'Invited') {
+      tone = 'people-studio__status--invite';
     } else if (accStatus === 'On Leave') {
-      badgeClass = 'bg-purple-50 text-purple-700 border-purple-200';
+      tone = 'people-studio__status--muted';
     } else if (accStatus === 'Suspended' || accStatus === 'Deactivated') {
-      badgeClass = 'bg-rose-50 text-rose-700 border-rose-200';
+      tone = 'people-studio__status--error';
     }
 
     return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeClass}`}>
+      <span className={`people-studio__status ${tone}`}>
         {accStatus === 'Activated' ? 'Active' : accStatus}
       </span>
     );
   };
 
   return (
-    <div className="space-y-3 w-full">
-      {/* Search & Filter Header Strip */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 bg-white p-2.5 rounded-xl border border-[#e2e8f0] shadow-card">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search directory by name, role, department..."
-            className="w-full rounded-lg border border-[#e2e8f0] bg-[#f8fafc] pl-8.5 pr-4 py-1.5 text-xs text-[#0f172a] placeholder:text-slate-400 outline-none focus:bg-white focus:border-[#2563eb] focus:ring-1 focus:ring-blue-100 transition-all font-medium"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+    <div className="people-studio__panel">
+      <section className="people-studio__sheet people-studio__sheet--pad">
+        <div className="people-studio__filters">
+          <div className="people-studio__search">
+            <Search className="people-studio__search-icon" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by name, role, or department"
+              aria-label="Search directory"
+            />
+            {searchQuery && (
+              <button type="button" onClick={() => setSearchQuery('')} className="people-studio__search-clear" aria-label="Clear search">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="people-studio__controls">
+            <select
+              value={departmentFilter}
+              onChange={(e) => setDepartmentFilter(e.target.value)}
+              aria-label="Filter by department"
+              className="people-studio__select"
             >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
+              <option value="All">All departments</option>
+              {availableDepartments.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              aria-label="Filter by location"
+              className="people-studio__select"
+            >
+              <option value="All">All locations</option>
+              {availableBranches.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="Filter by account status"
+              className="people-studio__select"
+            >
+              <option value="All">All statuses</option>
+              <option value="Not Activated">Not Activated</option>
+              <option value="Active">Active</option>
+              <option value="In Probation">In Probation</option>
+              <option value="On Leave">On Leave</option>
+              <option value="Notice Period">Notice Period</option>
+              <option value="Suspended">Suspended</option>
+              <option value="Deactivated">Deactivated</option>
+            </select>
+
+            {hasActiveFilters && (
+              <button type="button" onClick={handleClearFilters} className="people-studio__btn people-studio__btn--ghost">
+                <X className="w-3 h-3" /> Clear
+              </button>
+            )}
+          </div>
         </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <select
-            value={departmentFilter}
-            onChange={(e) => setDepartmentFilter(e.target.value)}
-            className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] cursor-pointer font-semibold shadow-2xs"
-          >
-            <option value="All">All Departments</option>
-            {availableDepartments.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-            className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] cursor-pointer font-semibold shadow-2xs"
-          >
-            <option value="All">All Locations</option>
-            {availableBranches.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] cursor-pointer font-semibold shadow-2xs"
-          >
-            <option value="All">All Statuses</option>
-            <option value="Not Activated">Not Activated</option>
-            <option value="Active">Active</option>
-            <option value="In Probation">In Probation</option>
-            <option value="On Leave">On Leave</option>
-            <option value="Notice Period">Notice Period</option>
-            <option value="Suspended">Suspended</option>
-            <option value="Deactivated">Deactivated</option>
-          </select>
-
-          {hasActiveFilters && (
+        <div className="people-studio__count">
+          <span>
+            <strong>{filteredEmployees.length}</strong> {filteredEmployees.length === 1 ? 'person' : 'people'} in this directory
+          </span>
+          {onPrintIdCards && (
             <button
               type="button"
-              onClick={handleClearFilters}
-              className="px-2 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
+              disabled={filteredEmployees.length === 0}
+              onClick={() => onPrintIdCards(filteredEmployees)}
+              className="people-studio__btn people-studio__btn--secondary people-studio__btn--compact"
             >
-              <X className="w-3 h-3" /> Clear
+              <Printer className="h-3.5 w-3.5" />
+              Print ID cards
             </button>
           )}
         </div>
-      </div>
+      </section>
 
-      {/* Directory Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+      <div className="people-studio__grid">
         {filteredEmployees.length === 0 ? (
-          <div className="col-span-full rounded-xl border border-[#e2e8f0] bg-white p-10 text-center text-xs text-[#64748b] shadow-card font-medium">
-            No employees found matching filter criteria
+          <div className="people-studio__empty">
+            No people match these filters. Clear a filter or search a different name.
           </div>
         ) : (
           filteredEmployees.map((emp) => {
-            const branchText = emp.officeName || emp.location || 'Corporate Headquarters';
+            const branchText = emp.officeName || emp.location || 'No office';
 
             return (
-              <div
+              <article
                 key={emp.id}
                 onClick={() => onSelectEmployee(emp)}
-                className="rounded-xl border border-[#e2e8f0] bg-white p-4 flex flex-col items-center text-center transition-all duration-200 hover:border-[#2563eb]/40 hover:shadow-md cursor-pointer group shadow-card relative overflow-hidden"
+                className="people-studio__sheet people-studio__card"
               >
-                {/* Top Corner Status Pill & Employee ID */}
-                <div className="w-full flex items-center justify-between mb-2.5">
-                  {emp.employeeId ? (
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                      {emp.employeeId}
-                    </span>
-                  ) : <span />}
+                <div className="people-studio__card-top">
+                  {emp.employeeId ? <span className="people-studio__id">{emp.employeeId}</span> : <span />}
                   {getStatusChip(emp)}
                 </div>
 
-                {/* Avatar with Ring */}
-                <UserAvatar
-                  src={emp.avatar}
-                  name={emp.name}
-                  className="h-13 w-13 mb-2 ring-2 ring-slate-100 group-hover:ring-[#2563eb] transition-all text-xs font-bold"
-                />
-
-                {/* Name & Job Title */}
-                <h4 className="text-xs font-bold text-[#0f172a] group-hover:text-[#2563eb] transition-colors truncate max-w-full">
-                  {emp.name}
-                </h4>
-
-                <p className="text-[11px] font-medium text-[#64748b] truncate max-w-full mt-0.5">
-                  {emp.designation || (emp.role === 'super_admin' ? 'Founder & CEO' : 'Team Member')}
-                </p>
-
-                {/* Department Badge */}
-                <div className="mt-1.5 mb-1.5">
-                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#eff6ff] text-[#1e3a8a] border border-[#2563eb]/20">
-                    {emp.department || 'Operations'}
-                  </span>
-                </div>
-
-                {/* Location */}
-                <div className="text-[10px] font-medium text-slate-500 mb-2.5 truncate flex items-center justify-center gap-1">
-                  <Building2 className="h-3 w-3 text-slate-400 shrink-0" />
-                  <span className="truncate">{branchText}</span>
-                </div>
-
-                {/* Bottom Contact Bar */}
-                <div className="w-full pt-2 border-t border-[#e2e8f0] space-y-1 text-[10px] text-[#64748b]">
-                  <div className="flex items-center justify-center gap-1 truncate" title={emp.email}>
-                    <Mail className="h-3 w-3 text-slate-400 shrink-0" />
-                    <span className="truncate">{emp.email}</span>
+                <div className="people-studio__card-body">
+                  <UserAvatar
+                    src={emp.avatar}
+                    name={emp.name}
+                    className="h-10 w-10 shrink-0 text-xs font-bold"
+                  />
+                  <div className="min-w-0">
+                    <h4 className="people-studio__who-name">{emp.name}</h4>
+                    <p className="people-studio__who-mail">
+                      {emp.designation || (emp.role === 'super_admin' ? 'Founder & CEO' : 'Team Member')}
+                    </p>
+                    <span className="people-studio__dept-tag">{emp.department || 'Operations'}</span>
                   </div>
-                  {emp.phone && emp.phone !== '—' && (
-                    <div className="flex items-center justify-center gap-1 text-slate-500 truncate">
-                      <Phone className="h-3 w-3 text-slate-400 shrink-0" />
-                      <span className="truncate">{emp.phone}</span>
-                    </div>
-                  )}
                 </div>
 
-                {/* Manage Action Button */}
-                <div className="w-full mt-3 pt-1">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectEmployee(emp);
-                    }}
-                    className="w-full py-2 px-3 rounded-lg bg-slate-100 hover:bg-blue-600 text-slate-800 hover:text-white font-bold text-xs transition-all border border-slate-200 hover:border-blue-600 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600"
-                  >
-                    <Eye className="h-3.5 w-3.5 text-slate-700 group-hover:text-white transition-colors" />
-                    <span className="text-slate-800 group-hover:text-white font-bold transition-colors">View Profile</span>
-                  </button>
+                <div className="people-studio__card-facts">
+                  <p>{branchText}</p>
+                  <p title={emp.email}>{emp.email}</p>
+                  {emp.phone && emp.phone !== '—' && <p>{emp.phone}</p>}
                 </div>
-              </div>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectEmployee(emp);
+                  }}
+                  className="people-studio__card-open"
+                >
+                  Open profile
+                </button>
+              </article>
             );
           })
         )}

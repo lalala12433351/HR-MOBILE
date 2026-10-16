@@ -24,9 +24,10 @@ export async function seedDemoDatabase(): Promise<void> {
 
     // Seed Subscription
     await client.query(
-      `INSERT INTO public.tenant_subscriptions (tenant_id, tier, max_employees, status, billing_cycle)
-       VALUES ($1, 'enterprise', 200, 'active', 'annual')
-       ON CONFLICT DO NOTHING`,
+      `INSERT INTO public.tenant_subscriptions (tenant_id, plan_id, tier, max_employees, status, billing_cycle)
+       SELECT $1, p.id, p.key, 200, 'active', 'annual'
+         FROM public.license_plans p WHERE p.key = 'enterprise'
+       ON CONFLICT (tenant_id) DO NOTHING`,
       [tenantId]
     );
 

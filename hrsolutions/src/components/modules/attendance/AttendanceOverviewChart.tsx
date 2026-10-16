@@ -55,12 +55,10 @@ export function AttendanceOverviewChart({
   );
 
   return (
-    <div
-      className={`rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs flex flex-col h-full min-h-[200px] ${className}`}
-    >
-      <div className="flex items-center justify-between gap-3 mb-1 shrink-0">
-        <h3 className="text-xs font-semibold text-slate-900 tracking-tight">{title}</h3>
-        <span className="text-[10px] font-medium text-slate-400 shrink-0">{rangeLabel}</span>
+    <div className={`att-stat h-full min-h-[200px] ${className}`}>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="m-0 text-[16px] font-[750] tracking-[-0.02em]">{title}</h3>
+        <span className="text-[11px] text-[var(--text-muted)] shrink-0">{rangeLabel}</span>
       </div>
       <div className="flex-1 w-full min-h-[160px]">
         <ResponsiveContainer width="100%" height="100%" minHeight={160}>
@@ -78,19 +76,19 @@ export function AttendanceOverviewChart({
             />
             <Tooltip
               content={<ChartTooltip valueFormatter={(v) => `${v}%`} />}
-              cursor={{ fill: 'rgba(15, 23, 42, 0.04)', radius: 6 }}
+              cursor={{ fill: 'rgba(23, 50, 78, 0.05)', radius: 6 }}
             />
             <Legend
               iconType="circle"
               iconSize={7}
-              wrapperStyle={{ fontSize: 10, paddingTop: 4, color: '#64748b' }}
+              wrapperStyle={{ fontSize: 11, paddingTop: 4, color: '#5e6c7b' }}
             />
-            <Bar dataKey="Present" stackId="a" fill="#86efac" maxBarSize={28} />
-            <Bar dataKey="On Leave" stackId="a" fill="#7dd3fc" maxBarSize={28} />
+            <Bar dataKey="Present" stackId="a" fill="#53886b" maxBarSize={28} />
+            <Bar dataKey="On Leave" stackId="a" fill="#17324e" maxBarSize={28} />
             <Bar
               dataKey="Absent"
               stackId="a"
-              fill="#cbd5e1"
+              fill="#c5d0d8"
               radius={[6, 6, 0, 0]}
               maxBarSize={28}
             />

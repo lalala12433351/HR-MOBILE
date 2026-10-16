@@ -3,6 +3,9 @@ import { env } from './config/env.js';
 import { testDatabaseConnection, pool } from './config/database.js';
 import { runPublicMigrations } from './db/migrator.js';
 import { ensureInstituteTables } from './db/ensureInstituteTables.js';
+import { initChatSocket } from './modules/chat/chat.socket.js';
+import { startLicenseReminderJob, stopLicenseReminderJob } from './modules/licenses/license.reminders.js';
+import { startTaskDueReminderJob, stopTaskDueReminderJob } from './modules/projects/taskDueReminders.js';
 import { log } from './utils/logger.js';
 
 async function bootstrap() {
@@ -56,9 +59,16 @@ async function bootstrap() {
     log.info(`🛡️ Schema-per-tenant PostgreSQL isolation engine active.`);
   });
 
+  const chatIo = initChatSocket(server);
+  startTaskDueReminderJob();
+  startLicenseReminderJob();
+
   // Graceful Shutdown Signal Handling
   const shutdown = async (signal: string) => {
     log.warn(`Received ${signal}. Commencing graceful shutdown...`);
+    stopLicenseReminderJob();
+    stopTaskDueReminderJob();
+    chatIo.disconnectSockets(true);
 
     server.close(async () => {
       log.info('Closed incoming HTTP connections.');

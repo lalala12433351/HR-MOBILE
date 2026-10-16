@@ -35,8 +35,9 @@ export async function seedDemoTenant(): Promise<void> {
 
     // 5. Subscription
     await client2.query(
-      `INSERT INTO public.tenant_subscriptions (tenant_id, tier, max_employees, status, billing_cycle)
-       VALUES ($1, 'enterprise', 250, 'active', 'annual')`,
+      `INSERT INTO public.tenant_subscriptions (tenant_id, plan_id, tier, max_employees, status, billing_cycle)
+       SELECT $1, p.id, p.key, 250, 'active', 'annual'
+         FROM public.license_plans p WHERE p.key = 'enterprise'`,
       [tenantId]
     );
 

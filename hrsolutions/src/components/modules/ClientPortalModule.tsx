@@ -71,7 +71,7 @@ export const ClientPortalModule: React.FC<ClientPortalModuleProps> = ({ state, o
             Dedicated customer collaboration workspace • Real-time project milestones, invoicing & SLA ticketing
           </p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#161d2e] border border-[#232d44] text-xs">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#161d2e] border border-[#232d44] text-xs">
           <Building2 className="h-4 w-4 text-[#7c5cfc]" />
           <span className="text-[#8e9eb5]">Active Account:</span>
           <span className="font-bold text-white">{state.customers[0]?.companyName || state.organization.name}</span>
@@ -81,12 +81,12 @@ export const ClientPortalModule: React.FC<ClientPortalModuleProps> = ({ state, o
       {/* Projects Progress Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {activeProjects.length === 0 ? (
-          <div className="col-span-full p-8 rounded-2xl bg-[#161d2e] border border-[#232d44] text-center text-xs text-[#8e9eb5]">
+          <div className="col-span-full p-8 rounded-xl bg-[#161d2e] border border-[#232d44] text-center text-xs text-[#8e9eb5]">
             No active deliverables or client projects recorded yet.
           </div>
         ) : (
           activeProjects.map((proj) => (
-            <div key={proj.id} className="p-6 rounded-2xl bg-[#161d2e] border border-[#232d44] space-y-4 shadow-sm">
+            <div key={proj.id} className="p-6 rounded-xl bg-[#161d2e] border border-[#232d44] space-y-4 shadow-sm">
               <div className="flex items-start justify-between">
                 <div>
                   <span className="px-2.5 py-0.5 rounded-full bg-[#7c5cfc]/20 text-[#a78bfa] font-bold text-[10px]">
@@ -125,7 +125,7 @@ export const ClientPortalModule: React.FC<ClientPortalModuleProps> = ({ state, o
       {/* Invoices & Support Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Invoices */}
-        <div className="p-6 rounded-2xl bg-[#161d2e] border border-[#232d44] space-y-4 shadow-sm">
+        <div className="p-6 rounded-xl bg-[#161d2e] border border-[#232d44] space-y-4 shadow-sm">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <Receipt className="h-4 w-4 text-[#2dd4bf]" /> Billed Deliverables & Invoices
           </h3>
@@ -161,13 +161,13 @@ export const ClientPortalModule: React.FC<ClientPortalModuleProps> = ({ state, o
         </div>
 
         {/* Client Support Ticket Box */}
-        <div className="p-6 rounded-2xl bg-[#161d2e] border border-[#232d44] space-y-4 shadow-sm">
+        <div className="p-6 rounded-xl bg-[#161d2e] border border-[#232d44] space-y-4 shadow-sm">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <Headphones className="h-4 w-4 text-[#38bdf8]" /> Submit Client Support Ticket
           </h3>
 
           {ticketSent && (
-            <div className="p-3 bg-[#2dd4bf]/20 border border-[#2dd4bf]/40 rounded-xl text-xs text-[#2dd4bf] flex items-center gap-2">
+            <div className="p-3 bg-[#2dd4bf]/20 border border-[#2dd4bf]/40 rounded-lg text-xs text-[#2dd4bf] flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4" /> Support request logged! Our engineering lead will respond within 4 hours.
             </div>
           )}
@@ -181,7 +181,7 @@ export const ClientPortalModule: React.FC<ClientPortalModuleProps> = ({ state, o
                 placeholder="e.g. Inquire on Staging Milestone Deploy"
                 value={ticketSubject}
                 onChange={(e) => setTicketSubject(e.target.value)}
-                className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-xl text-white focus:outline-none focus:border-[#7c5cfc]"
+                className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-lg text-white focus:outline-none focus:border-[#7c5cfc]"
               />
             </div>
             <div>
@@ -192,12 +192,12 @@ export const ClientPortalModule: React.FC<ClientPortalModuleProps> = ({ state, o
                 placeholder="Provide context or requested deliverables..."
                 value={ticketMessage}
                 onChange={(e) => setTicketMessage(e.target.value)}
-                className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-xl text-white focus:outline-none focus:border-[#7c5cfc]"
+                className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-lg text-white focus:outline-none focus:border-[#7c5cfc]"
               />
             </div>
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#7c5cfc] hover:bg-[#6b47fc] text-white font-bold rounded-xl shadow-md transition-all"
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#7c5cfc] hover:bg-[#6b47fc] text-white font-bold rounded-lg shadow-md transition-all"
             >
               <Send className="h-4 w-4" /> Submit Support Request
             </button>

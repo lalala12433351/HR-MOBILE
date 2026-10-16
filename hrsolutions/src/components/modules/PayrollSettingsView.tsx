@@ -3,7 +3,10 @@
 import React, { useState, useMemo } from 'react';
 import { AppState } from '@/services/store';
 import { api } from '@/services/apiClient';
+import { SettingsToast } from './settings/SettingsToast';
+import { SlideOverDrawer } from '@/components/common/SlideOverDrawer';
 import {
+  DEFAULT_ATTENDANCE_PAY,
   PayrollGroup,
   PayrollSettings,
   SalaryType,
@@ -19,8 +22,6 @@ import {
   Edit2,
   Trash2,
   X,
-  Check,
-  CheckCircle2,
   AlertCircle,
   Building2,
   Users,
@@ -195,7 +196,10 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
   }, [salaryComponents, componentSearch, componentTypeFilter]);
 
   // General Settings State
-  const [settingsForm, setSettingsForm] = useState<PayrollSettings>(payrollSettings);
+  const [settingsForm, setSettingsForm] = useState<PayrollSettings>(() => ({
+    ...payrollSettings,
+    attendancePay: { ...DEFAULT_ATTENDANCE_PAY, ...(payrollSettings.attendancePay || {}) },
+  }));
 
   // Live Gross-to-Net Simulator State (Rupees)
   const [simSalaryType, setSimSalaryType] = useState<SalaryType>('monthly');
@@ -677,9 +681,13 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
   const handleSaveGeneralSettings = async () => {
     setIsSaving(true);
     try {
-      const updatedSettings = {
+      const updatedSettings: PayrollSettings = {
         ...settingsForm,
         defaultCurrency: settingsForm.defaultCurrency || 'INR',
+        attendancePay: {
+          ...DEFAULT_ATTENDANCE_PAY,
+          ...(settingsForm.attendancePay || {}),
+        },
       };
       await api.setup.savePayrollSettings({
         payrollSettings: updatedSettings,
@@ -818,67 +826,56 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
   };
 
   return (
-    <div className="w-full space-y-6 text-slate-900 font-sans">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed top-6 right-6 z-50 flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-xl shadow-lg text-xs font-bold border border-blue-500 animate-in fade-in slide-in-from-top-2">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
+    <div className="settings-page">
+      <SettingsToast message={toastMessage} />
 
-      {/* Clean Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">
-            Payroll & Compensation Settings
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage payroll groups, salary structures, and statutory compliance (INR ₹)
-          </p>
-        </div>
+      <div className="settings-page__header">
+        <h2 className="settings-page__heading">
+          Payroll & Compensation Settings
+        </h2>
 
-        <div className="flex items-center gap-2">
+        <div className="settings-page__actions">
           {onBackToPayroll && (
             <button
+              type="button"
               onClick={onBackToPayroll}
-              className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all cursor-pointer shadow-2xs"
+              className="settings-page__action--secondary"
             >
               Back to Payslips
             </button>
           )}
           {activeTab === 'groups' && (
             <button
+              type="button"
               onClick={handleOpenCreateGroup}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all cursor-pointer shadow-xs"
+              className="settings-page__action"
             >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Create Pay Group</span>
+              Create Pay Group
             </button>
           )}
           {activeTab === 'general_settings' && (
             <button
+              type="button"
               onClick={handleSaveGeneralSettings}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all cursor-pointer shadow-xs"
+              className="settings-page__action"
             >
-              <Check className="h-3.5 w-3.5" />
-              <span>Save Settings</span>
+              Save Settings
             </button>
           )}
           {activeTab === 'components' && (
             <button
+              type="button"
               onClick={handleOpenCreateComponent}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all cursor-pointer shadow-xs"
+              className="settings-page__action"
             >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Add Component</span>
+              Add Component
             </button>
           )}
         </div>
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-1 border-b border-slate-200 pb-px overflow-x-auto no-scrollbar py-1 w-full">
+      <div className="settings-page__tabs" role="tablist" aria-label="Payroll settings categories">
         {[
           { id: 'groups', label: `Payroll Groups (${payrollGroups.length})` },
           { id: 'salary_types', label: 'Salary Simulator' },
@@ -891,10 +888,13 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3.5 py-2 text-xs transition-colors whitespace-nowrap cursor-pointer ${
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`payroll-settings-${tab.id}`}
+              className={`settings-page__tab ${
                 isActive
-                  ? 'border-b-2 border-blue-600 text-blue-600 font-semibold'
-                  : 'text-slate-600 hover:text-slate-900 font-medium'
+                  ? 'settings-page__tab--active'
+                  : ''
               }`}
             >
               {tab.label}
@@ -903,6 +903,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
         })}
       </div>
 
+      <div id={`payroll-settings-${activeTab}`} role="tabpanel" className="space-y-5">
       {/* ========================================================================= */}
       {/* TAB 1: PAYROLL GROUPS MANAGER                                             */}
       {/* ========================================================================= */}
@@ -939,7 +940,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
           </div>
 
           {/* Clean Groups Table */}
-          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
+          <div className="settings-page__data-card overflow-hidden">
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold text-[11px]">
                 <tr>
@@ -1065,7 +1066,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
         <div className="space-y-6">
           {/* Explanation Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-5 rounded-lg-xl border border-slate-200  bg-white  space-y-2">
+            <div className="settings-page__card space-y-2">
               <h3 className="text-sm font-bold text-slate-900 ">1. Monthly Fixed CTC</h3>
               <p className="text-xs text-slate-500  leading-relaxed">
                 Traditional salaried model with fixed gross pay comprising Basic, HRA (40%), Special Allowances, and standard deductions.
@@ -1075,7 +1076,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
               </div>
             </div>
 
-            <div className="p-5 rounded-lg-xl border border-slate-200  bg-white  space-y-2">
+            <div className="settings-page__card space-y-2">
               <h3 className="text-sm font-bold text-slate-900 ">2. Hourly Timesheet Wages</h3>
               <p className="text-xs text-slate-500  leading-relaxed">
                 Wages calculated based on logged timesheet hours, hourly base rates (e.g. ₹650/hr), and 1.5x overtime rates with contractor TDS.
@@ -1085,7 +1086,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
               </div>
             </div>
 
-            <div className="p-5 rounded-lg-xl border border-slate-200  bg-white  space-y-2">
+            <div className="settings-page__card space-y-2">
               <h3 className="text-sm font-bold text-slate-900 ">3. Statutory Compliance</h3>
               <p className="text-xs text-slate-500  leading-relaxed">
                 Automated Indian labour statutory structure: EPF (12%), ESIC (0.75%), Professional Tax (₹200), and TDS withholding.
@@ -1097,7 +1098,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
           </div>
 
           {/* Clean Gross-to-Net Calculator */}
-          <div className="rounded-lg-xl border border-slate-200  bg-white  p-6 space-y-5 ">
+          <div className="settings-page__card space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200  pb-3">
               <div>
                 <h3 className="text-sm font-bold text-slate-900 ">Gross-to-Net Salary Calculator</h3>
@@ -1246,7 +1247,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
       {/* TAB 3: PAY CYCLES & GENERAL RULES                                         */}
       {/* ========================================================================= */}
       {activeTab === 'general_settings' && (
-        <div className="rounded-lg-xl border border-slate-200  bg-white  p-6 space-y-6 ">
+        <div className="settings-page__card space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
               <label className="block text-xs font-semibold text-slate-700  mb-1.5">
@@ -1304,6 +1305,11 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
             </div>
           </div>
 
+          <AttendancePayRulesForm
+            settings={settingsForm}
+            onChange={setSettingsForm}
+          />
+
           <div className="pt-4 border-t border-slate-200  flex justify-end">
             <button
               onClick={handleSaveGeneralSettings}
@@ -1319,7 +1325,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
       {/* TAB 4: STATUTORY COMPLIANCE RULES                                         */}
       {/* ========================================================================= */}
       {activeTab === 'compliance' && (
-        <div className="rounded-lg-xl border border-slate-200  bg-white  overflow-hidden ">
+        <div className="settings-page__data-card overflow-hidden">
           <table className="w-full text-left text-xs border-collapse">
             <thead className="bg-white  text-slate-600  border-b border-slate-200  font-semibold text-[11px]">
               <tr>
@@ -1425,7 +1431,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
           </div>
 
           {/* Interactive Components Table */}
-          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
+          <div className="settings-page__data-card overflow-hidden">
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold text-[11px]">
                 <tr>
@@ -1535,42 +1541,19 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
         </div>
       )}
 
+      </div>
+
       {/* ========================================================================= */}
       {/* MODAL: CREATE / EDIT PAYROLL GROUP (ALLOWANCES, FIELDS & RULES)           */}
       {/* ========================================================================= */}
       {showGroupModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-3xl bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col max-h-[90vh] shadow-2xl">
-            {/* Header */}
-            <div className="px-6 py-4.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center font-bold shrink-0">
-                  <Layers className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
-                    {editingGroupId ? 'Configure Pay Group' : 'Create New Pay Group'}
-                    {groupForm.code && (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-slate-200/80 text-slate-700">
-                        {groupForm.code}
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Define salary structure, custom allowances, deductions, and group-level custom fields
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowGroupModal(false)}
-                className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors shrink-0"
-                title="Close"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
+        <SlideOverDrawer
+          title={editingGroupId ? 'Configure Pay Group' : 'Create New Pay Group'}
+          description="Define salary structure, custom allowances, deductions, and group-level custom fields"
+          onClose={() => setShowGroupModal(false)}
+          panelClassName="md:max-w-3xl"
+        >
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             {/* Sub-Tab Navigation Bar */}
             <div className="px-6 pt-2 bg-white border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto text-xs font-semibold">
               <button
@@ -2351,33 +2334,19 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
                 </div>
               </div>
             </form>
-          </div>
-        </div>
+            </div>
+        </SlideOverDrawer>
       )}
 
       {/* ========================================================================= */}
       {/* MODAL: MANAGE GROUP MEMBERS                                               */}
       {/* ========================================================================= */}
       {showMembersModal && selectedGroupForMembers && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-lg bg-white  border border-slate-200  rounded-lg-xl  overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="p-5 border-b border-slate-200  flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-sm text-slate-900 ">
-                  Assign Members — {selectedGroupForMembers.name}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {selectedGroupForMembers.assignedEmployeeIds?.length || 0} employees currently assigned
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowMembersModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-700  cursor-pointer"
-              >
-                
-              </button>
-            </div>
+        <SlideOverDrawer
+          title={`Assign Members — ${selectedGroupForMembers.name}`}
+          description={`${selectedGroupForMembers.assignedEmployeeIds?.length || 0} employees currently assigned`}
+          onClose={() => setShowMembersModal(false)}
+        >
 
             <div className="p-4 border-b border-slate-200 ">
               <div className="relative">
@@ -2424,17 +2393,16 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
                 })}
             </div>
 
-            <div className="p-4 border-t border-slate-200  flex justify-end">
+            <div className="p-4 sm:p-5 sm:px-8 border-t border-[var(--border-color)] bg-[var(--bg-surface)] flex justify-end shrink-0">
               <button
                 type="button"
                 onClick={() => setShowMembersModal(false)}
-                className="px-5 py-2 bg-blue-600  text-white  rounded-lg-xl font-bold text-xs cursor-pointer"
+                className="flex-1 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer"
               >
                 Done
               </button>
             </div>
-          </div>
-        </div>
+        </SlideOverDrawer>
       )}
 
       {/* ========================================================================= */}
@@ -2619,3 +2587,116 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
     </div>
   );
 };
+
+function AttendancePayRulesForm({
+  settings,
+  onChange,
+}: {
+  settings: PayrollSettings;
+  onChange: (next: PayrollSettings) => void;
+}) {
+  const pay = { ...DEFAULT_ATTENDANCE_PAY, ...(settings.attendancePay || {}) };
+  const patch = (partial: Partial<typeof pay>) =>
+    onChange({ ...settings, attendancePay: { ...pay, ...partial } });
+
+  const exampleGross = 50000;
+  const exampleDays = 22;
+  const exampleCalendar = 30;
+  const perDay =
+    pay.lopDayRate === 'gross_per_calendar_day' ? exampleGross / exampleCalendar : exampleGross / exampleDays;
+
+  return (
+    <div className="pt-5 border-t border-slate-200 space-y-4">
+      <div>
+        <h3 className="text-sm font-bold text-slate-900">Attendance, LOP and salary</h3>
+        <p className="mt-1 text-[13px] text-slate-500">
+          These rules apply to every employee on a payroll run. Required days and hours still come from the payroll group.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 mb-1.5">How monthly salary is calculated</label>
+          <select
+            value={pay.salaryMethod}
+            onChange={(e) => patch({ salaryMethod: e.target.value as typeof pay.salaryMethod })}
+            className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-200 rounded-lg-xl font-medium outline-none"
+          >
+            <option value="full_then_deduct">Pay full salary, then deduct LOP</option>
+            <option value="payable_days">Pay only credited days (gross × days / required days)</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 mb-1.5">LOP day rate</label>
+          <select
+            value={pay.lopDayRate}
+            onChange={(e) => patch({ lopDayRate: e.target.value as typeof pay.lopDayRate })}
+            className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-200 rounded-lg-xl font-medium outline-none"
+          >
+            <option value="gross_per_working_day">Gross ÷ working days in the group</option>
+            <option value="basic_per_working_day">Basic ÷ working days in the group</option>
+            <option value="gross_per_calendar_day">Gross ÷ calendar days in the cycle</option>
+          </select>
+          <p className="mt-1.5 text-[11px] text-slate-500">
+            Example: ₹{exampleGross.toLocaleString('en-IN')} over{' '}
+            {pay.lopDayRate === 'gross_per_calendar_day' ? exampleCalendar : exampleDays} days → ₹
+            {Math.round(perDay).toLocaleString('en-IN')} per LOP day.
+          </p>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="block text-xs font-semibold text-slate-700 mb-1.5">Cost of missing attendance hours</label>
+          <select
+            value={pay.missingHours}
+            onChange={(e) => patch({ missingHours: e.target.value as typeof pay.missingHours })}
+            className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-200 rounded-lg-xl font-medium outline-none"
+          >
+            <option value="hours_to_lop">Convert missing hours into extra LOP days</option>
+            <option value="hourly_rate">Deduct hourly rate × missing hours</option>
+            <option value="gross_per_hour">Deduct (gross ÷ required hours) × missing hours</option>
+            <option value="ignore">Do not deduct — only mark hours as short</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold text-slate-700 mb-2">Count as LOP</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {(
+            [
+              ['lopFromUnpaidLeave', 'Approved unpaid / Loss of Pay leave'],
+              ['lopFromAbsent', 'Absent days'],
+              ['lopFromHalfDay', 'Half day as 0.5 LOP'],
+              ['lopFromDayShortfall', 'Shortfall vs required working days'],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 text-[13px] text-slate-700">
+              <input type="checkbox" checked={pay[key]} onChange={(e) => patch({ [key]: e.target.checked })} />
+              {label}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="flex items-start gap-2 text-[13px] text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={settings.autoCalculateFromAttendance}
+            onChange={(e) => onChange({ ...settings, autoCalculateFromAttendance: e.target.checked })}
+          />
+          <span>Calculate LOP and payable days from attendance</span>
+        </label>
+        <label className="flex items-start gap-2 text-[13px] text-slate-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={settings.autoCalculateFromTimesheets}
+            onChange={(e) => onChange({ ...settings, autoCalculateFromTimesheets: e.target.checked })}
+          />
+          <span>Use approved timesheets for hourly hours</span>
+        </label>
+      </div>
+    </div>
+  );
+}

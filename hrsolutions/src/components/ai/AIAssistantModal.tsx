@@ -99,13 +99,13 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative flex h-[85vh] max-h-[620px] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#282830] bg-[#121214] shadow-2xl cursor-default"
+        className="relative flex h-[85vh] max-h-[620px] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#282830] bg-[#121214] shadow-2xl cursor-default"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-[#282830] bg-[#121214] px-4 sm:px-5 py-3.5 sm:py-4 text-white">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-950/40 border border-blue-800/40 text-blue-400">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-950/40 border border-blue-800/40 text-blue-400">
               <Bot className="h-5 w-5" />
             </div>
             <div>
@@ -154,7 +154,7 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
                 {m.role === 'user' ? 'You' : <Bot className="h-4 w-4" />}
               </div>
               <div
-                className={`max-w-[82%] rounded-xl p-3.5 text-xs leading-relaxed ${
+                className={`max-w-[82%] rounded-lg p-3.5 text-xs leading-relaxed ${
                   m.role === 'user'
                     ? 'bg-blue-600 text-white'
                     : 'bg-[#18181d] border border-[#282830] text-slate-200 whitespace-pre-wrap'
@@ -187,12 +187,12 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="Ask AI assistant about tasks, attendance, finance, or draft updates..."
-              className="flex-1 rounded-xl border border-[#282830] bg-[#18181d] px-3.5 py-2 text-xs font-medium text-white outline-none focus:border-blue-500 transition-all placeholder:text-[#686873]"
+              className="flex-1 rounded-lg border border-[#282830] bg-[#18181d] px-3.5 py-2 text-xs font-medium text-white outline-none focus:border-blue-500 transition-all placeholder:text-[#686873]"
             />
             <button
               type="submit"
               disabled={loading || !prompt.trim()}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:opacity-50 cursor-pointer shadow-sm active:scale-95"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:opacity-50 cursor-pointer shadow-sm active:scale-95"
             >
               <Send className="h-4 w-4" />
             </button>

@@ -3,19 +3,12 @@ const isVercel = Boolean(process.env.VERCEL);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   ...(isVercel ? {} : { output: 'standalone' }),
+  // Parent repo also has a lockfile; without this, Hostinger/Turbopack infers the
+  // workspace root as the monorepo and PostCSS dies compiling globals.css.
+  turbopack: {
+    root: import.meta.dirname,
+  },
   reactStrictMode: true,
-  transpilePackages: [
-    '@capacitor/core',
-    '@capacitor/app',
-    '@capacitor/browser',
-    '@capacitor/camera',
-    '@capacitor/filesystem',
-    '@capacitor/geolocation',
-    '@capacitor/keyboard',
-    '@capacitor/share',
-    '@capacitor/splash-screen',
-    '@capacitor/status-bar',
-  ],
   images: {
     remotePatterns: [
       {

@@ -391,7 +391,6 @@ export const EmployeeSetupWizard: React.FC<{ onComplete?: () => void }> = ({ onC
   const [newEmployeeName, setNewEmployeeName] = useState('');
   const [newEmployeeEmail, setNewEmployeeEmail] = useState('');
   const [newEmployeePhone, setNewEmployeePhone] = useState('');
-  const [newEmployeePassword, setNewEmployeePassword] = useState('');
   const [newEmployeeRole, setNewEmployeeRole] = useState(isInitialInstitution ? 'Teacher' : 'Employee');
   const [newEmployeeDept, setNewEmployeeDept] = useState('');
   const [newEmployeeOffice, setNewEmployeeOffice] = useState('');
@@ -661,7 +660,6 @@ export const EmployeeSetupWizard: React.FC<{ onComplete?: () => void }> = ({ onC
       name: newEmployeeName.trim(),
       email: newEmployeeEmail.trim().toLowerCase(),
       phone: newEmployeePhone.trim(),
-      password: newEmployeePassword.trim() || 'Welcome@123',
       role: newEmployeeRole || (jobRoles[0]?.title ?? (orgTemplate === 'institution' ? 'Teacher' : 'Employee')),
       department: assignedDept,
       team: `${assignedDept} Team`,
@@ -691,7 +689,6 @@ export const EmployeeSetupWizard: React.FC<{ onComplete?: () => void }> = ({ onC
     setNewEmployeeName('');
     setNewEmployeeEmail('');
     setNewEmployeePhone('');
-    setNewEmployeePassword('');
     setNewEmployeeManagerId('');
     triggerToast({
       title: orgTemplate === 'institution' ? 'Staff Member Added' : 'Employee Added',
@@ -832,7 +829,6 @@ export const EmployeeSetupWizard: React.FC<{ onComplete?: () => void }> = ({ onC
         name: emp.name,
         fullName: emp.name,
         email: emp.email,
-        password: emp.password || existingEmp?.password || 'Welcome@123',
         phone: emp.phone || (isCurrentLoggedInUser ? (existingEmp?.phone || '') : '+1 (555) 019-2834'),
         avatar: existingEmp?.avatar || `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2394a3b8"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>`,
         department: (emp.department || assignedDept) as DepartmentName,
@@ -902,7 +898,6 @@ export const EmployeeSetupWizard: React.FC<{ onComplete?: () => void }> = ({ onC
         name: state.currentPersona.name || 'Organization Administrator',
         fullName: state.currentPersona.name || 'Organization Administrator',
         email: state.currentPersona.email || 'admin@organization.com',
-        password: state.currentPersona.password || 'password123',
         phone: '+1 (555) 019-2834',
         avatar: state.currentPersona.avatar || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2394a3b8"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>',
         department: (finalDepartments[0] || '') as any,
@@ -1520,19 +1515,11 @@ export const EmployeeSetupWizard: React.FC<{ onComplete?: () => void }> = ({ onC
                       </select>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                        Initial Login Password
-                      </label>
-                      <input
-                        type="password"
-                        value={newEmployeePassword}
-                        onChange={(e) => setNewEmployeePassword(e.target.value)}
-                        placeholder="Default: Welcome@123"
-                        className="w-full rounded-2xl border border-slate-200 px-4.5 py-3.5 text-xs outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900/10 font-medium bg-white transition-all"
-                      />
-                    </div>
                   </div>
+
+                  <p className="text-[11px] font-medium text-slate-500 leading-relaxed">
+                    Each person gets an email invite to set their own password when you finish setup.
+                  </p>
 
                   {/* Submit Button */}
                   <button

@@ -4,10 +4,9 @@ import {
   cognitoAdminSetUserPassword,
   cognitoFindUserSubByEmail,
 } from '../../config/cognito.js';
-import { hashPassword } from '../../utils/crypto.js';
+import { generateUnusablePassword, hashPassword } from '../../utils/crypto.js';
 import { log } from '../../utils/logger.js';
-
-const DEFAULT_TEMP_PASSWORD = 'Welcome@123';
+import { sendEmployeeInvite } from './employeeInvites.js';
 
 export type ProvisionEmployeeAuthInput = {
   employeeId: string;
@@ -15,10 +14,14 @@ export type ProvisionEmployeeAuthInput = {
   firstName?: string;
   lastName?: string;
   role?: string;
+  /** Explicit password set by an admin. When omitted the account is created locked until the invite is accepted. */
   password?: string;
   tenantId?: string;
   tenantSlug?: string;
   schemaName?: string;
+  /** Email the employee a one-time setup link. */
+  sendInvite?: boolean;
+  invitedBy?: string;
   /** Tenant-scoped query helper (optional). Updates cognito_sub on the employee row. */
   tenantQuery?: (text: string, params?: any[]) => Promise<{ rows: any[] }>;
 };
@@ -32,24 +35,14 @@ function isPlaceholderCognitoSub(sub: string | null | undefined): boolean {
   return sub.startsWith('sub_dev_') || sub.startsWith('user_') || sub.startsWith('sub_');
 }
 
-/**
- * Creates (or reuses) a Cognito user, links global_auth_mapping, and updates the
- * tenant employee row so login works.
- */
-export async function provisionEmployeeAuth(input: ProvisionEmployeeAuthInput): Promise<{
-  cognitoSub: string;
-  temporaryPassword: string;
-  created: boolean;
-}> {
-  const cleanEmail = input.email.trim().toLowerCase();
-  const temporaryPassword = (input.password || DEFAULT_TEMP_PASSWORD).trim();
-  const fullName = [input.firstName, input.lastName].filter(Boolean).join(' ').trim() || cleanEmail.split('@')[0];
-  const role = input.role || 'employee';
-
+/** Resolves the real tenant UUID + slug; JWT/header tenant ids are often slugs, not UUIDs. */
+export async function resolveTenant(input: {
+  tenantId?: string | null;
+  tenantSlug?: string | null;
+  schemaName?: string | null;
+}): Promise<{ tenantUuid: string | null; tenantSlug: string | null }> {
   let tenantUuid = input.tenantId || null;
   let tenantSlug = input.tenantSlug || null;
-
-  // Resolve real tenant UUID — JWT/header tenant ids are often slugs, not UUIDs.
   if (!tenantUuid || !isLikelyUuid(tenantUuid)) {
     const schemaName = input.schemaName || '';
     const slugHint = (tenantSlug || tenantUuid || schemaName.replace(/^tenant_/, '') || '').trim();
@@ -64,14 +57,34 @@ export async function provisionEmployeeAuth(input: ProvisionEmployeeAuthInput): 
     tenantUuid = tenantRes.rows[0]?.id || null;
     tenantSlug = tenantRes.rows[0]?.slug || tenantSlug;
   }
+  return { tenantUuid, tenantSlug };
+}
+
+/**
+ * Creates (or reuses) a Cognito user, links global_auth_mapping, and updates the
+ * tenant employee row. Without an explicit password the Cognito user gets a random
+ * password nobody knows; the employee sets their own via the emailed invite link.
+ */
+export async function provisionEmployeeAuth(input: ProvisionEmployeeAuthInput): Promise<{
+  cognitoSub: string;
+  created: boolean;
+  inviteSent: boolean;
+}> {
+  const cleanEmail = input.email.trim().toLowerCase();
+  const explicitPassword = input.password?.trim() || '';
+  const fullName = [input.firstName, input.lastName].filter(Boolean).join(' ').trim() || cleanEmail.split('@')[0];
+  const role = input.role || 'employee';
+
+  const { tenantUuid, tenantSlug } = await resolveTenant(input);
 
   let cognitoSub: string;
   let created = false;
 
   try {
+    // Cognito's own emails stay suppressed: the app sends branded invites through SES instead.
     const createdUser = await cognitoAdminCreateUser({
       email: cleanEmail,
-      password: temporaryPassword,
+      password: explicitPassword || generateUnusablePassword(),
       name: fullName,
       role,
       tenantSlug: tenantSlug || undefined,
@@ -81,14 +94,12 @@ export async function provisionEmployeeAuth(input: ProvisionEmployeeAuthInput): 
     created = true;
   } catch (err: any) {
     if (err?.name === 'UsernameExistsException') {
-      try {
-        await cognitoAdminSetUserPassword({
-          username: cleanEmail,
-          password: temporaryPassword,
-          permanent: true,
-        });
-      } catch (pwdErr: any) {
-        log.warn(`Could not reset Cognito password for existing user ${cleanEmail}`, pwdErr);
+      if (explicitPassword) {
+        try {
+          await cognitoAdminSetUserPassword({ username: cleanEmail, password: explicitPassword, permanent: true });
+        } catch (pwdErr: any) {
+          log.warn(`Could not reset Cognito password for existing user ${cleanEmail}`, pwdErr);
+        }
       }
 
       const lookedUp = await cognitoFindUserSubByEmail(cleanEmail);
@@ -117,13 +128,13 @@ export async function provisionEmployeeAuth(input: ProvisionEmployeeAuthInput): 
   }
 
   if (tenantUuid) {
-    const passwordHash = hashPassword(temporaryPassword);
+    const passwordHash = explicitPassword ? hashPassword(explicitPassword) : null;
     await pool.query(
       `INSERT INTO public.global_auth_mapping (cognito_sub, email, password_hash, tenant_id, role, is_active)
        VALUES ($1, $2, $3, $4, $5, true)
        ON CONFLICT (cognito_sub, tenant_id) DO UPDATE SET
          email = EXCLUDED.email,
-         password_hash = EXCLUDED.password_hash,
+         password_hash = COALESCE(EXCLUDED.password_hash, public.global_auth_mapping.password_hash),
          role = EXCLUDED.role,
          is_active = true`,
       [cognitoSub, cleanEmail, passwordHash, tenantUuid, role]
@@ -132,27 +143,41 @@ export async function provisionEmployeeAuth(input: ProvisionEmployeeAuthInput): 
     log.warn(`No tenant UUID resolved while provisioning ${cleanEmail}; Cognito user created without global_auth_mapping`);
   }
 
+  let employeeRowId: string | null = isLikelyUuid(input.employeeId) ? input.employeeId : null;
   if (input.tenantQuery) {
-    if (isLikelyUuid(input.employeeId)) {
-      await input.tenantQuery(
-        `UPDATE employees
-         SET cognito_sub = $1,
-             account_status = COALESCE(NULLIF(account_status, ''), 'Not Activated')
-         WHERE id = $2::uuid OR LOWER(email) = $3`,
-        [cognitoSub, input.employeeId, cleanEmail]
-      );
-    } else {
-      await input.tenantQuery(
-        `UPDATE employees
-         SET cognito_sub = $1,
-             account_status = COALESCE(NULLIF(account_status, ''), 'Not Activated')
-         WHERE LOWER(email) = $2`,
-        [cognitoSub, cleanEmail]
-      );
+    const nextStatus = input.sendInvite && !explicitPassword ? 'Invited' : 'Not Activated';
+    const res = await input.tenantQuery(
+      `UPDATE employees
+       SET cognito_sub = $1,
+           account_status = CASE
+             WHEN COALESCE(NULLIF(account_status, ''), 'Not Activated') IN ('Not Activated', 'Invited', 'Auth Error') THEN $2
+             ELSE account_status
+           END
+       WHERE ($3::uuid IS NOT NULL AND id = $3::uuid) OR LOWER(email) = $4
+       RETURNING id`,
+      [cognitoSub, nextStatus, employeeRowId, cleanEmail]
+    );
+    employeeRowId = res.rows[0]?.id || employeeRowId;
+  }
+
+  let inviteSent = false;
+  if (input.sendInvite && !explicitPassword && tenantUuid) {
+    try {
+      await sendEmployeeInvite({
+        email: cleanEmail,
+        firstName: input.firstName,
+        role,
+        tenantId: tenantUuid,
+        employeeId: employeeRowId,
+        invitedBy: input.invitedBy,
+      });
+      inviteSent = true;
+    } catch (inviteErr: any) {
+      log.warn(`Invite email failed for ${cleanEmail}; admin can resend from the employee list`, inviteErr);
     }
   }
 
-  return { cognitoSub, temporaryPassword, created };
+  return { cognitoSub, created, inviteSent };
 }
 
-export { DEFAULT_TEMP_PASSWORD, isPlaceholderCognitoSub };
+export { isPlaceholderCognitoSub };

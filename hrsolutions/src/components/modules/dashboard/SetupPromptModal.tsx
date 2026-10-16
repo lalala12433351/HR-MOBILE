@@ -109,9 +109,9 @@ export const SetupPromptModal: React.FC<SetupPromptModalProps> = ({ forceType })
   };
 
   return (
-    <div className="w-full bg-white border border-[#e2e8f0] rounded-xl px-4 py-3 sm:py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs">
+    <div className="w-full bg-[var(--bg-surface)] border border-[#e2e8f0] rounded-xl px-4 py-3 sm:py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs">
       <div className="flex items-center gap-3">
-        <span className="text-sm font-medium text-[#0f172a]">
+        <span className="text-sm font-medium text-[var(--text-primary)]">
           {messageText}
         </span>
       </div>
@@ -127,7 +127,7 @@ export const SetupPromptModal: React.FC<SetupPromptModalProps> = ({ forceType })
         <button
           type="button"
           onClick={handleDismiss}
-          className="h-8 px-2 rounded-lg text-slate-400 hover:text-slate-600 text-base leading-none font-bold transition-colors cursor-pointer flex items-center justify-center"
+          className="h-8 px-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-base leading-none font-bold transition-colors cursor-pointer flex items-center justify-center"
           title="Dismiss"
         >
           ×

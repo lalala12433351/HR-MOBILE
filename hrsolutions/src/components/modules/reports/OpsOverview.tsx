@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { downloadBlob } from '@/lib/native';
 import { AppState } from '@/services/store';
 import { Download, Users, Briefcase, CheckSquare, CalendarCheck } from 'lucide-react';
 import {
@@ -185,9 +184,9 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
 
   if (enabledWidgets.length === 0) {
     return (
-      <div className="p-12 text-center rounded-xl border border-slate-200 bg-white shadow-xs max-w-md mx-auto my-12 space-y-2">
-        <h3 className="text-base font-bold text-slate-900">All Overview Widgets Disabled</h3>
-        <p className="text-xs text-slate-500 leading-relaxed">
+      <div className="p-12 text-center rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]  max-w-md mx-auto my-12 space-y-2">
+        <h3 className="text-base font-bold text-[var(--text-primary)]">All Overview Widgets Disabled</h3>
+        <p className="text-xs text-[var(--text-muted)] leading-relaxed">
           Re-enable widgets in Reports Settings to see operational analytics.
         </p>
       </div>
@@ -195,9 +194,9 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
   }
 
   return (
-    <div className="flex-1 p-4 sm:p-6 lg:p-7 space-y-5 overflow-y-auto bg-slate-50/60">
+    <div className="flex-1 p-4 sm:p-6 lg:p-7 space-y-5 overflow-y-auto bg-[var(--bg-surface-subtle)]/60">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h2 className="text-base font-semibold tracking-tight text-slate-900">
+        <h2 className="text-base font-semibold tracking-tight text-[var(--text-primary)]">
           Ops Overview
         </h2>
         <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -205,13 +204,13 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
             type="month"
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium focus:border-blue-600 outline-none text-xs cursor-pointer font-mono"
+            className="px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] font-medium focus:border-blue-600 outline-none text-xs cursor-pointer font-mono"
           />
           {reportSettings.allowCsvExport !== false && (
             <button
               type="button"
               onClick={handleExportCSV}
-              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 active:scale-[0.97] text-white text-xs font-semibold shadow-xs transition-[transform,background-color] duration-150 cursor-pointer"
+              className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 active:scale-[0.97] text-white text-xs font-semibold  transition-[transform,background-color] duration-150 cursor-pointer"
               style={{ boxShadow: '0 4px 6px -1px rgba(37, 99, 235, 0.20)' }}
             >
               <Download className="h-3.5 w-3.5" />
@@ -226,15 +225,15 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
           {kpiCards.map((kpi) => (
             <div
               key={kpi.title}
-              className="p-4 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-2"
+              className="p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]  space-y-2"
             >
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                   {kpi.title}
                 </span>
                 {kpi.icon}
               </div>
-              <p className="text-2xl font-bold tracking-tight text-slate-900 font-mono">{kpi.value}</p>
+              <p className="text-2xl font-bold tracking-tight text-[var(--text-primary)] font-mono">{kpi.value}</p>
             </div>
           ))}
         </div>
@@ -243,16 +242,16 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
       {reportSettings.showCharts !== false && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           {isWidgetOn('headcount') && (
-            <div className="lg:col-span-7 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3">
+            <div className="lg:col-span-7 p-5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]  space-y-3">
               <div>
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                   Headcount by Department
                 </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">Active staff across business units</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Active staff across business units</p>
               </div>
               <div className="h-56 w-full">
                 {headcountByDept.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                  <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                     No employee data available
                   </div>
                 ) : (
@@ -288,16 +287,16 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
           )}
 
           {isWidgetOn('projects') && (
-            <div className="lg:col-span-5 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3 flex flex-col">
+            <div className="lg:col-span-5 p-5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]  space-y-3 flex flex-col">
               <div>
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                   Project Status
                 </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">{projects.length} total projects</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{projects.length} total projects</p>
               </div>
               <div className="flex-1 min-h-[11rem]">
                 {projectBreakdown.length === 0 ? (
-                  <div className="h-44 flex items-center justify-center text-xs text-slate-400">
+                  <div className="h-44 flex items-center justify-center text-xs text-[var(--text-muted)]">
                     No projects yet
                   </div>
                 ) : (
@@ -312,12 +311,12 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
                   />
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+              <div className="grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
                 {projectBreakdown.map((item) => (
                   <div key={item.name} className="flex items-center gap-1.5 truncate">
                     <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
                     <span className="truncate">{item.name}</span>
-                    <span className="font-mono font-semibold text-slate-800 ml-auto">{item.count}</span>
+                    <span className="font-mono font-semibold text-[var(--text-primary)] ml-auto">{item.count}</span>
                   </div>
                 ))}
               </div>
@@ -325,12 +324,12 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
           )}
 
           {isWidgetOn('tasks') && (
-            <div className="lg:col-span-6 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-4">
+            <div className="lg:col-span-6 p-5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]  space-y-4">
               <div>
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                   Task Completion Velocity
                 </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">Live task pipeline across projects</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Live task pipeline across projects</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
                 <SemiGauge
@@ -340,15 +339,15 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
                   size={160}
                 />
                 <div className="grid grid-cols-3 sm:grid-cols-1 gap-2.5">
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase">Total</p>
-                    <p className="text-xl font-bold font-mono text-slate-900 mt-1">{taskVelocity.total}</p>
+                  <div className="p-3 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]">
+                    <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase">Total</p>
+                    <p className="text-xl font-bold font-mono text-[var(--text-primary)] mt-1">{taskVelocity.total}</p>
                   </div>
-                  <div className="p-3 rounded-xl bg-emerald-50/60 border border-emerald-100">
+                  <div className="p-3 rounded-lg bg-emerald-50/60 border border-emerald-100">
                     <p className="text-[10px] font-semibold text-emerald-700 uppercase">Done</p>
                     <p className="text-xl font-bold font-mono text-emerald-800 mt-1">{taskVelocity.completed}</p>
                   </div>
-                  <div className="p-3 rounded-xl bg-amber-50/60 border border-amber-100">
+                  <div className="p-3 rounded-lg bg-amber-50/60 border border-amber-100">
                     <p className="text-[10px] font-semibold text-amber-700 uppercase">Open</p>
                     <p className="text-xl font-bold font-mono text-amber-800 mt-1">{taskVelocity.open}</p>
                   </div>
@@ -358,12 +357,12 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
           )}
 
           {isWidgetOn('attendance_snapshot') && (
-            <div className="lg:col-span-6 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-4">
+            <div className="lg:col-span-6 p-5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]  space-y-4">
               <div>
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                   Attendance Snapshot
                 </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">Month {selectedMonth} presence summary</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Month {selectedMonth} presence summary</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
                 <SemiGauge
@@ -373,27 +372,27 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
                   size={160}
                 />
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1 p-3 rounded-xl bg-slate-50 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase">Punches</p>
-                    <p className="text-lg font-bold font-mono text-slate-900">{attendanceSnapshot.punchCount}</p>
+                  <div className="space-y-1 p-3 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]">
+                    <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase">Punches</p>
+                    <p className="text-lg font-bold font-mono text-[var(--text-primary)]">{attendanceSnapshot.punchCount}</p>
                   </div>
-                  <div className="space-y-1 p-3 rounded-xl bg-slate-50 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase">Staff</p>
-                    <p className="text-lg font-bold font-mono text-slate-900">{attendanceSnapshot.staff}</p>
+                  <div className="space-y-1 p-3 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]">
+                    <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase">Staff</p>
+                    <p className="text-lg font-bold font-mono text-[var(--text-primary)]">{attendanceSnapshot.staff}</p>
                   </div>
-                  <div className="space-y-1 p-3 rounded-xl bg-amber-50/60 border border-amber-100">
+                  <div className="space-y-1 p-3 rounded-lg bg-amber-50/60 border border-amber-100">
                     <p className="text-[10px] font-semibold text-amber-700 uppercase">Late</p>
                     <p className="text-lg font-bold font-mono text-amber-800">{attendanceSnapshot.late}</p>
                   </div>
-                  <div className="space-y-1 p-3 rounded-xl bg-slate-50 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase">Leave Days</p>
-                    <p className="text-lg font-bold font-mono text-slate-900">{attendanceSnapshot.leaveDays}</p>
+                  <div className="space-y-1 p-3 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]">
+                    <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase">Leave Days</p>
+                    <p className="text-lg font-bold font-mono text-[var(--text-primary)]">{attendanceSnapshot.leaveDays}</p>
                   </div>
                 </div>
               </div>
               {/* Employment-status style stacked bar */}
               <div className="pt-1">
-                <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100 flex">
+                <div className="h-3 w-full overflow-hidden rounded-full bg-[var(--bg-surface-subtle)] flex">
                   <div
                     className="h-full bg-blue-600 transition-[width] duration-200 ease-out"
                     style={{ width: `${Math.min(100, attendanceSnapshot.rate)}%` }}
@@ -413,7 +412,7 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
                   />
                   <div className="h-full flex-1 bg-slate-200" style={{ minWidth: 0 }} />
                 </div>
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[var(--text-muted)]">
                   <span className="inline-flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-blue-600" /> Present
                   </span>
@@ -431,26 +430,26 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
       )}
 
       {isWidgetOn('headcount') && headcountByDept.length > 0 && (
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-slate-100">
-            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Department Roster</h3>
+        <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]  overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-[var(--border-color)]">
+            <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">Department Roster</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                <tr className="bg-[var(--bg-surface-subtle)] text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
                   <th className="px-5 py-2.5">Department</th>
                   <th className="px-5 py-2.5 text-right">Headcount</th>
                   <th className="px-5 py-2.5 text-right">Share</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-[var(--border-color)]">
                 {headcountByDept.map((row) => {
                   const total = headcountByDept.reduce((s, d) => s + d.count, 0) || 1;
                   const share = Math.round((row.count / total) * 1000) / 10;
                   return (
-                    <tr key={row.name} className="hover:bg-slate-50/80">
-                      <td className="px-5 py-3 font-semibold text-slate-800">
+                    <tr key={row.name} className="hover:bg-[var(--bg-surface-subtle)]/80">
+                      <td className="px-5 py-3 font-semibold text-[var(--text-primary)]">
                         <span className="inline-flex items-center gap-2">
                           <span
                             className="h-2 w-2 rounded-full shrink-0"
@@ -459,8 +458,8 @@ export const OpsOverview: React.FC<OpsOverviewProps> = ({ state }) => {
                           {row.name}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-right font-mono font-bold text-slate-900">{row.count}</td>
-                      <td className="px-5 py-3 text-right font-mono text-slate-600">{share}%</td>
+                      <td className="px-5 py-3 text-right font-mono font-bold text-[var(--text-primary)]">{row.count}</td>
+                      <td className="px-5 py-3 text-right font-mono text-[var(--text-secondary)]">{share}%</td>
                     </tr>
                   );
                 })}

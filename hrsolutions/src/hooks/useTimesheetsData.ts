@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/services/apiClient';
 import { safeApiCall } from '@/hooks/safeApiCall';
-import { mapApiTask, mapApiTimesheet } from '@/services/backendSync';
+import { mapApiEmployee, mapApiTask, mapApiTimesheet } from '@/services/backendSync';
 import { Employee, Project, Task, AttendanceRecord, TimesheetEntry, AuditLogItem } from '@/types';
 
 export function useTimesheetsData() {
@@ -33,18 +33,7 @@ export function useTimesheetsData() {
         const newData = { ...businessData };
 
         if (empRes.success && Array.isArray(empRes.data)) {
-          newData.employees = empRes.data.map((e: any) => ({
-            id: e.id,
-            employeeId: e.employee_code || `EMP-${e.id.slice(0,4)}`,
-            name: `${e.first_name || ''} ${e.last_name || ''}`.trim() || e.employee_code,
-            email: e.email,
-            department: e.department_name,
-            designation: e.job_title,
-            status: e.account_status === 'Deactivated' ? 'Deactivated' : 'Active',
-            role: e.role || 'employee',
-            avatar: e.avatar || '',
-            phone: e.phone || '—',
-          } as Employee));
+          newData.employees = empRes.data.map(mapApiEmployee);
         }
 
         if (projRes.success && Array.isArray(projRes.data)) {
@@ -53,7 +42,9 @@ export function useTimesheetsData() {
             name: p.name,
             status: p.status || 'In Progress',
             budget: p.budget || 0,
-            description: p.description || ''
+            description: p.description || '',
+            managerId: p.manager_id || p.managerId || '',
+            managerName: p.manager_name || p.managerName || '',
           } as Project));
         }
 

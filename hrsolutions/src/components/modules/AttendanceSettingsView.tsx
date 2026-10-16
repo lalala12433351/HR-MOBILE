@@ -3,8 +3,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { DEFAULT_GEO_COORDINATES } from '@/config/constants';
 import { isInstitutionMode } from '@/utils/organizationMode';
-import { Check, ExternalLink } from 'lucide-react';
+import { SettingsToggle } from './settings/SettingsToggle';
+import { SettingsToast } from './settings/SettingsToast';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { AppState } from '../../services/store';
 import { WorkShift } from '../../types';
 import { api } from '../../services/apiClient';
@@ -14,9 +16,6 @@ import {
   ATT_CARD,
   ATT_SECTION_SUB,
   ATT_SECTION_TITLE,
-  ATT_SUBNAV_ACTIVE,
-  ATT_SUBNAV_BASE,
-  ATT_SUBNAV_IDLE,
   ATT_TABLE_SHELL,
 } from './attendance/attendanceUi';
 
@@ -49,31 +48,7 @@ const WEEK_DAYS = [
   { key: 'Sunday', short: 'Sun', full: 'Sunday' },
 ];
 
-// Reusable Sleek Toggle Switch Component
-const ToggleSwitch: React.FC<{
-  checked: boolean;
-  onChange: (val: boolean) => void;
-  id?: string;
-}> = ({ checked, onChange, id }) => {
-  return (
-    <button
-      type="button"
-      id={id}
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-[background-color] duration-150 ease-out outline-none active:scale-[0.96] ${
-        checked ? 'bg-blue-600' : 'bg-slate-200'
-      }`}
-    >
-      <span
-        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform duration-[160ms] ease-out mt-0.5 ${
-          checked ? 'translate-x-4.5' : 'translate-x-0.5'
-        }`}
-      />
-    </button>
-  );
-};
+const ToggleSwitch = SettingsToggle;
 
 // Helper: Convert "09:30 AM" to "09:30"
 const to24HourTime = (time12h?: string): string => {
@@ -101,6 +76,19 @@ const to12HourTime = (time24h: string): string => {
   return `${h.toString().padStart(2, '0')}:${m} ${meridian}`;
 };
 
+const blockDecimalPointKeys = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === '.' || e.key === ',' || e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-') {
+    e.preventDefault();
+  }
+};
+
+const toWholeDays = (raw: string, max: number): number | null => {
+  if (raw.trim() === '') return 0;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(max, Math.max(0, n));
+};
+
 export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   state,
   onUpdateState,
@@ -109,11 +97,26 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   const initialAtt = options.attendanceSettings;
   const initialPolicies = options.attendancePolicies;
   const initialLeaves = options.leaveSettings;
+  const searchParams = useSearchParams();
 
   const isInstitution = isInstitutionMode(state.organization, state.currentPersona);
 
   // Sub-Navigation Tab State
   const [subTab, setSubTab] = useState<'general' | 'students' | 'policy' | 'office_location' | 'leaves' | 'reports'>('general');
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (
+      tab === 'general' ||
+      tab === 'students' ||
+      tab === 'policy' ||
+      tab === 'office_location' ||
+      tab === 'leaves' ||
+      tab === 'reports'
+    ) {
+      setSubTab(tab);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!isInstitution && subTab === 'students') {
@@ -122,7 +125,9 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   }, [isInstitution, subTab]);
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [leaveQuotaPeriod, setLeaveQuotaPeriod] = useState<'annual' | 'monthly'>(initialLeaves?.accrualFrequency || 'monthly');
+  const [leaveQuotaPeriod, setLeaveQuotaPeriod] = useState<'annual' | 'monthly'>(
+    initialLeaves?.accrualFrequency === 'monthly' ? 'monthly' : 'annual'
+  );
 
   // Academic & Student Policy Settings
   const initialAcademic = options?.academicSettings;
@@ -404,6 +409,9 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   const [autoClockOut, setAutoClockOut] = useState(
     initialAtt?.autoClockOutEnabled ?? true
   );
+  const [autoClockOutHours, setAutoClockOutHours] = useState(
+    Number(initialAtt?.autoClockOutHours) || 12
+  );
 
   // Modals for creating new shift / batch
   const [showAddShiftModal, setShowAddShiftModal] = useState(false);
@@ -501,7 +509,20 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
     initialAtt?.requireLocationGPS ?? true
   );
   const [allowedIps, setAllowedIps] = useState(
-    initialAtt?.allowedIpAddresses || '192.168.1.0/24, 106.51.72.18'
+    initialAtt?.allowedIpAddresses && initialAtt.allowedIpAddresses !== '192.168.1.0/24, 106.51.72.18'
+      ? initialAtt.allowedIpAddresses
+      : ''
+  );
+  const [outOfRadiusAction, setOutOfRadiusAction] = useState<'Block' | 'Allow' | 'Warn'>(
+    initialAtt?.outOfRadiusAction === 'Allow' || initialAtt?.outOfRadiusAction === 'Warn'
+      ? initialAtt.outOfRadiusAction
+      : 'Block'
+  );
+  const [allowQrCodeAttendance, setAllowQrCodeAttendance] = useState(
+    initialAtt?.allowQrCodeAttendance === true
+  );
+  const [qrRefreshIntervalSeconds, setQrRefreshIntervalSeconds] = useState(
+    Number(initialAtt?.qrRefreshIntervalSeconds) || 30
   );
   const [regularizationDaysWindow, setRegularizationDaysWindow] = useState(11);
   const [requireManagerRegularizationApproval, setRequireManagerRegularizationApproval] = useState(true);
@@ -515,7 +536,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   const [enableCompOff, setEnableCompOff] = useState(initialLeaves?.enableCompOff ?? true);
   const [maxConsecutiveWithoutDoc, setMaxConsecutiveWithoutDoc] = useState(initialLeaves?.maxConsecutiveDaysWithoutDoc || 3);
   const [maxCarryForward, setMaxCarryForward] = useState(initialLeaves?.maxCarryForwardDays || 10);
-  const [accrualFrequency, setAccrualFrequency] = useState<'annual' | 'monthly'>(initialLeaves?.accrualFrequency || 'monthly');
+  const [leavePoliciesEnabled, setLeavePoliciesEnabled] = useState(initialLeaves?.leavePoliciesEnabled ?? true);
+  const [enableMonthlyRollover, setEnableMonthlyRollover] = useState(initialLeaves?.enableMonthlyRollover ?? true);
   const [enableCarryOver, setEnableCarryOver] = useState(initialLeaves?.enableCarryOver ?? true);
   const [allowNegativeBalance, setAllowNegativeBalance] = useState(initialLeaves?.allowNegativeBalance ?? false);
   const [restrictDuringNotice, setRestrictDuringNotice] = useState(initialLeaves?.restrictDuringNoticePeriod ?? true);
@@ -572,8 +594,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
         .map((p, idx) => ({
           id: p.id || `off_${idx + 1}`,
           name: p.name,
-          clockingDevices: 'Desktop, Mobile',
-          qrCodeEnabled: true,
+          clockingDevices: (p as any).clockingDevices || 'Desktop, Mobile',
+          qrCodeEnabled: (p as any).qrCodeEnabled !== false,
           geofencingStatus: p.geofencingStatus === 'Inactive' ? 'Inactive' : 'Active',
           address: p.address || `${p.name} Office Address`,
           radiusText: `${p.radiusMeters || 250} meters`,
@@ -872,6 +894,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       geofencingStatus: o.geofencingStatus,
       radiusMeters: o.radiusMeters,
       address: o.address,
+      clockingDevices: o.clockingDevices,
+      qrCodeEnabled: o.qrCodeEnabled,
     }));
 
   const persistOfficeGeofencePolicies = async (list: OfficePolicyConfig[]) => {
@@ -1146,15 +1170,16 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
         halfDayThresholdHours: Number(halfDayHours) || 4.5,
         fullDayMinimumHours: Number(fullDayHours) || 8.0,
         autoClockOutEnabled: autoClockOut,
-        autoClockOutHours: 12,
+        autoClockOutHours: Math.min(24, Math.max(1, Number(autoClockOutHours) || 12)),
         geofenceRadiusMeters: Math.min(MAX_GEOFENCE_LIMIT, Math.max(MIN_GEOFENCE_LIMIT, Number(geofenceRadius) || 150)),
         requireSelfieCheckIn,
         requireSelfieCheckOut,
         requireLocationGPS: requireGPS,
         geofenceEnabled: requireGPS,
-        allowQrCodeAttendance: true,
-        qrRefreshIntervalSeconds: 30,
-        allowedIpAddresses: allowedIps,
+        outOfRadiusAction,
+        allowQrCodeAttendance,
+        qrRefreshIntervalSeconds: Math.min(300, Math.max(15, Number(qrRefreshIntervalSeconds) || 30)),
+        allowedIpAddresses: allowedIps.trim(),
         officeGeofencePolicies: buildOfficeGeofencePolicies(offices),
         includeSaturdayInWorkHours: selectedDays.includes('Saturday'),
         workingDays: selectedDays,
@@ -1176,7 +1201,9 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
         maxConsecutiveDaysWithoutDoc: Number(maxConsecutiveWithoutDoc) || 3,
         maxCarryForwardDays: Number(maxCarryForward) || 10,
         enableCarryOver,
+        leavePoliciesEnabled,
         accrualFrequency: leaveQuotaPeriod,
+        enableMonthlyRollover,
         allowNegativeBalance,
         restrictDuringNoticePeriod: restrictDuringNotice,
         approvalWorkflow: leaveApprovalWorkflow,
@@ -1252,39 +1279,25 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Toast Alert */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-3 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200">
-          <Check className="h-4 w-4 shrink-0" />
-          <span className="text-xs font-semibold">{toastMessage}</span>
-        </div>
-      )}
+    <div className="settings-page">
+      <SettingsToast message={toastMessage} />
 
-      {/* Sticky page header + sub-nav */}
-      <div className="sticky top-0 z-30 -mx-1 px-1 pt-0.5 pb-4 space-y-4 bg-[var(--bg-app)] border-b border-slate-200/70 shadow-[0_8px_16px_-12px_rgba(15,23,42,0.18)]">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 className={`${ATT_SECTION_TITLE} text-xl`}>
-              Attendance & Work Schedules
-            </h2>
-            <p className={ATT_SECTION_SUB}>
-              {isInstitution
-                ? 'Configure batch timings, classroom shifts, campus geofences, and student attendance policies'
-                : 'Configure work shifts, weekly office schedules, GPS geofences, and overtime policies'}
-            </p>
-          </div>
+      <div className="settings-page__sticky">
+        <div className="settings-page__header">
+          <h2 className="settings-page__heading">
+            Attendance & Work Schedules
+          </h2>
 
           <button
             type="button"
             onClick={handleSaveAllSettings}
-            className={`${ATT_BTN_PRIMARY} w-full sm:w-auto shrink-0`}
+            className="settings-page__action shrink-0"
           >
             Save Changes
           </button>
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5 w-full">
+        <div className="settings-page__tabs" role="tablist" aria-label="Attendance settings categories">
           {[
             { id: 'general', label: isInstitution ? 'Batches & Schedules' : 'Shifts & Schedules' },
             ...(isInstitution ? [{ id: 'students', label: 'Student Policies & Warnings' }] : []),
@@ -1299,7 +1312,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => setSubTab(item.id as any)}
-                className={`${ATT_SUBNAV_BASE} ${isSelected ? ATT_SUBNAV_ACTIVE : ATT_SUBNAV_IDLE}`}
+                role="tab"
+                aria-selected={isSelected}
+                aria-controls={`attendance-settings-${item.id}`}
+                className={`settings-page__tab${isSelected ? ' settings-page__tab--active' : ''}`}
               >
                 {item.label}
               </button>
@@ -1309,7 +1325,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       </div>
 
       {/* Main Content Area */}
-      <div className="w-full space-y-6">
+      <div className="w-full space-y-5" id={`attendance-settings-${subTab}`} role="tabpanel">
           {/* ========================================================================= */}
           {/* 1. GENERAL TAB (Shifts / Batches & Working Days)                          */}
           {/* ========================================================================= */}
@@ -1331,15 +1347,15 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               {/* SECTION: CHOOSE OR CREATE SHIFT / BATCH */}
               {isInstitution ? (
                 /* Institutional Batches Switcher */
-                <div className="space-y-3 p-4 rounded-lg bg-slate-50 border border-slate-200">
+                <div className="space-y-3 p-4 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-900">
+                    <span className="text-xs font-bold text-[var(--text-primary)]">
                       Choose Batch to Configure
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowAddBatchModal(true)}
-                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all cursor-pointer shadow-xs"
+                      className="settings-page__action"
                     >
                       New Batch
                     </button>
@@ -1347,7 +1363,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                   <div className="flex flex-wrap gap-2 pt-1">
                     {academicBatches.length === 0 ? (
-                      <div className="text-xs text-slate-500 py-1 font-medium">
+                      <div className="text-xs text-[var(--text-muted)] py-1 font-medium">
                         No batches configured yet. Click &quot;New Batch&quot; above to create one.
                       </div>
                     ) : (
@@ -1359,12 +1375,12 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                             className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
                               isSelected
                                 ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                                : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
+                                : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-color)] hover:border-[var(--border-strong)]'
                             }`}
                             onClick={() => handleSelectBatch(b.id)}
                           >
                             <span>{b.grade} {b.section ? `- ${b.section}` : ''}</span>
-                            <span className={`text-[10px] font-mono ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                            <span className={`text-[10px] font-mono ${isSelected ? 'text-blue-100' : 'text-[var(--text-muted)]'}`}>
                               ({b.startTime || '08:30'} - {b.endTime || '15:30'})
                             </span>
                             {academicBatches.length > 1 && (
@@ -1375,7 +1391,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                                   handleDeleteBatch(b.id);
                                 }}
                                 className={`p-0.5 text-xs font-bold transition-colors cursor-pointer ${
-                                  isSelected ? 'text-blue-200 hover:text-white' : 'text-slate-400 hover:text-red-600'
+                                  isSelected ? 'text-blue-200 hover:text-white' : 'text-[var(--text-muted)] hover:text-red-600'
                                 }`}
                                 title="Delete batch"
                               >
@@ -1390,15 +1406,15 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
               ) : (
                 /* Corporate Shifts Switcher */
-                <div className="space-y-3 p-4 rounded-lg bg-slate-50 border border-slate-200">
+                <div className="space-y-3 p-4 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-900">
+                    <span className="text-xs font-bold text-[var(--text-primary)]">
                       Choose Work Shift
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowAddShiftModal(true)}
-                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all cursor-pointer shadow-xs"
+                      className="settings-page__action"
                     >
                       New Shift
                     </button>
@@ -1413,17 +1429,17 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
                             isSelected
                               ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
+                              : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-color)] hover:border-[var(--border-strong)]'
                           }`}
                           onClick={() => handleSelectShift(s.id)}
                         >
                           <span>{s.name}</span>
                           {s.isHourlyShift && (
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${isSelected ? 'bg-[var(--bg-surface)]/20 text-white' : 'bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)]'}`}>
                               HOURLY
                             </span>
                           )}
-                          <span className={`text-[10px] font-mono ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                          <span className={`text-[10px] font-mono ${isSelected ? 'text-blue-100' : 'text-[var(--text-muted)]'}`}>
                             ({s.startTime} - {s.endTime})
                           </span>
                           {shifts.length > 1 && (
@@ -1434,7 +1450,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                                 handleDeleteShift(s.id);
                               }}
                               className={`p-0.5 text-xs font-bold transition-colors cursor-pointer ${
-                                isSelected ? 'text-blue-200 hover:text-white' : 'text-slate-400 hover:text-red-600'
+                                isSelected ? 'text-blue-200 hover:text-white' : 'text-[var(--text-muted)] hover:text-red-600'
                               }`}
                               title="Delete shift"
                             >
@@ -1451,19 +1467,19 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               {/* SECTION: TIMINGS & SCHEDULE RULES */}
               <div className="space-y-4 pt-1">
                 {/* Attendance Evaluation Cycle */}
-                <div className="p-4 rounded-lg border border-slate-200 bg-white space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)] pb-3">
                     <div>
-                      <h4 className="text-xs font-bold text-slate-900">
+                      <h4 className="text-xs font-bold text-[var(--text-primary)]">
                         Attendance Evaluation & Reconciliation Cycle
                       </h4>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
+                      <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
                         Configure monthly reconciliation vs annual cumulative hours tracking
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full bg-blue-600 inline-block" />
-                      <span className="text-xs font-bold text-slate-900 capitalize">
+                      <span className="text-xs font-bold text-[var(--text-primary)] capitalize">
                         {attendanceCycle} Tracking
                       </span>
                     </div>
@@ -1475,8 +1491,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       onClick={() => setAttendanceCycle('monthly')}
                       className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
                         attendanceCycle === 'monthly'
-                          ? 'border-blue-600 bg-blue-50/50 text-blue-950 font-semibold ring-1 ring-blue-600/20'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                          ? 'border-blue-600 bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)]/50 text-blue-950 font-semibold ring-1 ring-blue-600/20'
+                          : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1">
@@ -1485,7 +1501,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           <span className="h-2 w-2 rounded-full bg-blue-600 shrink-0" />
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-500">
+                      <p className="text-[11px] text-[var(--text-muted)]">
                         Reviews punches, deductions, late arrivals, and hour targets on a 1st calendar month cycle.
                       </p>
                     </button>
@@ -1495,8 +1511,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       onClick={() => setAttendanceCycle('yearly')}
                       className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
                         attendanceCycle === 'yearly'
-                          ? 'border-blue-600 bg-blue-50/50 text-blue-950 font-semibold ring-1 ring-blue-600/20'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                          ? 'border-blue-600 bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)]/50 text-blue-950 font-semibold ring-1 ring-blue-600/20'
+                          : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1">
@@ -1505,7 +1521,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           <span className="h-2 w-2 rounded-full bg-blue-600 shrink-0" />
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-500">
+                      <p className="text-[11px] text-[var(--text-muted)]">
                         Accumulates cumulative hours and attendance statistics continuously across the entire financial year.
                       </p>
                     </button>
@@ -1513,46 +1529,46 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 {/* Live Computed Schedule Target Banner */}
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/60 text-xs">
+                <div className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/60 text-xs">
                   <div>
-                    <span className="font-semibold text-slate-900 block">Weekly Work Target</span>
-                    <span className="text-[11px] text-slate-500">{currentDailyShiftHours} hrs/day × {selectedDays.length} days</span>
+                    <span className="font-semibold text-[var(--text-primary)] block">Weekly Work Target</span>
+                    <span className="text-[11px] text-[var(--text-muted)]">{currentDailyShiftHours} hrs/day × {selectedDays.length} days</span>
                   </div>
-                  <span className="text-sm font-bold text-slate-900 font-mono">{currentWeeklyWorkHours} Hours</span>
+                  <span className="text-sm font-bold text-[var(--text-primary)] font-mono">{currentWeeklyWorkHours} Hours</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">
+                    <label className="text-xs font-semibold text-[var(--text-secondary)]">
                       {isInstitution ? 'Morning Bell / Start Time' : 'Shift Start Time'}
                     </label>
                     <input
                       type="time"
                       value={to24HourTime(workStartTime)}
                       onChange={(e) => setWorkStartTime(to12HourTime(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">
+                    <label className="text-xs font-semibold text-[var(--text-secondary)]">
                       {isInstitution ? 'Dismissal / End Time' : 'Shift End Time'}
                     </label>
                     <input
                       type="time"
                       value={to24HourTime(workEndTime)}
                       onChange={(e) => setWorkEndTime(to12HourTime(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Grace Buffer Period</label>
+                    <label className="text-xs font-semibold text-[var(--text-secondary)]">Grace Buffer Period</label>
                     <div className="relative">
                       <select
                         value={gracePeriod}
                         onChange={(e) => setGracePeriod(Number(e.target.value))}
-                        className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 appearance-none outline-none focus:border-blue-600 cursor-pointer pr-8"
+                        className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] appearance-none outline-none focus:border-blue-600 cursor-pointer pr-8"
                       >
                         <option value={0}>0 Mins (Strict)</option>
                         <option value={5}>5 Minutes</option>
@@ -1567,11 +1583,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 {/* INTERACTIVE 7-DAY SELECTOR (MON - SUN) */}
-                <div className="space-y-3 p-4 rounded-lg border border-slate-200 bg-white">
+                <div className="space-y-3 p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
-                      <span className="text-xs font-bold text-slate-900 block">Weekly Working Days</span>
-                      <span className="text-[11px] text-slate-500">
+                      <span className="text-xs font-bold text-[var(--text-primary)] block">Weekly Working Days</span>
+                      <span className="text-[11px] text-[var(--text-muted)]">
                         Choose active working days for this schedule (in sync with organization working days)
                       </span>
                     </div>
@@ -1582,7 +1598,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           setSelectedDays(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
                           setEnableAlternateSaturdays(false);
                         }}
-                        className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium cursor-pointer transition-colors"
+                        className="px-2.5 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-medium cursor-pointer transition-colors"
                       >
                         Mon – Fri (5 Days)
                       </button>
@@ -1592,7 +1608,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           setSelectedDays(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
                           setEnableAlternateSaturdays(false);
                         }}
-                        className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium cursor-pointer transition-colors"
+                        className="px-2.5 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-medium cursor-pointer transition-colors"
                       >
                         Mon – Sat (6 Days)
                       </button>
@@ -1605,8 +1621,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                         }}
                         className={`px-2.5 py-1 rounded-lg border font-medium cursor-pointer transition-colors ${
                           enableAlternateSaturdays
-                            ? 'border-blue-600 bg-blue-50 text-blue-700 font-semibold'
-                            : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                            ? 'border-blue-600 bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 font-semibold'
+                            : 'border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)]'
                         }`}
                       >
                         Mon – Fri + Alt. Saturdays
@@ -1617,7 +1633,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           setSelectedDays(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
                           setEnableAlternateSaturdays(false);
                         }}
-                        className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium cursor-pointer transition-colors"
+                        className="px-2.5 py-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-medium cursor-pointer transition-colors"
                       >
                         All 7 Days
                       </button>
@@ -1638,14 +1654,14 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                             isSelected
                               ? 'border-blue-600 bg-blue-600 text-white font-bold'
                               : isAltSaturday
-                              ? 'border-blue-300 bg-blue-50 text-blue-900 font-semibold'
-                              : 'border-slate-200 bg-white text-slate-400 hover:text-slate-700 hover:border-slate-300 font-medium'
+                              ? 'border-blue-300 bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-900 font-semibold'
+                              : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border-strong)] font-medium'
                           }`}
                         >
                           <span className="block text-xs sm:text-sm">{d.short}</span>
                           <span
                             className={`hidden sm:block text-[10px] mt-0.5 ${
-                              isSelected ? 'text-blue-100 font-normal' : isAltSaturday ? 'text-blue-700 font-bold' : 'text-slate-400'
+                              isSelected ? 'text-blue-100 font-normal' : isAltSaturday ? 'text-blue-700 font-bold' : 'text-[var(--text-muted)]'
                             }`}
                           >
                             {isSelected ? 'Open' : isAltSaturday ? 'Alt. Open' : 'Off'}
@@ -1655,33 +1671,33 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     })}
                   </div>
 
-                  <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+                  <div className="p-2.5 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] text-xs text-[var(--text-secondary)] flex items-center justify-between">
                     <span>
-                      Active: <strong className="text-slate-900 font-bold">{selectedDays.length} Days</strong> ({selectedDays.map((d) => d.slice(0, 3)).join(', ')})
+                      Active: <strong className="text-[var(--text-primary)] font-bold">{selectedDays.length} Days</strong> ({selectedDays.map((d) => d.slice(0, 3)).join(', ')})
                       {enableAlternateSaturdays && (
-                        <span className="ml-1 text-slate-700 font-semibold">+ Alternate Saturdays ({alternateSaturdaysPolicy === '2nd_4th_off' ? '2nd & 4th Off' : alternateSaturdaysPolicy === '1st_3rd_off' ? '1st & 3rd Off' : 'Fortnightly'})</span>
+                        <span className="ml-1 text-[var(--text-secondary)] font-semibold">+ Alternate Saturdays ({alternateSaturdaysPolicy === '2nd_4th_off' ? '2nd & 4th Off' : alternateSaturdaysPolicy === '1st_3rd_off' ? '1st & 3rd Off' : 'Fortnightly'})</span>
                       )}
                     </span>
-                    <span className="text-[11px] text-slate-400">
+                    <span className="text-[11px] text-[var(--text-muted)]">
                       {enableAlternateSaturdays ? 'Alternate Weekend Policy' : 7 - selectedDays.length > 0 ? `${7 - selectedDays.length} Off Days` : 'No Off Days'}
                     </span>
                   </div>
 
                   {/* Alternate Saturdays Schedule Card */}
-                  <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-3">
+                  <div className="p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5 pr-4">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-900">Alternate Saturdays Schedule</span>
+                          <span className="text-xs font-bold text-[var(--text-primary)]">Alternate Saturdays Schedule</span>
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                             enableAlternateSaturdays
                               ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                              : 'bg-slate-200 text-slate-600'
+                              : 'bg-slate-200 text-[var(--text-secondary)]'
                           }`}>
                             {enableAlternateSaturdays ? 'Active' : 'Disabled'}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-[11px] text-[var(--text-muted)]">
                           Allow Saturdays to alternate between active working shifts and scheduled weekly offs.
                         </p>
                       </div>
@@ -1689,20 +1705,20 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </div>
 
                     {enableAlternateSaturdays && (
-                      <div className="pt-2.5 border-t border-slate-200 space-y-2.5 animate-in fade-in">
-                        <label className="text-[11px] font-bold text-slate-700 block">Select Alternate Saturday Rule</label>
+                      <div className="pt-2.5 border-t border-[var(--border-color)] space-y-2.5 animate-in fade-in">
+                        <label className="text-[11px] font-bold text-[var(--text-secondary)] block">Select Alternate Saturday Rule</label>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                           <button
                             type="button"
                             onClick={() => setAlternateSaturdaysPolicy('2nd_4th_off')}
                             className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
                               alternateSaturdaysPolicy === '2nd_4th_off'
-                                ? 'border-blue-600 bg-white text-blue-900 font-bold ring-1 ring-blue-600/30'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                ? 'border-blue-600 bg-[var(--bg-surface)] text-blue-900 font-bold ring-1 ring-blue-600/30'
+                                : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)]'
                             }`}
                           >
                             <div className="font-bold">2nd & 4th Off</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">1st, 3rd, 5th Saturdays are Working</div>
+                            <div className="text-[10px] text-[var(--text-muted)] mt-0.5">1st, 3rd, 5th Saturdays are Working</div>
                           </button>
 
                           <button
@@ -1710,12 +1726,12 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                             onClick={() => setAlternateSaturdaysPolicy('1st_3rd_off')}
                             className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
                               alternateSaturdaysPolicy === '1st_3rd_off'
-                                ? 'border-blue-600 bg-white text-blue-900 font-bold ring-1 ring-blue-600/30'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                ? 'border-blue-600 bg-[var(--bg-surface)] text-blue-900 font-bold ring-1 ring-blue-600/30'
+                                : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)]'
                             }`}
                           >
                             <div className="font-bold">1st & 3rd Off</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">2nd & 4th Saturdays are Working</div>
+                            <div className="text-[10px] text-[var(--text-muted)] mt-0.5">2nd & 4th Saturdays are Working</div>
                           </button>
 
                           <button
@@ -1723,16 +1739,16 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                             onClick={() => setAlternateSaturdaysPolicy('alternate')}
                             className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
                               alternateSaturdaysPolicy === 'alternate'
-                                ? 'border-blue-600 bg-white text-blue-900 font-bold ring-1 ring-blue-600/30'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                ? 'border-blue-600 bg-[var(--bg-surface)] text-blue-900 font-bold ring-1 ring-blue-600/30'
+                                : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)]'
                             }`}
                           >
                             <div className="font-bold">Every Other Saturday</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">Alternates fortnightly</div>
+                            <div className="text-[10px] text-[var(--text-muted)] mt-0.5">Alternates fortnightly</div>
                           </button>
                         </div>
 
-                        <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-[11px] text-blue-800">
+                        <div className="p-2.5 rounded-lg bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] border border-blue-200 text-[11px] text-blue-800">
                           Working Saturdays will be automatically factored into shift target calculations and punch logs.
                         </div>
                       </div>
@@ -1740,20 +1756,20 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                   </div>
 
                   {/* Working Hourly Shift & Hours Tracking Card */}
-                  <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-3">
+                  <div className="p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5 pr-4">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-900">Working Hourly Shift & Hours Tracking</span>
+                          <span className="text-xs font-bold text-[var(--text-primary)]">Working Hourly Shift & Hours Tracking</span>
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                             enableHourlyShiftPolicy
                               ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                              : 'bg-slate-200 text-slate-600'
+                              : 'bg-slate-200 text-[var(--text-secondary)]'
                           }`}>
                             {enableHourlyShiftPolicy ? 'Active' : 'Disabled'}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-[11px] text-[var(--text-muted)]">
                           Automatically transition employees on hourly wages to the Hourly / Flexible Shift and track their exact hours worked.
                         </p>
                       </div>
@@ -1761,8 +1777,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </div>
 
                     {enableHourlyShiftPolicy && (
-                      <div className="pt-2.5 border-t border-slate-200 space-y-2 animate-in fade-in">
-                        <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-[11px] text-blue-900">
+                      <div className="pt-2.5 border-t border-[var(--border-color)] space-y-2 animate-in fade-in">
+                        <div className="p-2.5 rounded-lg bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] border border-blue-200 text-[11px] text-blue-900">
                           <span className="font-bold block mb-0.5">Hourly Shift Impact:</span>
                           <p className="text-blue-800">
                             Employees with hourly compensation are exempt from rigid fixed check-in times. Daily punches track actual logged hours, standard hours (8h), and overtime beyond threshold.
@@ -1775,11 +1791,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Half-Day Minimum (Hours)</label>
+                    <label className="text-xs font-semibold text-[var(--text-secondary)]">Half-Day Minimum (Hours)</label>
                     <select
                       value={halfDayHours}
                       onChange={(e) => setHalfDayHours(Number(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 appearance-none outline-none focus:border-blue-600 cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] appearance-none outline-none focus:border-blue-600 cursor-pointer"
                     >
                       <option value={3.5}>3.5 Hours</option>
                       <option value={4.0}>4.0 Hours</option>
@@ -1789,11 +1805,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-700">Full-Day Minimum (Hours)</label>
+                    <label className="text-xs font-semibold text-[var(--text-secondary)]">Full-Day Minimum (Hours)</label>
                     <select
                       value={fullDayHours}
                       onChange={(e) => setFullDayHours(Number(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 appearance-none outline-none focus:border-blue-600 cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] appearance-none outline-none focus:border-blue-600 cursor-pointer"
                     >
                       <option value={7.0}>7.0 Hours</option>
                       <option value={7.5}>7.5 Hours</option>
@@ -1805,26 +1821,39 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 {/* Auto Clock Out Row */}
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
+                <div className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50">
                   <div className="space-y-0.5 pr-4">
-                    <p className="text-xs font-bold text-slate-900">Auto Clock-Out at Midnight</p>
-                    <p className="text-[11px] text-slate-500">
-                      Automatically logs out unclosed shifts at 11:59 PM to prevent open-ended records.
+                    <p className="text-xs font-bold text-[var(--text-primary)]">Auto Clock-Out at Midnight</p>
+                    <p className="text-[11px] text-[var(--text-muted)]">
+                      Closes unclosed shifts at 11:59 PM and after the max open duration below.
                     </p>
                   </div>
                   <ToggleSwitch checked={autoClockOut} onChange={setAutoClockOut} />
                 </div>
+                {autoClockOut && (
+                  <div className="flex items-center justify-between px-3.5">
+                    <label className="text-xs font-semibold text-[var(--text-secondary)]">Max open shift (hours)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={24}
+                      value={autoClockOutHours}
+                      onChange={(e) => setAutoClockOutHours(Math.min(24, Math.max(1, Number(e.target.value) || 12)))}
+                      className="w-16 rounded-lg border border-[var(--border-strong)] px-2 py-1 text-xs font-mono font-bold text-blue-600 text-right outline-none focus:border-blue-600"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* SECTION: SHIFT ASSIGNMENT & MEMBER ALLOCATION */}
-              <div className="pt-4 border-t border-slate-200 space-y-4">
+              <div className="pt-4 border-t border-[var(--border-color)] space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
                       Employee Shift Assignment & Member Roster
                     </h4>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Assign specific employees and teams to work shifts. Currently configuring: <strong className="text-slate-800 font-bold">{shifts.find((s) => s.id === selectedShiftId)?.name || 'Selected Shift'}</strong>
+                    <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                      Assign specific employees and teams to work shifts. Currently configuring: <strong className="text-[var(--text-primary)] font-bold">{shifts.find((s) => s.id === selectedShiftId)?.name || 'Selected Shift'}</strong>
                     </p>
                   </div>
 
@@ -1833,7 +1862,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     <button
                       type="button"
                       onClick={() => handleAssignDepartmentToCurrentShift('All')}
-                      className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 cursor-pointer transition-all shadow-xs"
+                      className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[11px] font-semibold text-[var(--text-secondary)] cursor-pointer transition-all shadow-xs"
                     >
                       Assign All to this Shift
                     </button>
@@ -1841,10 +1870,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 {/* Assigned Members Summary & Filter Bar */}
-                <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 space-y-3.5">
+                <div className="p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 space-y-3.5">
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                     <div className="flex items-center gap-2 w-full sm:w-auto">
-                      <div className="text-xs font-semibold text-slate-700">
+                      <div className="text-xs font-semibold text-[var(--text-secondary)]">
                         {Object.values(employeeShifts).filter((sId) => sId === selectedShiftId).length} Employees on this Shift
                       </div>
                     </div>
@@ -1855,12 +1884,12 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                         placeholder="Search employee..."
                         value={shiftRosterSearch}
                         onChange={(e) => setShiftRosterSearch(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-800 placeholder:text-slate-400 outline-none focus:border-blue-600 w-full sm:w-44 font-medium shadow-xs"
+                        className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-blue-600 w-full sm:w-44 font-medium shadow-xs"
                       />
                       <select
                         value={shiftRosterDeptFilter}
                         onChange={(e) => setShiftRosterDeptFilter(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-800 outline-none focus:border-blue-600 font-medium cursor-pointer shadow-xs"
+                        className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs text-[var(--text-primary)] outline-none focus:border-blue-600 font-medium cursor-pointer shadow-xs"
                       >
                         <option value="All">All Departments</option>
                         {(Array.from(new Set((state.employees || []).map((e: any) => e.department).filter(Boolean))) as string[]).map((dept) => (
@@ -1887,16 +1916,16 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                             key={emp.id}
                             className={`p-3 rounded-lg border transition-all flex items-center justify-between gap-3 text-xs ${
                               isCurrentShift
-                                ? 'bg-white border-blue-200 shadow-xs'
-                                : 'bg-white border-slate-200 hover:border-slate-300'
+                                ? 'bg-[var(--bg-surface)] border-blue-200 shadow-xs'
+                                : 'bg-[var(--bg-surface)] border-[var(--border-color)] hover:border-[var(--border-strong)]'
                             }`}
                           >
                             <div className="min-w-0">
-                              <div className="font-bold text-slate-900 truncate">
+                              <div className="font-bold text-[var(--text-primary)] truncate">
                                 {emp.name}
                               </div>
-                              <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                                {emp.designation || 'Staff'} • <span className="text-slate-700 font-medium">{emp.department}</span>
+                              <div className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
+                                {emp.designation || 'Staff'} • <span className="text-[var(--text-secondary)] font-medium">{emp.department}</span>
                               </div>
                             </div>
 
@@ -1904,7 +1933,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                               <select
                                 value={currentAssignedShiftId}
                                 onChange={(e) => handleAssignEmployeeShift(emp.id, e.target.value)}
-                                className="px-2.5 py-1.5 rounded-2xl border border-slate-200/80 bg-white shadow-2xs text-xs font-bold text-slate-800 outline-none focus:border-blue-600 cursor-pointer "
+                                className="px-2.5 py-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xs text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer "
                               >
                                 {shifts.map((s) => (
                                   <option key={s.id} value={s.id}>
@@ -1921,19 +1950,19 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               </div>
 
               {/* SECTION: ROSTER SHIFTS & ROTATIONAL SCHEDULING (OPTIONAL IN SETTINGS) */}
-              <div className="pt-4 border-t border-slate-200 space-y-4">
-                <div className="flex items-center justify-between p-4 rounded-lg border border-slate-200 bg-white/80">
+              <div className="pt-4 border-t border-[var(--border-color)] space-y-4">
+                <div className="flex items-center justify-between p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]/80">
                   <div className="space-y-0.5 pr-4">
                     <div className="flex items-center gap-2">
                       
-                      <h4 className="text-sm font-bold text-slate-900">
+                      <h4 className="text-sm font-bold text-[var(--text-primary)]">
                         Roster Shifts & Rotational Scheduling
                       </h4>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-[var(--text-secondary)]">
                         Optional
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500">
+                    <p className="text-[11px] text-[var(--text-muted)]">
                       Enable dynamic rotational shift patterns (e.g., Morning, Evening, Night) and assign weekly staggered rosters.
                     </p>
                   </div>
@@ -1941,20 +1970,20 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 {enableRosterShifts && (
-                  <div className="p-4 rounded-lg border border-blue-200/80 bg-white space-y-4  animate-in fade-in">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+                  <div className="p-4 rounded-lg border border-blue-200/80 bg-[var(--bg-surface)] space-y-4  animate-in fade-in">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border-color)]">
                       <div>
-                        <span className="text-xs font-bold text-slate-900 block">Weekly Employee Roster Allocation Matrix</span>
-                        <span className="text-[11px] text-slate-500">Assign individual daily shifts or au weekly shift cycles</span>
+                        <span className="text-xs font-bold text-[var(--text-primary)] block">Weekly Employee Roster Allocation Matrix</span>
+                        <span className="text-[11px] text-[var(--text-muted)]">Assign individual daily shifts or au weekly shift cycles</span>
                       </div>
 
                       <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1.5 text-xs">
-                          <span className="text-slate-500 text-[11px]">Rotation:</span>
+                          <span className="text-[var(--text-muted)] text-[11px]">Rotation:</span>
                           <select
                             value={rosterRotationCycle}
                             onChange={(e) => setRosterRotationCycle(e.target.value as any)}
-                            className="px-2.5 py-1 rounded-2xl border border-slate-200/80 bg-white shadow-2xs font-semibold text-slate-800 text-xs outline-none cursor-pointer"
+                            className="px-2.5 py-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xs font-semibold text-[var(--text-primary)] text-xs outline-none cursor-pointer"
                           >
                             <option value="weekly">Weekly Rotation (Mondays)</option>
                             <option value="biweekly">Bi-Weekly Rotation (14 Days)</option>
@@ -1975,41 +2004,41 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                     {/* Roster Shift Legend */}
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="text-[11px] font-bold text-slate-400">Available Shifts:</span>
+                      <span className="text-[11px] font-bold text-[var(--text-muted)]">Available Shifts:</span>
                       {shifts.map((s, idx) => {
                         const code = idx === 0 ? 'GEN' : idx === 1 ? 'M1' : idx === 2 ? 'E1' : 'N1';
                         return (
-                          <span key={s.id} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white border border-slate-200 text-slate-700 text-[11px] font-bold">
-                            <span className="text-slate-900 font-extrabold">{code}</span> · {s.name} ({s.startTime} - {s.endTime})
+                          <span key={s.id} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-secondary)] text-[11px] font-bold">
+                            <span className="text-[var(--text-primary)] font-extrabold">{code}</span> · {s.name} ({s.startTime} - {s.endTime})
                           </span>
                         );
                       })}
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white border border-slate-200 text-slate-500 text-[11px] font-bold">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-muted)] text-[11px] font-bold">
                         <span className="text-rose-600 font-extrabold">OFF</span> · Weekly Off Day
                       </span>
                     </div>
 
                     {/* Weekly Matrix Table */}
-                    <div className="overflow-x-auto custom-scrollbar border border-slate-200 rounded-lg">
+                    <div className="overflow-x-auto custom-scrollbar border border-[var(--border-color)] rounded-lg">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead>
-                          <tr className="border-b border-slate-200 bg-white text-slate-600 font-semibold text-[11px]">
-                            <th className="py-2.5 px-3 font-bold text-slate-900">Employee</th>
+                          <tr className="border-b border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] font-semibold text-[11px]">
+                            <th className="py-2.5 px-3 font-bold text-[var(--text-primary)]">Employee</th>
                             <th className="py-2.5 px-3">Dept</th>
                             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
                               <th key={day} className="py-2.5 px-2 text-center">{day}</th>
                             ))}
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
+                        <tbody className="divide-y divide-[var(--border-color)]">
                           {(state.employees || []).slice(0, 10).map((emp) => {
                             const empSchedule = employeeRosterMatrix[emp.id] || {};
                             return (
-                              <tr key={emp.id} className="hover:bg-white/60">
-                                <td className="py-2 px-3 font-bold text-slate-900 whitespace-nowrap">
+                              <tr key={emp.id} className="hover:bg-[var(--bg-surface)]/60">
+                                <td className="py-2 px-3 font-bold text-[var(--text-primary)] whitespace-nowrap">
                                   {emp.name}
                                 </td>
-                                <td className="py-2 px-3 text-slate-500 whitespace-nowrap">
+                                <td className="py-2 px-3 text-[var(--text-muted)] whitespace-nowrap">
                                   {emp.department || 'General'}
                                 </td>
                                 {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => {
@@ -2025,14 +2054,14 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                                         onChange={(e) => handleUpdateRosterCell(emp.id, day, e.target.value)}
                                         className={`px-1.5 py-1 rounded text-[11px] font-bold border outline-none cursor-pointer text-center ${
                                           isOff
-                                            ? 'bg-white text-slate-400 border-slate-200'
+                                            ? 'bg-[var(--bg-surface)] text-[var(--text-muted)] border-[var(--border-color)]'
                                             : shiftCode === 'M1'
-                                            ? 'bg-white text-amber-800 border-amber-300'
+                                            ? 'bg-[var(--bg-surface)] text-amber-800 border-amber-300'
                                             : shiftCode === 'E1'
-                                            ? 'bg-white text-purple-800 border-purple-300'
+                                            ? 'bg-[var(--bg-surface)] text-purple-800 border-purple-300'
                                             : shiftCode === 'N1'
-                                            ? 'bg-white text-indigo-800 border-indigo-300'
-                                            : 'bg-white text-blue-800 border-blue-200'
+                                            ? 'bg-[var(--bg-surface)] text-indigo-800 border-indigo-300'
+                                            : 'bg-[var(--bg-surface)] text-blue-800 border-blue-200'
                                         }`}
                                       >
                                         {shifts.map((s, idx) => {
@@ -2059,18 +2088,18 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               </div>
 
               {/* Attendance Calculation & General Scope */}
-              <div className="pt-4 border-t border-slate-200 space-y-3.5">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              <div className="pt-4 border-t border-[var(--border-color)] space-y-3.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
                   Calculation & Approvals
                 </h4>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-slate-700">Total Hours Calculation Method</label>
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">Total Hours Calculation Method</label>
                     <select
                       value={hoursCalcMethod}
                       onChange={(e) => setHoursCalcMethod(e.target.value as any)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 cursor-pointer "
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer "
                     >
                       <option value="every_punch">Every Valid Check-in & Check-out</option>
                       <option value="first_last">First Check-in & Last Check-out</option>
@@ -2079,11 +2108,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-slate-700">Approval Cycle Type</label>
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">Approval Cycle Type</label>
                     <select
                       value={approvalCycle}
                       onChange={(e) => setApprovalCycle(e.target.value as any)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 cursor-pointer "
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer "
                     >
                       <option value="Monthly">Monthly Cycle (Default)</option>
                       <option value="Bi-Weekly">Bi-Weekly Cycle</option>
@@ -2094,21 +2123,21 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-slate-700">Attendance Start Date</label>
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">Attendance Start Date</label>
                     <input
                       type="date"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 cursor-pointer "
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer "
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-slate-700">Default Office Scope</label>
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">Default Office Scope</label>
                     <select
                       value={locationScope}
                       onChange={(e) => setLocationScope(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 cursor-pointer "
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer "
                     >
                       <option value="All Offices">All Offices</option>
                       {offices.map((o) => (
@@ -2122,7 +2151,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               </div>
 
               {/* Save General Button */}
-              <div className="flex items-center justify-end pt-5 border-t border-slate-200">
+              <div className="flex items-center justify-end pt-5 border-t border-[var(--border-color)]">
                 <button
                   type="button"
                   onClick={handleSaveAllSettings}
@@ -2138,11 +2167,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
           {/* 2. STUDENT ATTENDANCE & WARNING THRESHOLDS TAB                           */}
           {/* ========================================================================= */}
           {subTab === 'students' && (
-            <div className="space-y-6 text-slate-900">
+            <div className="space-y-6 text-[var(--text-primary)]">
               {/* Header Card */}
               <div className={`${ATT_CARD} flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-5 sm:p-6`}>
                 <div>
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold uppercase tracking-wider mb-1 border border-blue-100">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 text-[10px] font-bold uppercase tracking-wider mb-1 border border-blue-100">
                     Academic Regulations
                   </div>
                   <h3 className={`${ATT_SECTION_TITLE} text-lg`}>
@@ -2176,40 +2205,40 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               {/* 4 Summary Stat KPI Badges */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
                 <div className={`${ATT_CARD} p-4`}>
-                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Minimum Threshold</span>
+                  <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">Minimum Threshold</span>
                   <div className="flex items-baseline gap-1 mt-1">
                     <span className="text-2xl font-bold text-blue-600 font-mono">{studentMinAttendanceThreshold}%</span>
-                    <span className="text-xs text-slate-400 font-medium">Mandatory</span>
+                    <span className="text-xs text-[var(--text-muted)] font-medium">Mandatory</span>
                   </div>
                 </div>
 
                 <div className={`${ATT_CARD} p-4`}>
-                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Warning Flagging</span>
+                  <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">Warning Flagging</span>
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className={`h-2.5 w-2.5 rounded-full ${enableLowAttendanceWarning ? 'bg-amber-500' : 'bg-slate-300'}`} />
-                    <span className="text-xs font-bold text-slate-800">
+                    <span className="text-xs font-bold text-[var(--text-primary)]">
                       {enableLowAttendanceWarning ? 'Active on Rosters' : 'Disabled'}
                     </span>
                   </div>
                 </div>
 
                 <div className={`${ATT_CARD} p-4`}>
-                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Current Defaulters</span>
+                  <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">Current Defaulters</span>
                   <div className="flex items-baseline gap-1 mt-1">
                     <span className={`text-2xl font-bold font-mono ${activeDefaulters.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
                       {activeDefaulters.length}
                     </span>
-                    <span className="text-xs text-slate-400 font-medium">
+                    <span className="text-xs text-[var(--text-muted)] font-medium">
                       / {studentDefaulters.length} Students
                     </span>
                   </div>
                 </div>
 
                 <div className={`${ATT_CARD} p-4`}>
-                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Guardian Alerts</span>
+                  <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">Guardian Alerts</span>
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className={`h-2.5 w-2.5 rounded-full ${autoAlertGuardiansBelowThreshold ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                    <span className="text-xs font-bold text-slate-800">
+                    <span className="text-xs font-bold text-[var(--text-primary)]">
                       {autoAlertGuardiansBelowThreshold ? 'SMS & Email Auto' : 'Manual Outreach'}
                     </span>
                   </div>
@@ -2218,7 +2247,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
               {/* CARD 1: Configurable Minimum Attendance Threshold */}
               <div className={`${ATT_CARD} p-5 sm:p-6 space-y-4`}>
-                <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="border-b border-[var(--border-color)] pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h4 className={ATT_SECTION_TITLE}>
                       Minimum Attendance Requirement Policy
@@ -2230,13 +2259,13 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 <div className="max-w-md space-y-1.5 pt-1">
-                  <label className="block text-xs font-semibold text-slate-700">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)]">
                     Attendance Cut-off Rate (%)
                   </label>
                   <select
                     value={studentMinAttendanceThreshold}
                     onChange={(e) => setStudentMinAttendanceThreshold(Number(e.target.value))}
-                    className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 cursor-pointer transition-all"
+                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer transition-all"
                   >
                     <option value={50}>50% - Low Requirement</option>
                     <option value={60}>60% - Relaxed Minimum</option>
@@ -2253,7 +2282,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
               {/* CARD 2: Automated Rules & Guardian Alerts */}
               <div className={`${ATT_CARD} p-5 sm:p-6 space-y-4`}>
-                <div className="border-b border-slate-100 pb-3">
+                <div className="border-b border-[var(--border-color)] pb-3">
                   <h4 className={ATT_SECTION_TITLE}>
                     Warning Flags & Guardian Alert Automation
                   </h4>
@@ -2264,17 +2293,17 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                 <div className="space-y-4 text-xs">
                   {/* Toggle 1: Warning Badges */}
-                  <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
+                  <div className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50">
                     <div className="space-y-0.5 pr-4">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900">Show Warning Badges on Rosters</span>
+                        <span className="font-bold text-[var(--text-primary)]">Show Warning Badges on Rosters</span>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          enableLowAttendanceWarning ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-600'
+                          enableLowAttendanceWarning ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-[var(--text-secondary)]'
                         }`}>
                           {enableLowAttendanceWarning ? 'Enabled' : 'Off'}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-500">
+                      <p className="text-[11px] text-[var(--text-muted)]">
                         Displays an amber warning pill (&lt; {studentMinAttendanceThreshold}%) in the Student Directory, Attendance Table, and Profile dialogs.
                       </p>
                     </div>
@@ -2282,17 +2311,17 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                   </div>
 
                   {/* Toggle 2: Automated Guardian Alert */}
-                  <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
+                  <div className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50">
                     <div className="space-y-0.5 pr-4">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900">Auto-Notify Guardians upon Falling Below {studentMinAttendanceThreshold}%</span>
+                        <span className="font-bold text-[var(--text-primary)]">Auto-Notify Guardians upon Falling Below {studentMinAttendanceThreshold}%</span>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          autoAlertGuardiansBelowThreshold ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                          autoAlertGuardiansBelowThreshold ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-[var(--text-secondary)]'
                         }`}>
                           {autoAlertGuardiansBelowThreshold ? 'Automated' : 'Manual'}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-500">
+                      <p className="text-[11px] text-[var(--text-muted)]">
                         Dispatches SMS and Email notices directly to registered parent contacts when a student is recorded absent with attendance &lt; {studentMinAttendanceThreshold}%.
                       </p>
                     </div>
@@ -2302,11 +2331,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                   {/* Consecutive Absences Rule */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-700">Consecutive Absences Urgent Alert</label>
+                      <label className="text-xs font-semibold text-[var(--text-secondary)]">Consecutive Absences Urgent Alert</label>
                       <select
                         value={consecutiveAbsenceAlertDays}
                         onChange={(e) => setConsecutiveAbsenceAlertDays(Number(e.target.value))}
-                        className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 cursor-pointer"
+                        className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer"
                       >
                         <option value={2}>2 Consecutive Days Absent</option>
                         <option value={3}>3 Consecutive Days (Standard)</option>
@@ -2316,10 +2345,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-700">Reconciliation Evaluation Window</label>
+                      <label className="text-xs font-semibold text-[var(--text-secondary)]">Reconciliation Evaluation Window</label>
                       <select
                         defaultValue="monthly"
-                        className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 cursor-pointer"
+                        className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer"
                       >
                         <option value="monthly">Monthly Academic Rollup</option>
                         <option value="term">Term / Semester Cumulative</option>
@@ -2330,15 +2359,15 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                   {/* Customizable Guardian Notification Template */}
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-800 flex items-center justify-between">
+                    <label className="text-xs font-semibold text-[var(--text-primary)] flex items-center justify-between">
                       <span>Guardian Alert SMS & Email Template</span>
-                      <span className="text-[10px] font-normal text-slate-400">Tokens: &#123;student_name&#125;, &#123;attendance_pct&#125;, &#123;threshold&#125;</span>
+                      <span className="text-[10px] font-normal text-[var(--text-muted)]">Tokens: &#123;student_name&#125;, &#123;attendance_pct&#125;, &#123;threshold&#125;</span>
                     </label>
                     <textarea
                       rows={3}
                       value={studentWarningMessage}
                       onChange={(e) => setStudentWarningMessage(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white p-3 text-xs text-slate-800 outline-none focus:border-blue-600 transition-colors"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 text-xs text-[var(--text-primary)] outline-none focus:border-blue-600 transition-colors"
                     />
                   </div>
                 </div>
@@ -2346,7 +2375,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
               {/* CARD 3: LIVE DEFAULTERS ROSTER PREVIEW */}
               <div className={`${ATT_CARD} overflow-hidden`}>
-                <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white">
+                <div className="p-5 border-b border-[var(--border-color)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[var(--bg-surface)]">
                   <div>
                     <div className="flex items-center gap-2">
                       <h4 className={ATT_SECTION_TITLE}>
@@ -2375,16 +2404,16 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 {activeDefaulters.length === 0 ? (
-                  <div className="p-8 text-center space-y-2 bg-slate-50/50">
-                    <h5 className="text-sm font-bold text-slate-800">Zero Attendance Defaulters</h5>
-                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  <div className="p-8 text-center space-y-2 bg-[var(--bg-surface-subtle)]/50">
+                    <h5 className="text-sm font-bold text-[var(--text-primary)]">Zero Attendance Defaulters</h5>
+                    <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
                       All enrolled students currently meet or exceed the mandatory {studentMinAttendanceThreshold}% attendance requirement.
                     </p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs border-collapse">
-                      <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-[10px] border-b border-slate-200 select-none">
+                      <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] uppercase font-semibold text-[10px] border-b border-[var(--border-color)] select-none">
                         <tr>
                           <th className="p-3.5 pl-5">Student</th>
                           <th className="p-3.5">Batch / Section</th>
@@ -2395,18 +2424,18 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           <th className="p-3.5 pr-5 text-right">Action</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                      <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
                         {activeDefaulters.map(({ student, rate, totalDays, attendedDays, absentDays }) => (
                           <tr key={student.id} className="hover:bg-amber-50/30 transition-colors">
                             <td className="p-3.5 pl-5 whitespace-nowrap">
                               <div>
-                                <div className="font-bold text-slate-900">{student.name}</div>
-                                <div className="text-[10px] font-mono text-slate-400">Roll #{student.rollNumber} • {student.studentId}</div>
+                                <div className="font-bold text-[var(--text-primary)]">{student.name}</div>
+                                <div className="text-[10px] font-mono text-[var(--text-muted)]">Roll #{student.rollNumber} • {student.studentId}</div>
                               </div>
                             </td>
 
                             <td className="p-3.5 whitespace-nowrap">
-                              <span className="font-semibold text-slate-800">{student.grade}</span>
+                              <span className="font-semibold text-[var(--text-primary)]">{student.grade}</span>
                             </td>
 
                             <td className="p-3.5 whitespace-nowrap">
@@ -2415,7 +2444,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                               </span>
                             </td>
 
-                            <td className="p-3.5 font-mono text-slate-800 whitespace-nowrap">
+                            <td className="p-3.5 font-mono text-[var(--text-primary)] whitespace-nowrap">
                               {attendedDays} / {totalDays} Days
                             </td>
 
@@ -2424,15 +2453,15 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                             </td>
 
                             <td className="p-3.5 whitespace-nowrap">
-                              <div className="text-slate-800 font-medium">{student.guardianName || '—'}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">{student.guardianPhone || student.phone || '—'}</div>
+                              <div className="text-[var(--text-primary)] font-medium">{student.guardianName || '—'}</div>
+                              <div className="text-[10px] text-[var(--text-muted)] font-mono">{student.guardianPhone || student.phone || '—'}</div>
                             </td>
 
                             <td className="p-3.5 pr-5 text-right whitespace-nowrap">
                               <button
                                 type="button"
                                 onClick={() => handleAlertGuardian(student.name, student.guardianName, student.guardianPhone || student.phone)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all cursor-pointer shadow-xs"
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] text-xs font-semibold transition-all cursor-pointer shadow-xs"
                               >
                                 <span>Send Alert</span>
                               </button>
@@ -2472,7 +2501,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
               {/* CARD 1: GPS Geofencing Perimeter Controls */}
               <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5`}>
-                <div className="border-b border-slate-200 pb-3">
+                <div className="border-b border-[var(--border-color)] pb-3">
                   <h4 className={ATT_SECTION_TITLE}>
                     GPS Geofencing Boundary
                   </h4>
@@ -2484,7 +2513,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 <div className="space-y-4 text-xs">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-semibold text-slate-700">Geofence Radius</label>
+                      <label className="text-xs font-semibold text-[var(--text-secondary)]">Geofence Radius</label>
                       <div className="flex items-center gap-1.5">
                         <input
                           type="number"
@@ -2496,9 +2525,9 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                             const val = Number(e.target.value);
                             setGeofenceRadius(Math.min(MAX_GEOFENCE_LIMIT, Math.max(MIN_GEOFENCE_LIMIT, val)));
                           }}
-                          className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-xs font-mono font-bold text-blue-600 text-right outline-none focus:border-blue-600"
+                          className="w-16 rounded-lg border border-[var(--border-strong)] px-2 py-1 text-xs font-mono font-bold text-blue-600 text-right outline-none focus:border-blue-600"
                         />
-                        <span className="text-xs text-slate-500">meters</span>
+                        <span className="text-xs text-[var(--text-muted)]">meters</span>
                       </div>
                     </div>
 
@@ -2528,7 +2557,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                             geofenceRadius === preset.m
                               ? 'bg-blue-600 text-white shadow-xs'
-                              : 'bg-white text-slate-700 border border-slate-200 hover:border-slate-400'
+                              : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border border-[var(--border-color)] hover:border-slate-400'
                           }`}
                         >
                           {preset.label}
@@ -2537,57 +2566,66 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <div className="pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
                     <div>
-                      <div className="text-xs font-semibold text-slate-800">Strict GPS Coordinate Matching</div>
-                      <div className="text-[11px] text-slate-500">Blocks punch if mobile location services are disabled or coordinates are spoofed</div>
+                      <div className="text-xs font-semibold text-[var(--text-primary)]">Require GPS geofencing</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">When off, punches do not need device GPS and office radius is not enforced</div>
                     </div>
                     <ToggleSwitch checked={requireGPS} onChange={setRequireGPS} />
                   </div>
 
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <div className="pt-3 border-t border-[var(--border-color)] flex items-center justify-between gap-4">
                     <div>
-                      <div className="text-xs font-semibold text-slate-800">Out-of-Radius Punch Handling</div>
-                      <div className="text-[11px] text-slate-500">Action taken when employee punches outside the geofence perimeter</div>
+                      <div className="text-xs font-semibold text-[var(--text-primary)]">Out-of-Radius Punch Handling</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">Action taken when an employee punches outside the geofence perimeter</div>
                     </div>
-                    <span className="text-xs font-medium text-slate-700">Block Check-in & Prompt Regularization</span>
+                    <select
+                      value={outOfRadiusAction}
+                      onChange={(e) => setOutOfRadiusAction(e.target.value as 'Block' | 'Allow' | 'Warn')}
+                      disabled={!requireGPS}
+                      className="rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 disabled:opacity-50"
+                    >
+                      <option value="Block">Block check-in</option>
+                      <option value="Warn">Warn, then allow as remote</option>
+                      <option value="Allow">Allow without warning</option>
+                    </select>
                   </div>
                 </div>
               </div>
 
               {/* CARD 2: Punch Verification Enforcements */}
               <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
-                <div className="flex items-center justify-between border-b border-slate-200 pb-3.5">
+                <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3.5">
                   <h4 className={ATT_SECTION_TITLE}>
                     Punch Verification & Identity Rules
                   </h4>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] border border-[var(--border-color)]">
                     Security Enforced
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-y-4 text-xs items-center">
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Check-In Selfie Photo
                   </div>
                   <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-slate-700 font-medium">
+                    <span className="text-[var(--text-secondary)] font-medium">
                       Captures front camera photo verification upon morning check-in
                     </span>
                     <ToggleSwitch checked={requireSelfieCheckIn} onChange={setRequireSelfieCheckIn} />
                   </div>
 
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Check-Out Selfie Photo
                   </div>
                   <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-slate-700 font-medium">
+                    <span className="text-[var(--text-secondary)] font-medium">
                       Captures front camera photo verification upon evening departure
                     </span>
                     <ToggleSwitch checked={requireSelfieCheckOut} onChange={setRequireSelfieCheckOut} />
                   </div>
 
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Office Wi-Fi IP Allowlist
                   </div>
                   <div className="md:col-span-8 max-w-md">
@@ -2595,16 +2633,46 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       type="text"
                       value={allowedIps}
                       onChange={(e) => setAllowedIps(e.target.value)}
-                      placeholder="e.g. 192.168.1.0/24, 106.51.72.18"
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 font-mono"
+                      placeholder="Leave empty to allow any network. Example: 192.168.1.0/24, 10.0.0.12"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 font-mono"
                     />
                   </div>
+
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
+                    QR Code Attendance
+                  </div>
+                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
+                    <span className="text-[var(--text-secondary)] font-medium">
+                      Let employees punch by scanning a rotating office QR code
+                    </span>
+                    <ToggleSwitch checked={allowQrCodeAttendance} onChange={setAllowQrCodeAttendance} />
+                  </div>
+                  {allowQrCodeAttendance && (
+                    <>
+                      <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
+                        QR refresh interval
+                      </div>
+                      <div className="md:col-span-8 max-w-md">
+                        <input
+                          type="number"
+                          min={15}
+                          max={300}
+                          value={qrRefreshIntervalSeconds}
+                          onChange={(e) =>
+                            setQrRefreshIntervalSeconds(Math.min(300, Math.max(15, Number(e.target.value) || 30)))
+                          }
+                          className="w-24 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 font-mono"
+                        />
+                        <span className="ml-2 text-[11px] text-[var(--text-muted)]">seconds</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* CARD 3: Attendance Regularization Rules */}
               <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
-                <div className="border-b border-slate-100 pb-3.5">
+                <div className="border-b border-[var(--border-color)] pb-3.5">
                   <h4 className={ATT_SECTION_TITLE}>
                     Attendance Regularization & Disputes
                   </h4>
@@ -2614,7 +2682,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-y-4 text-xs items-center">
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Request Submission Window
                   </div>
                   <div className="md:col-span-8 flex items-center gap-2">
@@ -2624,18 +2692,18 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       max={90}
                       value={regularizationDaysWindow}
                       onChange={(e) => setRegularizationDaysWindow(Number(e.target.value))}
-                      className="w-20 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 text-right font-mono"
+                      className="w-20 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 text-right font-mono"
                     />
-                    <span className="text-xs text-slate-500 font-medium">
+                    <span className="text-xs text-[var(--text-muted)] font-medium">
                       calendar days allowed after missed punch to dispute attendance
                     </span>
                   </div>
 
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Manager Sign-off Required
                   </div>
                   <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-slate-700 font-medium">
+                    <span className="text-[var(--text-secondary)] font-medium">
                       Direct reporting manager approval is mandatory before punch adjustments are posted
                     </span>
                     <ToggleSwitch
@@ -2678,8 +2746,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               {offices.length === 0 ? (
                 <div className={`${ATT_CARD} border-dashed p-10 flex flex-col items-center justify-center text-center space-y-3`}>
                   <div>
-                    <h4 className="text-sm font-semibold text-slate-900">No Locations Configured</h4>
-                    <p className="text-xs text-slate-500 max-w-sm mt-0.5">
+                    <h4 className="text-sm font-semibold text-[var(--text-primary)]">No Locations Configured</h4>
+                    <p className="text-xs text-[var(--text-muted)] max-w-sm mt-0.5">
                       Add your physical campus/office locations and geofences below to enable location-restricted check-ins.
                     </p>
                   </div>
@@ -2702,21 +2770,21 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}
                     >
                       {/* Office Title + Action Buttons */}
-                      <div className="flex items-center justify-between border-b border-slate-200 pb-3.5">
-                        <h4 className="text-base font-bold text-slate-900 tracking-tight">
+                      <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3.5">
+                        <h4 className="text-base font-bold text-[var(--text-primary)] tracking-tight">
                           {office.name}
                         </h4>
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => handleOpenEdit(office)}
-                            className="text-slate-600 hover:text-slate-900 font-semibold text-xs cursor-pointer px-2 py-1 rounded-md hover:bg-slate-50 transition-colors"
+                            className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-semibold text-xs cursor-pointer px-2 py-1 rounded-md hover:bg-[var(--bg-surface-subtle)] transition-colors"
                             title="Edit Location Policy"
                           >
                             Edit
                           </button>
                           <button
                             onClick={() => handleDeleteOffice(office.id)}
-                            className="text-slate-400 hover:text-red-600 font-semibold text-xs cursor-pointer px-2 py-1 rounded-md hover:bg-slate-50 transition-colors"
+                            className="text-[var(--text-muted)] hover:text-red-600 font-semibold text-xs cursor-pointer px-2 py-1 rounded-md hover:bg-[var(--bg-surface-subtle)] transition-colors"
                             title="Delete Location"
                           >
                             Delete
@@ -2726,26 +2794,30 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                       {/* Key-Value Attribute Table */}
                       <div className="grid grid-cols-1 md:grid-cols-12 gap-y-3.5 text-xs">
-                        <div className="md:col-span-4 text-slate-500 font-medium">Clocking in/out from</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold">{office.clockingDevices}</div>
+                        <div className="md:col-span-4 text-[var(--text-muted)] font-medium">Clocking in/out from</div>
+                        <div className="md:col-span-8 text-[var(--text-primary)] font-semibold">{office.clockingDevices}</div>
 
-                        <div className="md:col-span-4 text-slate-500 font-medium">QR Code</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold">{office.qrCodeEnabled ? 'Yes' : 'No'}</div>
+                        <div className="md:col-span-4 text-[var(--text-muted)] font-medium">QR Code</div>
+                        <div className="md:col-span-8 text-[var(--text-primary)] font-semibold">{office.qrCodeEnabled ? 'Yes' : 'No'}</div>
 
-                        <div className="md:col-span-4 text-slate-500 font-medium">Geofencing</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
+                        <div className="md:col-span-4 text-[var(--text-muted)] font-medium">Geofencing</div>
+                        <div className="md:col-span-8 text-[var(--text-primary)] font-semibold flex items-center gap-2">
+                          <span
+                            className={`h-2 w-2 rounded-full inline-block ${
+                              office.geofencingStatus === 'Inactive' ? 'bg-slate-400' : 'bg-emerald-500'
+                            }`}
+                          />
                           <span>{office.geofencingStatus}</span>
                         </div>
 
-                        <div className="md:col-span-4 text-slate-500 font-medium">Address</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold">{office.address}</div>
+                        <div className="md:col-span-4 text-[var(--text-muted)] font-medium">Address</div>
+                        <div className="md:col-span-8 text-[var(--text-primary)] font-semibold">{office.address}</div>
 
-                        <div className="md:col-span-4 text-slate-500 font-medium">Radius</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold font-mono">{office.radiusText}</div>
+                        <div className="md:col-span-4 text-[var(--text-muted)] font-medium">Radius</div>
+                        <div className="md:col-span-8 text-[var(--text-primary)] font-semibold font-mono">{office.radiusText}</div>
 
-                        <div className="md:col-span-4 text-slate-500 font-medium">Policy</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold">{office.policyDescription}</div>
+                        <div className="md:col-span-4 text-[var(--text-muted)] font-medium">Policy</div>
+                        <div className="md:col-span-8 text-[var(--text-primary)] font-semibold">{office.policyDescription}</div>
                       </div>
                     </div>
                   ))}
@@ -2762,10 +2834,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               <div className={`${ATT_CARD} p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
                 <div>
                   <h3 className={ATT_SECTION_TITLE}>
-                    Leave Policies & Annual Quotas
+                    Leave Policies & Quotas
                   </h3>
                   <p className={ATT_SECTION_SUB}>
-                    Configure annual paid leave allowances, approval hierarchies, rollover limits, and probation rules
+                    Choose yearly or monthly grants, unused-leave rollover, approval routing, and probation rules
                   </p>
                 </div>
                 <button
@@ -2777,150 +2849,210 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </button>
               </div>
 
-              {/* CARD 1: Annual Paid Leave Entitlements & Monthly Accruals */}
               <div className={`${ATT_CARD} p-5 sm:p-7 space-y-6`}>
-                {/* Card Top Header & Period Selector */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border-color)] pb-5">
                   <div>
-                    <h4 className={ATT_SECTION_TITLE}>
-                      {leaveQuotaPeriod === 'annual' ? 'Annual Paid Leave Quotas' : 'Monthly Leave Accrual Rates'} (Per Employee)
-                    </h4>
+                    <h4 className={ATT_SECTION_TITLE}>How leaves are granted</h4>
                     <p className={ATT_SECTION_SUB}>
-                      {leaveQuotaPeriod === 'annual'
-                        ? 'Configured as total full-day quota credited across the 12-month calendar year'
-                        : 'Configured as monthly accrual rate credited to employee balance at each month-end'}
+                      Quotas below are annual allowances. Yearly credits the full balance on day one.
+                      Monthly credits 1/12 each month.
                     </p>
                   </div>
-                  <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shrink-0">
+                  <div className="flex items-center justify-between gap-3 shrink-0">
+                    <span className="text-xs font-medium text-[var(--text-secondary)]">Enable grant rules</span>
+                    <ToggleSwitch checked={leavePoliciesEnabled} onChange={setLeavePoliciesEnabled} />
+                  </div>
+                </div>
+
+                {leavePoliciesEnabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => {
-                        setLeaveQuotaPeriod('monthly');
-                        setAccrualFrequency('monthly');
-                      }}
-                      className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                        leaveQuotaPeriod === 'monthly'
-                          ? 'bg-white text-blue-600 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Monthly (Days/Month)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLeaveQuotaPeriod('annual');
-                        setAccrualFrequency('annual');
-                      }}
-                      className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                      onClick={() => setLeaveQuotaPeriod('annual')}
+                      className={`text-left rounded-xl border px-4 py-3.5 cursor-pointer transition-colors ${
                         leaveQuotaPeriod === 'annual'
-                          ? 'bg-white text-blue-600 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                          ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/20'
+                          : 'border-[var(--border-color)] bg-[var(--bg-surface)] hover:border-slate-300'
                       }`}
                     >
-                      Annual (Days/Year)
+                      <div className="text-sm font-semibold text-[var(--text-primary)]">Yearly</div>
+                      <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-snug">
+                        Full annual quota is available from January (or join date). Unused days can carry to next year if enabled.
+                      </p>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setLeaveQuotaPeriod('monthly')}
+                      className={`text-left rounded-xl border px-4 py-3.5 cursor-pointer transition-colors ${
+                        leaveQuotaPeriod === 'monthly'
+                          ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/20'
+                          : 'border-[var(--border-color)] bg-[var(--bg-surface)] hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="text-sm font-semibold text-[var(--text-primary)]">Monthly</div>
+                      <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-snug">
+                        Employees earn a twelfth of the annual quota each month. Unused days can roll into the next month.
+                      </p>
+                    </button>
+                  </div>
+                )}
+
+                {leavePoliciesEnabled && (
+                  <div className="space-y-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 p-4">
+                    {leaveQuotaPeriod === 'monthly' && (
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <div className="text-xs font-semibold text-[var(--text-primary)]">Roll unused leave to next month</div>
+                          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                            If a month&apos;s grant is not used, it is added to next month (capped at the annual quota).
+                            Turn off to expire unused days at month-end.
+                          </p>
+                        </div>
+                        <ToggleSwitch checked={enableMonthlyRollover} onChange={setEnableMonthlyRollover} />
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <div className="text-xs font-semibold text-[var(--text-primary)]">Carry unused leave to next year</div>
+                        <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                          At year-end, leftover days move into the next calendar year up to the cap.
+                        </p>
+                      </div>
+                      <ToggleSwitch checked={enableCarryOver} onChange={setEnableCarryOver} />
+                    </div>
+                    {enableCarryOver && (
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-medium text-[var(--text-secondary)]">Max carry to next year</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          max={90}
+                          step={1}
+                          value={maxCarryForward}
+                          onKeyDown={blockDecimalPointKeys}
+                          onChange={(e) => {
+                            const val = toWholeDays(e.target.value, 90);
+                            if (val === null) return;
+                            setMaxCarryForward(val);
+                          }}
+                          className="w-24 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 text-right font-mono"
+                        />
+                        <span className="text-xs text-[var(--text-muted)]">days per leave type</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* CARD 1: Annual Paid Leave Entitlements */}
+              <div className={`${ATT_CARD} p-5 sm:p-7 space-y-6`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border-color)] pb-5">
+                  <div>
+                    <h4 className={ATT_SECTION_TITLE}>Annual paid leave quotas (per employee)</h4>
+                    <p className={ATT_SECTION_SUB}>
+                      {leavePoliciesEnabled && leaveQuotaPeriod === 'monthly'
+                        ? `Monthly credit ≈ 1/12 of these numbers${enableMonthlyRollover ? ', unused rolls forward' : ', unused expires each month'}`
+                        : 'Credited as a full-year balance when yearly grant is selected'}
+                    </p>
                   </div>
                 </div>
 
                 {/* Section A: Standard Recurring Accrual Leaves */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
                       Standard Recurring Leaves
                     </span>
-                    <span className="text-[11px] font-medium text-slate-400">
-                      {leaveQuotaPeriod === 'annual' ? 'Values shown per annum' : 'Values shown per month'}
+                    <span className="text-[11px] font-medium text-[var(--text-muted)]">
+                      Values shown per year
                     </span>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-y-4 text-xs items-center">
                     {/* Paid / Privilege Leave */}
                     <div className="md:col-span-4">
-                      <div className="font-semibold text-slate-800 text-xs">Paid / Privilege Leave (PL / EL)</div>
-                      <div className="text-[11px] text-slate-400">Earned leaves for planned vacations</div>
+                      <div className="font-semibold text-[var(--text-primary)] text-xs">Paid / Privilege Leave (PL / EL)</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">Earned leaves for planned vacations</div>
                     </div>
                     <div className="md:col-span-8 flex items-center gap-3">
                       <input
                         type="number"
+                        inputMode="numeric"
                         min={0}
-                        max={leaveQuotaPeriod === 'annual' ? 90 : 7.5}
-                        step={leaveQuotaPeriod === 'annual' ? 1 : 0.01}
-                        value={leaveQuotaPeriod === 'annual' ? paidLeaveQuota : Number((paidLeaveQuota / 12).toFixed(2))}
+                        max={90}
+                        step={1}
+                        value={paidLeaveQuota}
+                        onKeyDown={blockDecimalPointKeys}
                         onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setPaidLeaveQuota(leaveQuotaPeriod === 'annual' ? val : Math.round(val * 12 * 100) / 100);
+                          const val = toWholeDays(e.target.value, 90);
+                          if (val === null) return;
+                          setPaidLeaveQuota(val);
                         }}
-                        className="w-24 rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 text-right font-mono"
+                        className="w-24 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 text-right font-mono"
                       />
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-700 font-medium">
-                          {leaveQuotaPeriod === 'annual' ? 'Days / Year' : 'Days / Month'}
-                        </span>
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                          {leaveQuotaPeriod === 'annual'
-                            ? `≈ ${(paidLeaveQuota / 12).toFixed(2)} Days / Month`
-                            : `≈ ${paidLeaveQuota} Days / Year total`}
+                        <span className="text-xs text-[var(--text-secondary)] font-medium">Days / Year</span>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] border border-[var(--border-color)]">
+                          ≈ {(paidLeaveQuota / 12).toFixed(2)} days / month
                         </span>
                       </div>
                     </div>
 
                     {/* Casual Leave */}
                     <div className="md:col-span-4">
-                      <div className="font-semibold text-slate-800 text-xs">Casual Leave (CL)</div>
-                      <div className="text-[11px] text-slate-400">For unexpected personal needs & emergencies</div>
+                      <div className="font-semibold text-[var(--text-primary)] text-xs">Casual Leave (CL)</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">For unexpected personal needs & emergencies</div>
                     </div>
                     <div className="md:col-span-8 flex items-center gap-3">
                       <input
                         type="number"
+                        inputMode="numeric"
                         min={0}
-                        max={leaveQuotaPeriod === 'annual' ? 60 : 5}
-                        step={leaveQuotaPeriod === 'annual' ? 1 : 0.01}
-                        value={leaveQuotaPeriod === 'annual' ? casualLeaveQuota : Number((casualLeaveQuota / 12).toFixed(2))}
+                        max={60}
+                        step={1}
+                        value={casualLeaveQuota}
+                        onKeyDown={blockDecimalPointKeys}
                         onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setCasualLeaveQuota(leaveQuotaPeriod === 'annual' ? val : Math.round(val * 12 * 100) / 100);
+                          const val = toWholeDays(e.target.value, 60);
+                          if (val === null) return;
+                          setCasualLeaveQuota(val);
                         }}
-                        className="w-24 rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 text-right font-mono"
+                        className="w-24 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 text-right font-mono"
                       />
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-700 font-medium">
-                          {leaveQuotaPeriod === 'annual' ? 'Days / Year' : 'Days / Month'}
-                        </span>
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                          {leaveQuotaPeriod === 'annual'
-                            ? `≈ ${(casualLeaveQuota / 12).toFixed(2)} Days / Month`
-                            : `≈ ${casualLeaveQuota} Days / Year total`}
+                        <span className="text-xs text-[var(--text-secondary)] font-medium">Days / Year</span>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] border border-[var(--border-color)]">
+                          ≈ {(casualLeaveQuota / 12).toFixed(2)} days / month
                         </span>
                       </div>
                     </div>
 
                     {/* Sick Leave */}
                     <div className="md:col-span-4">
-                      <div className="font-semibold text-slate-800 text-xs">Sick Leave (SL)</div>
-                      <div className="text-[11px] text-slate-400">For illness, doctor visits & medical recovery</div>
+                      <div className="font-semibold text-[var(--text-primary)] text-xs">Sick Leave (SL)</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">For illness, doctor visits & medical recovery</div>
                     </div>
                     <div className="md:col-span-8 flex items-center gap-3">
                       <input
                         type="number"
+                        inputMode="numeric"
                         min={0}
-                        max={leaveQuotaPeriod === 'annual' ? 60 : 5}
-                        step={leaveQuotaPeriod === 'annual' ? 1 : 0.01}
-                        value={leaveQuotaPeriod === 'annual' ? sickLeaveQuota : Number((sickLeaveQuota / 12).toFixed(2))}
+                        max={60}
+                        step={1}
+                        value={sickLeaveQuota}
+                        onKeyDown={blockDecimalPointKeys}
                         onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setSickLeaveQuota(leaveQuotaPeriod === 'annual' ? val : Math.round(val * 12 * 100) / 100);
+                          const val = toWholeDays(e.target.value, 60);
+                          if (val === null) return;
+                          setSickLeaveQuota(val);
                         }}
-                        className="w-24 rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 text-right font-mono"
+                        className="w-24 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 text-right font-mono"
                       />
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-700 font-medium">
-                          {leaveQuotaPeriod === 'annual' ? 'Days / Year' : 'Days / Month'}
-                        </span>
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
-                          {leaveQuotaPeriod === 'annual'
-                            ? `≈ ${(sickLeaveQuota / 12).toFixed(2)} Days / Month`
-                            : `≈ ${sickLeaveQuota} Days / Year total`}
+                        <span className="text-xs text-[var(--text-secondary)] font-medium">Days / Year</span>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] border border-[var(--border-color)]">
+                          ≈ {(sickLeaveQuota / 12).toFixed(2)} days / month
                         </span>
                       </div>
                     </div>
@@ -2928,13 +3060,13 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 {/* Section B: Statutory & Special Leaves (Event-Based) */}
-                <div className="pt-4 border-t border-slate-100 space-y-4">
+                <div className="pt-4 border-t border-[var(--border-color)] space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block">
+                      <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] block">
                         Statutory & Special Leaves (Per Occurrence)
                       </span>
-                      <span className="text-[11px] text-slate-400 mt-0.5 block">
+                      <span className="text-[11px] text-[var(--text-muted)] mt-0.5 block">
                         Fixed statutory allowances granted per qualifying life event (not monthly accruals)
                       </span>
                     </div>
@@ -2943,21 +3075,28 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-y-4 text-xs items-center">
                     {/* Maternity Leave */}
                     <div className="md:col-span-4">
-                      <div className="font-semibold text-slate-800 text-xs">Maternity Leave Allowance</div>
-                      <div className="text-[11px] text-slate-400">Granted to eligible female employees per child</div>
+                      <div className="font-semibold text-[var(--text-primary)] text-xs">Maternity Leave Allowance</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">Granted to eligible female employees per child</div>
                     </div>
                     <div className="md:col-span-8 flex items-center gap-3">
                       <input
                         type="number"
+                        inputMode="numeric"
                         min={0}
                         max={365}
+                        step={1}
                         value={maternityLeaveQuota}
-                        onChange={(e) => setMaternityLeaveQuota(Number(e.target.value))}
-                        className="w-24 rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 text-right font-mono"
+                        onKeyDown={blockDecimalPointKeys}
+                        onChange={(e) => {
+                          const val = toWholeDays(e.target.value, 365);
+                          if (val === null) return;
+                          setMaternityLeaveQuota(val);
+                        }}
+                        className="w-24 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 text-right font-mono"
                       />
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-700 font-medium">Days / Event</span>
-                        <span className="text-xs text-slate-500 font-medium">
+                        <span className="text-xs text-[var(--text-secondary)] font-medium">Days / Event</span>
+                        <span className="text-xs text-[var(--text-muted)] font-medium">
                           • 26 Weeks Statutory Standard
                         </span>
                       </div>
@@ -2965,21 +3104,28 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                     {/* Paternity Leave */}
                     <div className="md:col-span-4">
-                      <div className="font-semibold text-slate-800 text-xs">Paternity Leave Allowance</div>
-                      <div className="text-[11px] text-slate-400">Granted to eligible fathers around childbirth / adoption</div>
+                      <div className="font-semibold text-[var(--text-primary)] text-xs">Paternity Leave Allowance</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">Granted to eligible fathers around childbirth / adoption</div>
                     </div>
                     <div className="md:col-span-8 flex items-center gap-3">
                       <input
                         type="number"
+                        inputMode="numeric"
                         min={0}
                         max={60}
+                        step={1}
                         value={paternityLeaveQuota}
-                        onChange={(e) => setPaternityLeaveQuota(Number(e.target.value))}
-                        className="w-24 rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 text-right font-mono"
+                        onKeyDown={blockDecimalPointKeys}
+                        onChange={(e) => {
+                          const val = toWholeDays(e.target.value, 60);
+                          if (val === null) return;
+                          setPaternityLeaveQuota(val);
+                        }}
+                        className="w-24 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 text-right font-mono"
                       />
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-700 font-medium">Days / Event</span>
-                        <span className="text-xs text-slate-500 font-medium">
+                        <span className="text-xs text-[var(--text-secondary)] font-medium">Days / Event</span>
+                        <span className="text-xs text-[var(--text-muted)] font-medium">
                           • Statutory Allowance
                         </span>
                       </div>
@@ -2990,7 +3136,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
               {/* CARD 2: Approval Hierarchy & Carry Forward Rules */}
               <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
-                <div className="border-b border-slate-100 pb-3.5">
+                <div className="border-b border-[var(--border-color)] pb-3.5">
                   <h4 className={ATT_SECTION_TITLE}>
                     Leave Approval Workflow & Balance Rules
                   </h4>
@@ -3000,14 +3146,14 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-y-4 text-xs items-center">
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Leave Approval Hierarchy
                   </div>
                   <div className="md:col-span-8 max-w-md">
                     <select
                       value={leaveApprovalWorkflow}
                       onChange={(e) => setLeaveApprovalWorkflow(e.target.value as any)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-800 outline-none focus:border-blue-600 cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer"
                     >
                       <option value="manager_then_hr">Reporting Manager → HR Manager</option>
                       <option value="manager_only">Reporting Manager Only</option>
@@ -3015,56 +3161,31 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </select>
                   </div>
 
-                  <div className="md:col-span-4 text-slate-500 font-medium">
-                    Max Carry Over Limit
-                  </div>
-                  <div className="md:col-span-8 flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={90}
-                      value={maxCarryForward}
-                      onChange={(e) => setMaxCarryForward(Number(e.target.value))}
-                      className="w-24 rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 text-right font-mono"
-                    />
-                    <span className="text-xs text-slate-500 font-medium">Days / Year max rollover</span>
-                  </div>
-
-                  <div className="md:col-span-4 text-slate-500 font-medium">
-                    Enable Leave Carry Over
-                  </div>
-                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-slate-700 font-medium">
-                      Unused leaves roll forward automatically into the next cycle up to the max limit
-                    </span>
-                    <ToggleSwitch checked={enableCarryOver} onChange={setEnableCarryOver} />
-                  </div>
-
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Compensatory Off (Comp-Off)
                   </div>
                   <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-slate-700 font-medium">
+                    <span className="text-[var(--text-secondary)] font-medium">
                       Allows employees working on weekends or holidays to claim leave credits
                     </span>
                     <ToggleSwitch checked={enableCompOff} onChange={setEnableCompOff} />
                   </div>
 
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Allow Negative Leave Balance
                   </div>
                   <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-slate-700 font-medium">
+                    <span className="text-[var(--text-secondary)] font-medium">
                       Allows advance leave requests when employee balance is zero
                     </span>
                     <ToggleSwitch checked={allowNegativeBalance} onChange={setAllowNegativeBalance} />
                   </div>
 
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Restrict Leaves During Notice Period
                   </div>
                   <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-slate-700 font-medium">
+                    <span className="text-[var(--text-secondary)] font-medium">
                       Blocks planned casual leaves when serving resignation notice
                     </span>
                     <ToggleSwitch checked={restrictDuringNotice} onChange={setRestrictDuringNotice} />
@@ -3074,7 +3195,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
               {/* CARD 3: Probation Period & Intern Restrictions */}
               <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
-                <div className="border-b border-slate-100 pb-3.5">
+                <div className="border-b border-[var(--border-color)] pb-3.5">
                   <h4 className={ATT_SECTION_TITLE}>
                     Probation Period Settings & Paid Leave Lock
                   </h4>
@@ -3084,11 +3205,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-y-4 text-xs items-center">
-                  <div className="md:col-span-4 text-slate-500 font-medium">
+                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Enable Probation Tracking
                   </div>
                   <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-slate-700 font-medium">
+                    <span className="text-[var(--text-secondary)] font-medium">
                       Enforce probation status and review period for newly onboarded staff
                     </span>
                     <ToggleSwitch checked={enableProbation} onChange={setEnableProbation} />
@@ -3096,14 +3217,14 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                   {enableProbation && (
                     <>
-                      <div className="md:col-span-4 text-slate-500 font-medium">
+                      <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                         Standard Duration
                       </div>
                       <div className="md:col-span-8 max-w-md">
                         <select
                           value={probationDurationMonths}
                           onChange={(e) => setProbationDurationMonths(Number(e.target.value))}
-                          className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs font-medium text-slate-800 outline-none focus:border-blue-600 cursor-pointer"
+                          className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer"
                         >
                           <option value={1}>1 Month (30 Days)</option>
                           <option value={2}>2 Months (60 Days)</option>
@@ -3113,20 +3234,20 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                         </select>
                       </div>
 
-                      <div className="md:col-span-4 text-slate-500 font-medium">
+                      <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                         Paid Leave Quota Restriction
                       </div>
-                      <div className="md:col-span-8 text-slate-900 font-semibold flex items-center gap-2">
+                      <div className="md:col-span-8 text-[var(--text-primary)] font-semibold flex items-center gap-2">
                         <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
                           0 Paid Leaves Allowed • Absences logged as Loss of Pay (LOP / Unpaid)
                         </span>
                       </div>
 
-                      <div className="md:col-span-4 text-slate-500 font-medium">
+                      <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                         Auto-Confirm Probation
                       </div>
                       <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                        <span className="text-slate-700 font-medium">
+                        <span className="text-[var(--text-secondary)] font-medium">
                           Auto update employee status and unlock full paid leave quotas upon completion
                         </span>
                         <ToggleSwitch checked={autoConfirmProbation} onChange={setAutoConfirmProbation} />
@@ -3138,32 +3259,30 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
               {/* CARD 4: Role-Based Leave Quotas */}
               <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3.5">
-                  <h4 className={ATT_SECTION_TITLE}>
-                    {leaveQuotaPeriod === 'annual' ? 'Role-Based Annual Leave Quotas' : 'Role-Based Monthly Leave Accruals'}
-                  </h4>
-                  <span className="text-[11px] text-slate-500">
-                    {leaveQuotaPeriod === 'annual' ? 'Custom annual allowances override company default' : 'Custom monthly accrual rates override company default'}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[var(--border-color)] pb-3.5">
+                  <h4 className={ATT_SECTION_TITLE}>Role-based annual leave quotas</h4>
+                  <span className="text-[11px] text-[var(--text-muted)]">
+                    Custom annual allowances override the company default. Monthly grant still uses 1/12 of these values.
                   </span>
                 </div>
 
                 <div className={ATT_TABLE_SHELL}>
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50 text-slate-600">
-                        <th className="py-3 px-4 font-bold text-slate-700">Role</th>
-                        <th className="py-3 px-3 font-bold text-slate-700 text-center">
-                          Casual Leave (CL) {leaveQuotaPeriod === 'annual' ? '(Days/Yr)' : '(Days/Mo)'}
+                      <tr className="border-b border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)]">
+                        <th className="py-3 px-4 font-bold text-[var(--text-secondary)]">Role</th>
+                        <th className="py-3 px-3 font-bold text-[var(--text-secondary)] text-center">
+                          Casual Leave (CL) (Days/Yr)
                         </th>
-                        <th className="py-3 px-3 font-bold text-slate-700 text-center">
-                          Sick Leave (SL) {leaveQuotaPeriod === 'annual' ? '(Days/Yr)' : '(Days/Mo)'}
+                        <th className="py-3 px-3 font-bold text-[var(--text-secondary)] text-center">
+                          Sick Leave (SL) (Days/Yr)
                         </th>
-                        <th className="py-3 px-3 font-bold text-slate-700 text-center">
-                          Earned Leave (EL) {leaveQuotaPeriod === 'annual' ? '(Days/Yr)' : '(Days/Mo)'}
+                        <th className="py-3 px-3 font-bold text-[var(--text-secondary)] text-center">
+                          Earned Leave (EL) (Days/Yr)
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y divide-[var(--border-color)]">
                       {[
                         { key: 'admin', label: 'Admin / Executive' },
                         { key: 'hr_manager', label: 'HR Manager' },
@@ -3175,50 +3294,59 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       ].map((r) => {
                         const quotas = roleLeaveQuotas[r.key] || { casualLeave: 12, sickLeave: 10, earnedLeave: 15 };
                         return (
-                          <tr key={r.key} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="py-2.5 px-4 font-bold text-slate-900 whitespace-nowrap">
+                          <tr key={r.key} className="hover:bg-[var(--bg-surface-subtle)]/50 transition-colors">
+                            <td className="py-2.5 px-4 font-bold text-[var(--text-primary)] whitespace-nowrap">
                               {r.label}
                             </td>
                             <td className="py-2.5 px-3 text-center">
                               <input
                                 type="number"
+                                inputMode="numeric"
                                 min={0}
-                                max={leaveQuotaPeriod === 'annual' ? 60 : 5}
-                                step={leaveQuotaPeriod === 'annual' ? 1 : 0.01}
-                                value={leaveQuotaPeriod === 'annual' ? quotas.casualLeave : Number((quotas.casualLeave / 12).toFixed(2))}
+                                max={60}
+                                step={1}
+                                value={quotas.casualLeave}
+                                onKeyDown={blockDecimalPointKeys}
                                 onChange={(e) => {
-                                  const val = Number(e.target.value);
-                                  handleUpdateRoleLeaveQuota(r.key, 'casualLeave', leaveQuotaPeriod === 'annual' ? val : Math.round(val * 12 * 100) / 100);
+                                  const val = toWholeDays(e.target.value, 60);
+                                  if (val === null) return;
+                                  handleUpdateRoleLeaveQuota(r.key, 'casualLeave', val);
                                 }}
-                                className="w-20 text-center py-1.5 px-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-900 outline-none focus:border-blue-600 font-mono"
+                                className="w-20 text-center py-1.5 px-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 font-mono"
                               />
                             </td>
                             <td className="py-2.5 px-3 text-center">
                               <input
                                 type="number"
+                                inputMode="numeric"
                                 min={0}
-                                max={leaveQuotaPeriod === 'annual' ? 60 : 5}
-                                step={leaveQuotaPeriod === 'annual' ? 1 : 0.01}
-                                value={leaveQuotaPeriod === 'annual' ? quotas.sickLeave : Number((quotas.sickLeave / 12).toFixed(2))}
+                                max={60}
+                                step={1}
+                                value={quotas.sickLeave}
+                                onKeyDown={blockDecimalPointKeys}
                                 onChange={(e) => {
-                                  const val = Number(e.target.value);
-                                  handleUpdateRoleLeaveQuota(r.key, 'sickLeave', leaveQuotaPeriod === 'annual' ? val : Math.round(val * 12 * 100) / 100);
+                                  const val = toWholeDays(e.target.value, 60);
+                                  if (val === null) return;
+                                  handleUpdateRoleLeaveQuota(r.key, 'sickLeave', val);
                                 }}
-                                className="w-20 text-center py-1.5 px-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-900 outline-none focus:border-blue-600 font-mono"
+                                className="w-20 text-center py-1.5 px-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 font-mono"
                               />
                             </td>
                             <td className="py-2.5 px-3 text-center">
                               <input
                                 type="number"
+                                inputMode="numeric"
                                 min={0}
-                                max={leaveQuotaPeriod === 'annual' ? 60 : 5}
-                                step={leaveQuotaPeriod === 'annual' ? 1 : 0.01}
-                                value={leaveQuotaPeriod === 'annual' ? quotas.earnedLeave : Number((quotas.earnedLeave / 12).toFixed(2))}
+                                max={60}
+                                step={1}
+                                value={quotas.earnedLeave}
+                                onKeyDown={blockDecimalPointKeys}
                                 onChange={(e) => {
-                                  const val = Number(e.target.value);
-                                  handleUpdateRoleLeaveQuota(r.key, 'earnedLeave', leaveQuotaPeriod === 'annual' ? val : Math.round(val * 12 * 100) / 100);
+                                  const val = toWholeDays(e.target.value, 60);
+                                  if (val === null) return;
+                                  handleUpdateRoleLeaveQuota(r.key, 'earnedLeave', val);
                                 }}
-                                className="w-20 text-center py-1.5 px-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-900 outline-none focus:border-blue-600 font-mono"
+                                className="w-20 text-center py-1.5 px-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 font-mono"
                               />
                             </td>
                           </tr>
@@ -3243,19 +3371,12 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     Overview widgets, attendance report categories, filters, columns and CSV export are managed on the dedicated Reports Settings page.
                   </p>
                 </div>
-                <div
-                  className={`${ATT_CARD} p-5 sm:p-6 bg-gradient-to-br from-blue-50/80 via-white to-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4`}
-                >
-                  <div className="space-y-1 max-w-md">
-                    <p className="text-xs font-semibold text-slate-800">Reports & Analytics configuration</p>
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
-                      Changes on Reports Settings apply immediately to{' '}
-                      <span className="font-semibold text-slate-700">Reports & Analytics</span> after you save.
-                    </p>
-                  </div>
-                  <Link href="/reports/settings" className={`${ATT_BTN_PRIMARY} self-start sm:self-auto`}>
+                <div className="flex flex-col gap-4 rounded-[var(--panel-radius)] border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="settings-page__hint max-w-[70ch]">
+                    Changes on Reports Settings apply to Reports & Analytics after you save.
+                  </p>
+                  <Link href="/reports/settings" className="settings-page__action self-start sm:self-auto">
                     Open Reports Settings
-                    <ExternalLink className="h-3.5 w-3.5" />
                   </Link>
                 </div>
               </div>
@@ -3266,17 +3387,17 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       {/* CREATE WORK SHIFT MODAL */}
       {showAddShiftModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="relative w-full max-w-lg bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-150 text-slate-900">
+          <div className="relative w-full max-w-lg bg-[var(--bg-surface)] rounded-xl border border-[var(--border-color)] shadow-lg overflow-hidden flex flex-col animate-in zoom-in-95 duration-150 text-[var(--text-primary)]">
             {/* Modal Header */}
-            <div className="p-5 px-6 border-b border-slate-200 flex items-center justify-between bg-white shrink-0">
+            <div className="p-5 px-6 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Create New Work Shift</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Configure working hours, grace buffer, and roster schedule.</p>
+                <h3 className="text-base font-bold text-[var(--text-primary)]">Create New Work Shift</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">Configure working hours, grace buffer, and roster schedule.</p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAddShiftModal(false)}
-                className="text-slate-400 hover:text-slate-700 text-sm font-bold p-1 cursor-pointer rounded-lg hover:bg-slate-100 transition-colors"
+                className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-sm font-bold p-1 cursor-pointer rounded-lg hover:bg-[var(--bg-surface-subtle)] transition-colors"
               >
                 ✕
               </button>
@@ -3286,7 +3407,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
             <form onSubmit={handleCreateShift} className="flex flex-col">
               <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh]">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                     Shift Name <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -3294,41 +3415,41 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     placeholder="e.g. Afternoon Shift, Night Roster, Flexible Shift"
                     value={newShiftName}
                     onChange={(e) => setNewShiftName(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-blue-600 transition-all"
+                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-primary)] placeholder-slate-400 font-medium outline-none focus:border-blue-600 transition-all"
                     required
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3.5">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                       Start Time <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="time"
                       value={to24HourTime(newShiftStart)}
                       onChange={(e) => setNewShiftStart(to12HourTime(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs text-slate-800 font-medium outline-none focus:border-blue-600 transition-all cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-primary)] font-medium outline-none focus:border-blue-600 transition-all cursor-pointer"
                       required
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                       End Time <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="time"
                       value={to24HourTime(newShiftEnd)}
                       onChange={(e) => setNewShiftEnd(to12HourTime(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs text-slate-800 font-medium outline-none focus:border-blue-600 transition-all cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-primary)] font-medium outline-none focus:border-blue-600 transition-all cursor-pointer"
                       required
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                     Grace Buffer (Minutes)
                   </label>
                   <input
@@ -3337,13 +3458,13 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     max={60}
                     value={newShiftGrace}
                     onChange={(e) => setNewShiftGrace(Number(e.target.value))}
-                    className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs text-slate-800 font-medium outline-none focus:border-blue-600 transition-all"
+                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-primary)] font-medium outline-none focus:border-blue-600 transition-all"
                   />
                 </div>
 
                 {/* Working Days Selector */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                     Shift Working Days
                   </label>
                   <div className="grid grid-cols-7 gap-1.5">
@@ -3365,7 +3486,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           className={`py-2 text-center rounded-lg border font-semibold text-xs transition-all cursor-pointer ${
                             isSelected
                               ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                              : 'bg-[var(--bg-surface)] text-[var(--text-muted)] border-[var(--border-color)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-subtle)]'
                           }`}
                         >
                           {d.short}
@@ -3377,11 +3498,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               </div>
 
               {/* Modal Footer */}
-              <div className="p-4 px-6 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2.5 shrink-0">
+              <div className="p-4 px-6 border-t border-[var(--border-color)] bg-[var(--bg-surface-subtle)] flex items-center justify-end gap-2.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowAddShiftModal(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer transition-colors shadow-xs"
+                  className="px-4 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-xs font-semibold text-[var(--text-secondary)] cursor-pointer transition-colors shadow-xs"
                 >
                   Cancel
                 </button>
@@ -3400,17 +3521,17 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       {/* CREATE ACADEMIC BATCH MODAL */}
       {showAddBatchModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="relative w-full max-w-lg bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-150 text-slate-900">
+          <div className="relative w-full max-w-lg bg-[var(--bg-surface)] rounded-xl border border-[var(--border-color)] shadow-lg overflow-hidden flex flex-col animate-in zoom-in-95 duration-150 text-[var(--text-primary)]">
             {/* Modal Header */}
-            <div className="p-5 px-6 border-b border-slate-200 flex items-center justify-between bg-white shrink-0">
+            <div className="p-5 px-6 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Add Academic Batch</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Configure class timing, dismissal, and active class schedule.</p>
+                <h3 className="text-base font-bold text-[var(--text-primary)]">Add Academic Batch</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">Configure class timing, dismissal, and active class schedule.</p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAddBatchModal(false)}
-                className="text-slate-400 hover:text-slate-700 text-sm font-bold p-1 cursor-pointer rounded-lg hover:bg-slate-100 transition-colors"
+                className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-sm font-bold p-1 cursor-pointer rounded-lg hover:bg-[var(--bg-surface-subtle)] transition-colors"
               >
                 ✕
               </button>
@@ -3421,7 +3542,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               <div className="p-6 space-y-4 overflow-y-auto max-h-[70vh]">
                 <div className="grid grid-cols-2 gap-3.5">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                       Grade Level <span className="text-rose-500">*</span>
                     </label>
                     <input
@@ -3429,55 +3550,55 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       placeholder="e.g. Grade 12"
                       value={newBatchGrade}
                       onChange={(e) => setNewBatchGrade(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-blue-600 transition-all"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-primary)] placeholder-slate-400 font-medium outline-none focus:border-blue-600 transition-all"
                       required
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                      Section <span className="text-slate-400 font-normal">(Optional)</span>
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
+                      Section <span className="text-[var(--text-muted)] font-normal">(Optional)</span>
                     </label>
                     <input
                       type="text"
                       placeholder="e.g. A (Optional)"
                       value={newBatchSection}
                       onChange={(e) => setNewBatchSection(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-blue-600 transition-all"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-primary)] placeholder-slate-400 font-medium outline-none focus:border-blue-600 transition-all"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3.5">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                       Morning Entry Time <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="time"
                       value={newBatchStart}
                       onChange={(e) => setNewBatchStart(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs text-slate-800 font-medium outline-none focus:border-blue-600 transition-all cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-primary)] font-medium outline-none focus:border-blue-600 transition-all cursor-pointer"
                       required
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                       Dismissal Time <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="time"
                       value={newBatchEnd}
                       onChange={(e) => setNewBatchEnd(to12HourTime(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs text-slate-800 font-medium outline-none focus:border-blue-600 transition-all cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-primary)] font-medium outline-none focus:border-blue-600 transition-all cursor-pointer"
                       required
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                     Late Buffer (Minutes)
                   </label>
                   <input
@@ -3486,13 +3607,13 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     max={60}
                     value={newBatchGrace}
                     onChange={(e) => setNewBatchGrace(Number(e.target.value))}
-                    className="w-full rounded-xl border border-slate-200/80 bg-white px-3.5 py-2 text-xs text-slate-800 font-medium outline-none focus:border-blue-600 transition-all"
+                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs text-[var(--text-primary)] font-medium outline-none focus:border-blue-600 transition-all"
                   />
                 </div>
 
                 {/* Class Working Days Selector */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1.5">
                     Class Working Days
                   </label>
                   <div className="grid grid-cols-7 gap-1.5">
@@ -3514,7 +3635,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                           className={`py-2 text-center rounded-lg border font-semibold text-xs transition-all cursor-pointer ${
                             isSelected
                               ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                              : 'bg-[var(--bg-surface)] text-[var(--text-muted)] border-[var(--border-color)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface-subtle)]'
                           }`}
                         >
                           {d.short}
@@ -3526,11 +3647,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               </div>
 
               {/* Modal Footer */}
-              <div className="p-4 px-6 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2.5 shrink-0">
+              <div className="p-4 px-6 border-t border-[var(--border-color)] bg-[var(--bg-surface-subtle)] flex items-center justify-end gap-2.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowAddBatchModal(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer transition-colors shadow-xs"
+                  className="px-4 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-xs font-semibold text-[var(--text-secondary)] cursor-pointer transition-colors shadow-xs"
                 >
                   Cancel
                 </button>

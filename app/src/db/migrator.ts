@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { pool } from '../config/database.js';
 import { sanitizeSchemaName } from './queryRunner.js';
+import { hashPassword } from '../utils/crypto.js';
 import { log } from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,7 +26,7 @@ function getMigrationPath(filename: string): string {
 }
 
 /**
- * Runs public control plane migrations (001 + 003)
+ * Runs public control plane migrations (001 + 003 + 004 + 005 + 008 + 010 + 011)
  */
 export async function runPublicMigrations(): Promise<void> {
   const client = await pool.connect();
@@ -39,6 +40,47 @@ export async function runPublicMigrations(): Promise<void> {
     const sql003 = fs.readFileSync(getMigrationPath('003_platform_admin.sql'), 'utf8');
     await client.query(sql003);
     log.success('Public Control Plane Migration 003 executed successfully.');
+
+    // SQL cannot generate PBKDF2; replace the 003 placeholder so platform login works
+    // without requiring seedDemoTenant. Never overwrite an already-hashed password.
+    await client.query(
+      `UPDATE public.global_auth_mapping
+       SET password_hash = $1
+       WHERE role = 'platform_admin'
+         AND (password_hash IS NULL OR password_hash = 'platform_seed:pending')`,
+      [hashPassword('Platform@123')]
+    );
+
+    log.info('Running Public Control Plane Migration 004 (auth_tokens)...');
+    const sql004 = fs.readFileSync(getMigrationPath('004_auth_tokens.sql'), 'utf8');
+    await client.query(sql004);
+    log.success('Public Control Plane Migration 004 executed successfully.');
+
+    log.info('Running Public Control Plane Migration 005 (unique auth email)...');
+    const sql005 = fs.readFileSync(getMigrationPath('005_unique_auth_email.sql'), 'utf8');
+    try {
+      await client.query(sql005);
+      log.success('Public Control Plane Migration 005 executed successfully.');
+    } catch (err: any) {
+      log.warn(
+        `Migration 005 could not add a unique email index (${err.message}). Duplicate emails already in the database will not be removed; new registrations with those emails are still rejected.`
+      );
+    }
+
+    log.info('Running Public Control Plane Migration 008 (support threads)...');
+    const sql008 = fs.readFileSync(getMigrationPath('008_support_threads.sql'), 'utf8');
+    await client.query(sql008);
+    log.success('Public Control Plane Migration 008 executed successfully.');
+
+    log.info('Running Public Control Plane Migration 010 (license plans)...');
+    const sql010 = fs.readFileSync(getMigrationPath('010_license_plans.sql'), 'utf8');
+    await client.query(sql010);
+    log.success('Public Control Plane Migration 010 executed successfully.');
+
+    log.info('Running Public Control Plane Migration 011 (tenant address)...');
+    const sql011 = fs.readFileSync(getMigrationPath('011_tenant_address.sql'), 'utf8');
+    await client.query(sql011);
+    log.success('Public Control Plane Migration 011 executed successfully.');
   } finally {
     client.release();
   }
@@ -59,6 +101,9 @@ export async function provisionTenantSchema(schemaName: string): Promise<void> {
     await client.query(`CREATE SCHEMA IF NOT EXISTS "${sanitized}"`);
     await client.query(`SET search_path TO "${sanitized}", public`);
     await client.query(sql);
+    await client.query(fs.readFileSync(getMigrationPath('006_chat.sql'), 'utf8'));
+    await client.query(fs.readFileSync(getMigrationPath('007_unique_org_names.sql'), 'utf8'));
+    await client.query(fs.readFileSync(getMigrationPath('009_billing_clients.sql'), 'utf8'));
     await client.query('RESET search_path');
     log.success(`Tenant schema "${sanitized}" provisioned and migrated successfully with 15+ isolated domain tables.`);
   } finally {

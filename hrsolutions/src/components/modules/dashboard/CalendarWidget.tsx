@@ -1,13 +1,18 @@
 'use client';
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon, ExternalLink } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { ChevronLeft, ChevronRight, ChevronDown, ExternalLink } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
 import { generateInitialHolidays } from '@/data/holidayTemplates';
 
-export const CalendarWidget: React.FC = () => {
+/* ─────────────────────────────────────────────
+   CalendarWidget — redesigned with Linear/Notion
+   SaaS-grade polish
+   ───────────────────────────────────────────── */
+
+export const CalendarWidget: React.FC<{ className?: string }> = ({ className = '' }) => {
   const { state } = useApp();
   const dashboardState = useDashboardContext();
   const router = useRouter();
@@ -15,7 +20,9 @@ export const CalendarWidget: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [currentViewDate, setCurrentViewDate] = useState(() => new Date());
   const [showPicker, setShowPicker] = useState(false);
+  const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const year = currentViewDate.getFullYear();
   const month = currentViewDate.getMonth();
@@ -219,64 +226,87 @@ export const CalendarWidget: React.FC = () => {
     }
   };
 
+  /* ── Keyboard navigation ── */
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const idx = focusedIdx ?? calendarDays.findIndex((c) => c.isSelected);
+    if (idx === -1) return;
+    let next = idx;
+    switch (e.key) {
+      case 'ArrowLeft':  next = Math.max(0, idx - 1); break;
+      case 'ArrowRight': next = Math.min(calendarDays.length - 1, idx + 1); break;
+      case 'ArrowUp':    next = Math.max(0, idx - 7); break;
+      case 'ArrowDown':  next = Math.min(calendarDays.length - 1, idx + 7); break;
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        handleCellClick(calendarDays[idx]);
+        return;
+      default: return;
+    }
+    e.preventDefault();
+    setFocusedIdx(next);
+  }, [focusedIdx, calendarDays]);
+
+  // Build tooltip text for a cell
+  const getTooltip = (cell: (typeof calendarDays)[number]) => {
+    const parts: string[] = [];
+    if (cell.holidays.length) parts.push(`Holiday: ${cell.holidays.join(', ')}`);
+    if (cell.hasAttendance) parts.push('In Office');
+    if (cell.leaves.length) parts.push(`Leave: ${cell.leaves.map(l => l.name).join(', ')}`);
+    return parts.join(' · ');
+  };
+
   // Selected date status summary
   const selectedHolidays = holidaysMap.get(selectedDate) || [];
   const selectedLeaves = leavesMap.get(selectedDate) || [];
   const selectedAttendance = attendanceMap.get(selectedDate);
-
   const hasSelectedEvents = selectedHolidays.length > 0 || selectedLeaves.length > 0 || !!selectedAttendance;
 
   return (
-    <div className="dash-card p-3 sm:p-3.5 relative" data-purpose="calendar-widget">
-      {/* Calendar Header */}
-      <div className="flex items-center justify-between mb-2">
-        {/* Interactive Month Picker Trigger */}
+    <div className={`cal-w ${className}`.trim()} data-purpose="calendar-widget">
+      {/* ─── Header ─── */}
+      <div className="cal-w-header">
+        {/* Month/Year picker trigger */}
         <div className="relative" ref={pickerRef}>
           <button
             type="button"
             onClick={() => setShowPicker(!showPicker)}
-            className="flex items-center space-x-1 py-0.5 px-1 -ml-1 rounded-md hover:bg-slate-100 transition cursor-pointer group"
+            className="cal-w-month-btn"
           >
-            <h2 className="text-sm font-bold text-[var(--text-primary)] group-hover:text-[var(--primary-blue)] transition-colors">
-              {monthLabel}
-            </h2>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600 transition-transform ${showPicker ? 'rotate-180 text-blue-600' : ''}`} />
+            <span className="cal-w-month-label">{monthLabel}</span>
+            <ChevronDown className={`cal-w-chevron ${showPicker ? 'cal-w-chevron-open' : ''}`} />
           </button>
 
           {/* Quick Month & Year Picker Flyout */}
           {showPicker && (
-            <div className="absolute left-0 top-full mt-1 w-56 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-              <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100">
+            <div className="cal-w-picker-flyout">
+              <div className="cal-w-picker-year-row">
                 <button
                   type="button"
                   onClick={() => handleYearChange(-1)}
-                  className="p-1 rounded-md hover:bg-slate-100 text-slate-600 cursor-pointer"
+                  className="cal-w-icon-btn cal-w-icon-btn--sm"
                   title="Previous Year"
                 >
-                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <ChevronLeft className="cal-w-icon-14" />
                 </button>
-                <span className="text-xs font-bold text-slate-800">{year}</span>
+                <span className="cal-w-picker-year">{year}</span>
                 <button
                   type="button"
                   onClick={() => handleYearChange(1)}
-                  className="p-1 rounded-md hover:bg-slate-100 text-slate-600 cursor-pointer"
+                  className="cal-w-icon-btn cal-w-icon-btn--sm"
                   title="Next Year"
                 >
-                  <ChevronRight className="w-3.5 h-3.5" />
+                  <ChevronRight className="cal-w-icon-14" />
                 </button>
               </div>
 
-              <div className="grid grid-cols-3 gap-1 mb-1.5">
+              <div className="cal-w-picker-months">
                 {monthShortNames.map((name, idx) => (
                   <button
                     key={name}
                     type="button"
                     onClick={() => handleSelectMonth(idx)}
-                    className={`py-1 rounded-md text-[10px] font-semibold transition cursor-pointer ${
-                      idx === month
-                        ? 'bg-blue-600 text-white font-bold shadow-xs'
-                        : 'text-slate-700 hover:bg-slate-100'
-                    }`}
+                    className={`cal-w-picker-month ${idx === month ? 'cal-w-picker-month--active' : ''}`}
                   >
                     {name}
                   </button>
@@ -286,7 +316,7 @@ export const CalendarWidget: React.FC = () => {
               <button
                 type="button"
                 onClick={handleJumpToToday}
-                className="w-full py-1 text-center text-[10px] font-bold text-blue-600 hover:bg-blue-50 rounded-md border border-blue-100 transition cursor-pointer"
+                className="cal-w-picker-today"
               >
                 Jump to Today
               </button>
@@ -294,103 +324,99 @@ export const CalendarWidget: React.FC = () => {
           )}
         </div>
 
-        {/* Navigation Arrows */}
-        <div className="flex items-center space-x-0.5">
+        {/* Navigation arrows — 32×32 icon buttons */}
+        <div className="cal-w-nav-arrows">
           <button
             type="button"
             onClick={handlePrevMonth}
             aria-label="Previous Month"
-            className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-600 active:scale-95 transition cursor-pointer"
+            className="cal-w-icon-btn"
           >
-            <ChevronLeft className="w-3.5 h-3.5" />
+            <ChevronLeft className="cal-w-icon-16" />
           </button>
           <button
             type="button"
             onClick={handleNextMonth}
             aria-label="Next Month"
-            className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-600 active:scale-95 transition cursor-pointer"
+            className="cal-w-icon-btn"
           >
-            <ChevronRight className="w-3.5 h-3.5" />
+            <ChevronRight className="cal-w-icon-16" />
           </button>
         </div>
       </div>
 
-      {/* Calendar Days Grid Headers */}
-      <div className="grid grid-cols-7 gap-0.5 text-center text-[10px] font-semibold text-[#94a3b8] mb-0.5">
-        <span>S</span>
-        <span>M</span>
-        <span>T</span>
-        <span>W</span>
-        <span>T</span>
-        <span>F</span>
-        <span>S</span>
+      {/* ─── Day-of-week headers ─── */}
+      <div className="cal-w-dow-row">
+        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+          <span key={d} className="cal-w-dow">{d}</span>
+        ))}
       </div>
 
-      {/* Calendar Days Cells */}
-      <div className="grid grid-cols-7 gap-y-0.5 gap-x-0.5 text-center text-xs font-medium text-slate-700">
+      {/* ─── Calendar grid ─── */}
+      <div
+        ref={gridRef}
+        role="grid"
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        onBlur={() => setFocusedIdx(null)}
+        className="cal-w-grid"
+      >
         {calendarDays.map((cell, idx) => {
           const hasHoliday = cell.holidays.length > 0;
           const hasLeave = cell.leaves.length > 0;
           const hasAtt = cell.hasAttendance;
+          const hasEvents = hasHoliday || hasAtt || hasLeave;
+          const isFocused = focusedIdx === idx;
+          const tooltip = getTooltip(cell);
+
+          // Build class list for the circle
+          let circleClass = 'cal-w-circle';
+          if (cell.isSelected)        circleClass += ' cal-w-circle--selected';
+          else if (cell.isToday)      circleClass += ' cal-w-circle--today';
+          else if (!cell.isCurrentMonth) circleClass += ' cal-w-circle--outside';
+          if (isFocused)              circleClass += ' cal-w-circle--focused';
 
           return (
             <div
               key={`${cell.dateStr}-${idx}`}
-              onClick={() => handleCellClick(cell)}
-              className="py-0.5 relative cursor-pointer select-none group flex flex-col items-center"
+              role="gridcell"
+              aria-label={`${cell.dayNum}, ${monthNames[month]} ${year}`}
+              aria-selected={cell.isSelected}
+              onClick={() => {
+                handleCellClick(cell);
+                setFocusedIdx(idx);
+              }}
+              className="cal-w-cell"
+              title={tooltip || undefined}
             >
-              {cell.isSelected ? (
-                <span className="w-6.5 h-6.5 mx-auto rounded-full bg-[#2563eb] text-white font-bold flex items-center justify-center shadow-xs text-[11px]">
-                  {cell.dayNum}
-                </span>
-              ) : cell.isToday ? (
-                <span className="w-6.5 h-6.5 mx-auto rounded-full bg-[#eff6ff] text-[#2563eb] border border-[#2563eb] font-bold flex items-center justify-center text-[11px]">
-                  {cell.dayNum}
-                </span>
-              ) : (
-                <span className={`block w-6.5 h-6.5 leading-6.5 mx-auto rounded-full text-[11px] transition-colors ${
-                  !cell.isCurrentMonth
-                    ? 'text-slate-300 hover:text-slate-500 hover:bg-slate-50'
-                    : 'text-slate-700 hover:bg-slate-100'
-                }`}>
-                  {cell.dayNum}
-                </span>
-              )}
+              <span className={circleClass}>{cell.dayNum}</span>
 
-              {/* Compact Event Indicator Bars */}
-              {!cell.isSelected && (hasHoliday || hasAtt || hasLeave) && (
-                <div className="flex items-center justify-center gap-0.5 h-1 mt-0.5">
-                  {hasHoliday && (
-                    <span className="w-2.5 h-0.5 rounded-full bg-amber-400" title={`Holiday: ${cell.holidays.join(', ')}`} />
-                  )}
-                  {hasAtt && (
-                    <span className="w-2.5 h-0.5 rounded-full bg-[#2563eb]" title="Attendance Logged" />
-                  )}
-                  {hasLeave && (
-                    <span className="w-2.5 h-0.5 rounded-full bg-[#38bdf8]" title={`On Leave: ${cell.leaves.map(l => l.name).join(', ')}`} />
-                  )}
-                </div>
-              )}
+              {/* Status dots — up to 3 tiny colored dots below the date */}
+              <span className="cal-w-dots">
+                {hasAtt     && <span className="cal-w-dot cal-w-dot--att" />}
+                {hasHoliday && <span className="cal-w-dot cal-w-dot--hol" />}
+                {hasLeave   && <span className="cal-w-dot cal-w-dot--leave" />}
+              </span>
             </div>
           );
         })}
       </div>
 
-      {/* Synchronized Status / Micro-Legend Footer */}
+      {/* ─── Footer: Status summary or Legend ─── */}
       {hasSelectedEvents ? (
-        <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-600">
-          <div className="truncate pr-2">
+        <div className="cal-w-footer cal-w-footer--status">
+          <div className="cal-w-footer-text">
             {selectedHolidays.length > 0 ? (
-              <span className="font-semibold text-amber-700">
-                <span className="truncate">{selectedHolidays[0]}</span>
+              <span className="cal-w-footer-label cal-w-footer-label--hol">
+                {selectedHolidays[0]}
               </span>
             ) : selectedLeaves.length > 0 ? (
-              <span className="font-semibold text-sky-700">
-                <span className="truncate">{selectedLeaves[0].name} ({selectedLeaves[0].type})</span>
+              <span className="cal-w-footer-label cal-w-footer-label--leave">
+                {selectedLeaves[0].name} ({selectedLeaves[0].type})
               </span>
             ) : (
-              <span className="font-semibold text-blue-700">
-                <span>{selectedAttendance?.count || 1} Attendance Check-in{(selectedAttendance?.count || 1) > 1 ? 's' : ''}</span>
+              <span className="cal-w-footer-label cal-w-footer-label--att">
+                {selectedAttendance?.count || 1} Check-in{(selectedAttendance?.count || 1) > 1 ? 's' : ''}
               </span>
             )}
           </div>
@@ -406,16 +432,26 @@ export const CalendarWidget: React.FC = () => {
                 router.push('/attendance');
               }
             }}
-            className="text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:underline shrink-0 flex items-center gap-0.5 cursor-pointer"
+            className="cal-w-footer-link"
           >
-            Attendance <ExternalLink className="w-2.5 h-2.5" />
+            Attendance <ExternalLink className="cal-w-icon-11" />
           </button>
         </div>
       ) : (
-        <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-center gap-2 text-[10px] text-slate-500 font-medium">
-          <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200/60">In Office</span>
-          <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200/60">Holiday</span>
-          <span className="px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200/60">Leave</span>
+        /* Compact legend — dot + text */
+        <div className="cal-w-footer cal-w-footer--legend">
+          <div className="cal-w-legend-item">
+            <span className="cal-w-legend-dot cal-w-dot--att" />
+            <span className="cal-w-legend-label">In Office</span>
+          </div>
+          <div className="cal-w-legend-item">
+            <span className="cal-w-legend-dot cal-w-dot--hol" />
+            <span className="cal-w-legend-label">Holiday</span>
+          </div>
+          <div className="cal-w-legend-item">
+            <span className="cal-w-legend-dot cal-w-dot--leave" />
+            <span className="cal-w-legend-label">Leave</span>
+          </div>
         </div>
       )}
     </div>

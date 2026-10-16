@@ -85,7 +85,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#7c5cfc] hover:bg-[#6b47fc] text-white text-xs font-bold rounded-xl shadow-lg shadow-[#7c5cfc]/25 transition-all active:scale-95 self-start md:self-auto"
+          className="flex items-center gap-2 px-4 py-2.5 bg-[#7c5cfc] hover:bg-[#6b47fc] text-white text-xs font-bold rounded-lg shadow-lg shadow-[#7c5cfc]/25 transition-all active:scale-95 self-start md:self-auto"
         >
           <Plus className="h-4 w-4" /> Create Workflow Rule
         </button>
@@ -93,7 +93,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
 
       {/* KPI Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-5 rounded-2xl bg-[#161d2e] border border-[#232d44] shadow-sm">
+        <div className="p-5 rounded-xl bg-[#161d2e] border border-[#232d44] shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold text-[#8e9eb5] uppercase tracking-wider">Active Rules</span>
             <div className="p-2 bg-[#7c5cfc]/20 text-[#a78bfa] rounded-lg">
@@ -104,7 +104,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
           <p className="text-[11px] text-[#2dd4bf] mt-1 font-medium">Out of {state.workflows.length} total rules</p>
         </div>
 
-        <div className="p-5 rounded-2xl bg-[#161d2e] border border-[#232d44] shadow-sm">
+        <div className="p-5 rounded-xl bg-[#161d2e] border border-[#232d44] shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold text-[#8e9eb5] uppercase tracking-wider">Automations Fired</span>
             <div className="p-2 bg-[#2dd4bf]/20 text-[#2dd4bf] rounded-lg">
@@ -117,7 +117,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
           <p className="text-[11px] text-[#8e9eb5] mt-1 font-medium">99.8% successful execution SLA</p>
         </div>
 
-        <div className="p-5 rounded-2xl bg-[#161d2e] border border-[#232d44] shadow-sm">
+        <div className="p-5 rounded-xl bg-[#161d2e] border border-[#232d44] shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold text-[#8e9eb5] uppercase tracking-wider">Estimated Time Saved</span>
             <div className="p-2 bg-[#38bdf8]/20 text-[#38bdf8] rounded-lg">
@@ -132,7 +132,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
       </div>
 
       {/* Rules List */}
-      <div className="rounded-2xl border border-[#232d44] bg-[#161d2e] shadow-sm overflow-hidden">
+      <div className="rounded-xl border border-[#232d44] bg-[#161d2e] shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-[#232d44] flex items-center justify-between">
           <h3 className="text-sm font-bold text-white">Enterprise Workflow Engine</h3>
           <span className="text-xs font-semibold text-[#a78bfa]">{state.workflows.length} Configured Rules</span>
@@ -180,7 +180,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
                   }`}
                 >
                   <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${
+                    className={`bg-[var(--bg-surface)] w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${
                       rule.enabled ? 'translate-x-6' : 'translate-x-0'
                     }`}
                   />
@@ -194,7 +194,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
       {/* Create Rule Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-          <div className="w-full max-w-md rounded-2xl bg-[#161d2e] border border-[#232d44] p-6 shadow-2xl space-y-4 text-xs">
+          <div className="w-full max-w-md rounded-xl bg-[#161d2e] border border-[#232d44] p-6 shadow-2xl space-y-4 text-xs">
             <div className="flex items-center justify-between border-b border-[#232d44] pb-3">
               <h3 className="text-sm font-bold text-white">Create New Automation Workflow</h3>
               <button onClick={() => setShowAddModal(false)} className="text-[#8e9eb5]">✕</button>
@@ -208,7 +208,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
                   placeholder="e.g. Auto-Notify Team on Critical Bug"
                   value={newRule.title}
                   onChange={(e) => setNewRule({ ...newRule, title: e.target.value })}
-                  className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-xl text-white focus:outline-none focus:border-[#7c5cfc]"
+                  className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-lg text-white focus:outline-none focus:border-[#7c5cfc]"
                 />
               </div>
 
@@ -217,7 +217,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
                 <select
                   value={newRule.triggerEvent}
                   onChange={(e) => setNewRule({ ...newRule, triggerEvent: e.target.value })}
-                  className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-xl text-white focus:outline-none focus:border-[#7c5cfc]"
+                  className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-lg text-white focus:outline-none focus:border-[#7c5cfc]"
                 >
                   <option value="TASK_COMPLETED">Task Marked as Completed</option>
                   <option value="NEW_LEAD_CREATED">New CRM Lead Form Submission</option>
@@ -232,7 +232,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
                 <select
                   value={newRule.actionType}
                   onChange={(e) => setNewRule({ ...newRule, actionType: e.target.value })}
-                  className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-xl text-white focus:outline-none focus:border-[#7c5cfc]"
+                  className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-lg text-white focus:outline-none focus:border-[#7c5cfc]"
                 >
                   <option value="SEND_NOTIFICATION">Push Real-Time Notification & Toast</option>
                   <option value="AI_GENERATE_SUMMARY">Trigger Gemini AI Executive Brief</option>
@@ -248,7 +248,7 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
                   placeholder="Describe the workflow purpose..."
                   value={newRule.description}
                   onChange={(e) => setNewRule({ ...newRule, description: e.target.value })}
-                  className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-xl text-white focus:outline-none focus:border-[#7c5cfc]"
+                  className="w-full p-2.5 bg-[#131929] border border-[#232d44] rounded-lg text-white focus:outline-none focus:border-[#7c5cfc]"
                 />
               </div>
 
@@ -256,13 +256,13 @@ export const AutomationModule: React.FC<AutomationModuleProps> = ({ state, onUpd
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-3 py-2 bg-[#131929] border border-[#232d44] text-[#8e9eb5] rounded-xl font-semibold"
+                  className="px-3 py-2 bg-[#131929] border border-[#232d44] text-[#8e9eb5] rounded-lg font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-[#7c5cfc] hover:bg-[#6b47fc] text-white rounded-xl font-bold shadow-md"
+                  className="px-4 py-2 bg-[#7c5cfc] hover:bg-[#6b47fc] text-white rounded-lg font-bold shadow-md"
                 >
                   Save & Enable Workflow
                 </button>

@@ -1,41 +1,29 @@
-/** Shared class recipes for TeamHub-inspired attendance chrome (sapphire brand). */
+/** Shared class recipes for Pixbe attendance chrome (Working Studio). */
 
-export const ATT_SUBNAV_BASE =
-  'flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer transition-[transform,background-color,color,border-color,box-shadow] duration-150 ease-out active:scale-[0.97]';
+export const ATT_SUBNAV_BASE = 'work-tab';
 
-export const ATT_SUBNAV_ACTIVE =
-  'bg-blue-600 text-white shadow-sm shadow-blue-500/20 border border-transparent';
+export const ATT_SUBNAV_ACTIVE = 'is-active';
 
-export const ATT_SUBNAV_IDLE =
-  'bg-white text-slate-700 border border-slate-200/80 shadow-2xs';
+export const ATT_SUBNAV_IDLE = '';
 
 export const ATT_CARD =
-  'rounded-2xl border border-slate-200/80 bg-white shadow-2xs';
+  'border border-[var(--border-color)] rounded-[var(--card-radius)] bg-[var(--bg-surface)]';
 
-export const ATT_TABLE_SHELL =
-  'rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-2xs';
+export const ATT_TABLE_SHELL = 'work-table';
 
-export const ATT_TABLE_HEAD =
-  'bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider';
+export const ATT_TABLE_HEAD = '';
 
-export const ATT_BTN_PRIMARY =
-  'inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-600 text-white shadow-xs transition-[transform,background-color] duration-150 ease-out hover:bg-blue-700 active:scale-[0.97] cursor-pointer';
+export const ATT_BTN_PRIMARY = 'work-btn-primary';
 
-export const ATT_BTN_SECONDARY =
-  'inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white text-slate-700 border border-slate-200 shadow-2xs transition-[transform,background-color] duration-150 ease-out hover:bg-slate-50 active:scale-[0.97] cursor-pointer';
+export const ATT_BTN_SECONDARY = 'work-btn-secondary';
 
 export const ATT_SECTION_TITLE =
-  'text-sm sm:text-base font-bold text-slate-900 tracking-tight';
+  'm-0 text-[16px] font-[750] leading-[1.3] tracking-[-0.02em] text-[var(--text-primary)]';
 
-export const ATT_SECTION_SUB =
-  'text-xs text-slate-500 mt-0.5';
+export const ATT_SECTION_SUB = 'mt-1 mb-0 text-[14px] leading-[1.5] text-[var(--text-secondary)] max-w-[70ch]';
 
-/** Quiet page chrome — slate meta, not loud blue breadcrumbs */
-export const ATT_BREADCRUMB =
-  'text-[11px] font-medium text-slate-400 tracking-wide';
+export const ATT_BREADCRUMB = 'text-[11px] font-medium text-[var(--text-muted)]';
 
-export const ATT_PAGE_TITLE =
-  'text-[22px] font-semibold tracking-tight text-slate-900';
+export const ATT_PAGE_TITLE = 'work-title';
 
-export const ATT_PAGE_META =
-  'text-xs text-slate-500 mt-1.5';
+export const ATT_PAGE_META = 'hidden';

@@ -34,6 +34,15 @@ export function toApiAuthRole(role?: string | null): ApiAuthRole {
   return 'employee';
 }
 
+/** Map a job-role level from workspace setup onto a backend auth role. */
+export function toApiAuthRoleFromJobLevel(level?: string | null): ApiAuthRole {
+  const l = String(level || '').trim().toLowerCase();
+  if (l === 'hr') return 'hr_manager';
+  if (l === 'manager') return 'manager';
+  if (l === 'admin') return 'super_admin';
+  return 'employee';
+}
+
 /** Infer a backend role from a job title when the UI only captured designation. */
 export function inferApiRoleFromDesignation(
   designation?: string | null,
@@ -49,17 +58,6 @@ export function inferApiRoleFromDesignation(
   const d = String(designation || '').toLowerCase();
   if (!d) return 'employee';
 
-  if (d.includes('hr') || d.includes('people ops') || d.includes('people lead')) {
-    return 'hr_manager';
-  }
-  if (
-    d.includes('manager') ||
-    d.includes('lead') ||
-    d.includes('director') ||
-    d.includes('head')
-  ) {
-    return 'manager';
-  }
   if (d.includes('faculty') || d.includes('teacher') || d.includes('professor')) {
     return 'faculty';
   }

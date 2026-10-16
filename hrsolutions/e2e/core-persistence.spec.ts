@@ -40,54 +40,42 @@ async function registerWorkspace(page: Page, workspace: Workspace): Promise<void
   await page.getByRole('button', { name: 'CEO / Executive Owner' }).click();
   await page.getByRole('button', { name: 'Continue' }).click();
 
-  await waitForSuccessfulMutation(page, API.authRegister, () => page.getByRole('button', { name: 'Launch Workspace' }).click());
+  await waitForSuccessfulMutation(page, API.authRegister, () => page.getByRole('button', { name: 'Create workspace' }).click());
   await assertAfterDatabaseReload(page, async () => {
     await expect(page).toHaveURL(/\/setup/);
-    await expect(page.getByText('Add Office Locations', { exact: true })).toBeVisible();
+    await expect(page.getByText('Where will your team work?', { exact: true })).toBeVisible();
   });
 }
 
 async function addOfficeAndDepartment(page: Page, workspace: Workspace): Promise<void> {
-  await page.getByPlaceholder(/Office \/ Branch Name/).fill(workspace.office);
-  await page.getByRole('button', { name: /^Add Office Location$/ }).first().click();
-  await expect(page.getByText(workspace.office, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue to structure' }).click();
+  await expect(page.getByText('Shape your organisation.', { exact: true })).toBeVisible();
 
-  await waitForSuccessfulMutation(page, API.orgOffices, () => page.getByRole('button', { name: 'Next: Departments' }).click());
-  await assertAfterDatabaseReload(page, async () => {
-    await expect(page.getByText('Add Departments', { exact: true })).toBeVisible();
-    await expect(page.locator('p, span').filter({ hasText: workspace.office }).first()).toBeVisible();
-  });
-
-  await page.getByPlaceholder('Department Name (e.g. Engineering)').fill(workspace.department);
-  await page.getByRole('button', { name: 'Add Department' }).click();
+  await page.getByPlaceholder('Add a department').fill(workspace.department);
+  await page.getByRole('button', { name: 'Add department' }).click();
   await expect(page.getByText(workspace.department, { exact: true }).first()).toBeVisible();
-  await waitForSuccessfulMutation(page, API.orgDepartments, () => page.getByRole('button', { name: 'Next: Job Roles' }).click());
+  await page.getByPlaceholder('e.g. Product Designer').fill(workspace.jobRole);
+  await page.getByRole('button', { name: 'Add role' }).click();
+  await waitForSuccessfulMutation(page, API.setupDepartments, () => page.getByRole('button', { name: 'Save structure & continue' }).click());
+  await expect(page.getByText('How does your team work?', { exact: true })).toBeVisible();
+  await waitForSuccessfulMutation(page, API.setupEmploymentTypes, () => page.getByRole('button', { name: 'Save hours & continue' }).click());
   await assertAfterDatabaseReload(page, async () => {
-    await expect(page.getByText('Create New Job Role', { exact: true })).toBeVisible();
-    await expect(page.getByText(/Departments ready:/i)).toContainText(workspace.department);
+    await expect(page.getByText('Invite your first people.', { exact: true })).toBeVisible();
   });
 }
 
 async function finishWorkspaceSetup(page: Page, workspace: Workspace): Promise<void> {
-  await page.getByPlaceholder(/Senior Frontend Engineer/).fill(workspace.jobRole);
-  await page.getByRole('button', { name: /^(Add Job Role|Save Job Role)$/ }).click();
-  await waitForSuccessfulMutation(page, API.orgJobRoles, () => page.getByRole('button', { name: 'Next: Team Members' }).click());
-  await assertAfterDatabaseReload(page, async () => {
-    await expect(page.getByText('Add Team Members', { exact: true })).toBeVisible();
-    await expect(page.getByText(/Roles ready:/i)).toContainText(workspace.jobRole);
-  });
-
   const employeeName = `Employee ${unique('setup')}`;
-  await page.getByPlaceholder('Full Name *').fill(employeeName);
-  await page.getByPlaceholder('Official Email *').fill(`${unique('employee')}@example.com`);
-  await page.getByRole('button', { name: 'Add Team Member' }).click();
-  await waitForSuccessfulMutation(page, API.setupTeam, () => page.getByRole('button', { name: 'Next: Finalize Departments' }).click());
-  await assertAfterDatabaseReload(page, async () => {
-    await expect(page.getByText('Finalize Departments & Team Leads', { exact: true })).toBeVisible();
-    await expect(page.getByText(employeeName, { exact: true }).first()).toBeVisible();
-  });
+  const [firstName, lastName] = employeeName.split(' ');
+  await page.getByPlaceholder('First name').fill(firstName);
+  await page.getByPlaceholder('Last name').fill(lastName);
+  await page.getByPlaceholder('Work email').fill(`${unique('employee')}@example.com`);
+  await page.getByRole('button', { name: 'Add person' }).click();
+  await page.getByRole('button', { name: 'Review setup' }).click();
+  await expect(page.getByText('Review and launch.', { exact: true })).toBeVisible();
+  await expect(page.getByText(employeeName, { exact: true }).first()).toBeVisible();
 
-  await page.getByRole('button', { name: /Finish Setup & Launch Workspace/ }).click();
+  await waitForSuccessfulMutation(page, API.setupTeam, () => page.getByRole('button', { name: /Launch & send invitations/ }).click());
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
   await assertAfterDatabaseReload(page, async () => {
     await expect(page).toHaveURL(/\/dashboard/);
@@ -173,7 +161,7 @@ test('office locations and custom job roles are persisted rather than kept only 
   const office = `Mumbai ${unique('Office')}`;
   await selectEmployeeSettingsTab(page, /Office Locations/);
   await page.getByRole('button', { name: /Add Office Location/ }).click();
-  await page.getByPlaceholder('e.g. Bengaluru HQ').fill(office);
+  await page.getByPlaceholder('e.g. Main office').fill(office);
   await waitForSuccessfulMutation(page, API.orgOffices, () => page.getByRole('button', { name: 'Add Office' }).click());
   await assertAfterDatabaseReload(page, async () => expect(page.getByText(office, { exact: true })).toBeVisible());
 

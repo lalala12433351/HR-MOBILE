@@ -69,6 +69,9 @@ export const recordPunchSchema = z
     latitude: z.union([z.number(), z.string().transform(Number)]).optional(),
     longitude: z.union([z.number(), z.string().transform(Number)]).optional(),
     deviceInfo: z.string().max(255).optional().nullable(),
+    selfiePhoto: z.string().max(2_000_000).optional().nullable(),
+    qrToken: z.string().max(4096).optional().nullable(),
+    workFromHome: z.boolean().optional(),
     checkInTime: z
       .string()
       .regex(
@@ -193,11 +196,20 @@ export const adjustLeaveBalanceSchema = z.object({
   year: z.number().int().min(2000).max(2100).optional(),
 });
 
+const optionalClockTime = z
+  .string()
+  .optional()
+  .nullable()
+  .transform((v) => {
+    const s = String(v || '').trim();
+    return s.length ? s : undefined;
+  });
+
 export const requestRegularizationSchema = z.object({
   employeeId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  requestedCheckIn: z.string().min(1).optional(),
-  requestedCheckOut: z.string().min(1).optional(),
+  requestedCheckIn: optionalClockTime,
+  requestedCheckOut: optionalClockTime,
   reason: z.string().min(1).max(1000),
   remarks: z.string().max(1000).optional(),
 });
@@ -225,4 +237,15 @@ export const toggleBreakSchema = z.object({
   employeeId: z.string().min(1),
   isOnBreak: z.boolean(),
   breakType: z.string().max(32).optional(),
+});
+
+export const workplaceLocationCheckSchema = z.object({
+  latitude: z.union([z.number(), z.string().transform(Number)]).pipe(z.number().gte(-90).lte(90)),
+  longitude: z
+    .union([z.number(), z.string().transform(Number)])
+    .pipe(z.number().gte(-180).lte(180)),
+  accuracy: z
+    .union([z.number(), z.string().transform(Number)])
+    .pipe(z.number().min(0).max(5000))
+    .optional(),
 });

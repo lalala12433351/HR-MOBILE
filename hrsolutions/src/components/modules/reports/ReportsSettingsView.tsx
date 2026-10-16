@@ -1,10 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
 import { AppState } from '@/services/store';
 import { api } from '@/services/apiClient';
-import { ArrowLeft, Save } from 'lucide-react';
 import {
   ATTENDANCE_REPORT_CATALOG,
   OVERVIEW_WIDGET_CATALOG,
@@ -14,6 +12,7 @@ import {
   OverviewWidgetId,
 } from '@/utils/reportCatalog';
 import { ReportCustomizationSettings } from '@/types';
+import { SettingsToast } from '../settings/SettingsToast';
 
 interface ReportsSettingsViewProps {
   state: AppState;
@@ -145,68 +144,47 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
     REPORT_FIELD_CATALOG[selectedReportForFields as AttendanceReportId] || [];
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-6 pb-16">
-      {toast && (
-        <div className="fixed top-4 right-4 z-50 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-xs font-semibold shadow-lg">
-          {toast}
-        </div>
-      )}
+    <div className="settings-page">
+      <SettingsToast message={toast} />
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <Link
-            href="/reports"
-            className="mt-0.5 h-9 w-9 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-600 hover:bg-slate-50 shadow-xs transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900">
-              Reports Settings
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Customize overview widgets, attendance reports, filters, columns and exports
-            </p>
-          </div>
-        </div>
+      <div className="settings-page__header">
+        <h2 className="settings-page__heading">Reports Settings</h2>
         <button
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-semibold transition-all cursor-pointer self-start sm:self-auto"
-          style={{ boxShadow: '0 4px 6px -1px rgba(37, 99, 235, 0.20)' }}
+          className="settings-page__action shrink-0"
         >
-          <Save className="h-3.5 w-3.5" />
-          {saving ? 'Saving…' : 'Save Report Settings'}
+          {saving ? 'Saving…' : 'Save Changes'}
         </button>
       </div>
 
       {/* 1. Defaults */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-xs">
-        <div className="border-b border-slate-100 pb-3">
-          <h4 className="text-sm font-bold text-slate-900">Default Landing</h4>
-          <p className="text-xs text-slate-500 mt-0.5">
+      <section className="settings-page__card space-y-4">
+        <div className="border-b border-[var(--border-color)] pb-3">
+          <h4 className="settings-page__section-heading">Default Landing</h4>
+          <p className="settings-page__section-description">
             Choose what opens first when visiting Reports & Analytics
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-slate-700">Default tab</span>
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">Default tab</span>
             <select
               value={defaultTab}
               onChange={(e) => setDefaultTab(e.target.value as 'overview' | 'attendance')}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 outline-none focus:border-blue-600 focus:bg-white cursor-pointer"
+              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)] cursor-pointer"
             >
               <option value="overview">Overview</option>
               <option value="attendance">Attendance</option>
             </select>
           </label>
           <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-slate-700">Default attendance report</span>
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">Default attendance report</span>
             <select
               value={defaultReport}
               onChange={(e) => setDefaultReport(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 outline-none focus:border-blue-600 focus:bg-white cursor-pointer"
+              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)] cursor-pointer"
             >
               {ATTENDANCE_REPORT_CATALOG.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -216,11 +194,11 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
             </select>
           </label>
           <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-slate-700">Default month</span>
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">Default month</span>
             <select
               value={defaultMonthOffset}
               onChange={(e) => setDefaultMonthOffset(Number(e.target.value) as 0 | -1)}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 outline-none focus:border-blue-600 focus:bg-white cursor-pointer"
+              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)] cursor-pointer"
             >
               <option value={0}>Current month</option>
               <option value={-1}>Previous month</option>
@@ -230,10 +208,10 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
       </section>
 
       {/* 2. Overview widgets */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-xs">
-        <div className="border-b border-slate-100 pb-3">
-          <h4 className="text-sm font-bold text-slate-900">Overview Widgets</h4>
-          <p className="text-xs text-slate-500 mt-0.5">
+      <section className="settings-page__card space-y-4">
+        <div className="border-b border-[var(--border-color)] pb-3">
+          <h4 className="settings-page__section-heading">Overview Widgets</h4>
+          <p className="settings-page__section-description">
             Toggle live ops analytics cards on the Overview tab
           </p>
         </div>
@@ -244,18 +222,18 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
               <label
                 key={w.id}
                 className={`flex items-start gap-3 p-3.5 rounded-lg border transition-all cursor-pointer select-none ${
-                  checked ? 'border-blue-600/50 bg-blue-50/20' : 'border-slate-200 bg-white hover:bg-slate-50'
+                  checked ? 'settings-page__choice settings-page__choice--active' : 'settings-page__choice'
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggleWidget(w.id as OverviewWidgetId)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  className="mt-0.5 h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
                 />
                 <div>
-                  <div className="text-xs font-bold text-slate-900">{w.name}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">{w.desc}</div>
+                  <div className="text-[14px] font-semibold text-[var(--text-primary)]">{w.name}</div>
+                  <div className="settings-page__hint mt-0.5">{w.desc}</div>
                 </div>
               </label>
             );
@@ -264,10 +242,10 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
       </section>
 
       {/* 3. Attendance reports */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-xs">
-        <div className="border-b border-slate-100 pb-3">
-          <h4 className="text-sm font-bold text-slate-900">Attendance Report Categories</h4>
-          <p className="text-xs text-slate-500 mt-0.5">
+      <section className="settings-page__card space-y-4">
+        <div className="border-b border-[var(--border-color)] pb-3">
+          <h4 className="settings-page__section-heading">Attendance Report Categories</h4>
+          <p className="settings-page__section-description">
             Choose which reports appear in the Attendance tab sidebar
           </p>
         </div>
@@ -278,18 +256,18 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
               <label
                 key={rep.id}
                 className={`flex items-start gap-3 p-3.5 rounded-lg border transition-all cursor-pointer select-none ${
-                  checked ? 'border-blue-600/50 bg-blue-50/20' : 'border-slate-200 bg-white hover:bg-slate-50'
+                  checked ? 'settings-page__choice settings-page__choice--active' : 'settings-page__choice'
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggleReport(rep.id)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  className="mt-0.5 h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
                 />
                 <div>
-                  <div className="text-xs font-bold text-slate-900">{rep.name}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">{rep.desc}</div>
+                  <div className="text-[14px] font-semibold text-[var(--text-primary)]">{rep.name}</div>
+                  <div className="settings-page__hint mt-0.5">{rep.desc}</div>
                 </div>
               </label>
             );
@@ -298,44 +276,44 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
       </section>
 
       {/* 4. Visuals */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-xs">
-        <div className="border-b border-slate-100 pb-3">
-          <h4 className="text-sm font-bold text-slate-900">Visual Elements</h4>
-          <p className="text-xs text-slate-500 mt-0.5">Applies to Overview and Attendance reports</p>
+      <section className="settings-page__card space-y-4">
+        <div className="border-b border-[var(--border-color)] pb-3">
+          <h4 className="settings-page__section-heading">Visual Elements</h4>
+          <p className="settings-page__section-description">Applies to Overview and Attendance reports</p>
         </div>
         <div className="space-y-3">
-          <label className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-all cursor-pointer select-none">
+          <label className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] transition-all cursor-pointer select-none">
             <div>
-              <div className="text-xs font-bold text-slate-900">Display charts & graphs</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Bar, pie and area charts above tables</div>
+              <div className="text-[14px] font-semibold text-[var(--text-primary)]">Display charts & graphs</div>
+              <div className="settings-page__hint mt-0.5">Bar, pie and area charts above tables</div>
             </div>
             <input
               type="checkbox"
               checked={showCharts}
               onChange={(e) => setShowCharts(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
             />
           </label>
-          <label className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-all cursor-pointer select-none">
+          <label className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] transition-all cursor-pointer select-none">
             <div>
-              <div className="text-xs font-bold text-slate-900">Display KPI metric cards</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Summary metrics at the top of each view</div>
+              <div className="text-[14px] font-semibold text-[var(--text-primary)]">Display KPI metric cards</div>
+              <div className="settings-page__hint mt-0.5">Summary metrics at the top of each view</div>
             </div>
             <input
               type="checkbox"
               checked={showKpiCards}
               onChange={(e) => setShowKpiCards(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
             />
           </label>
         </div>
       </section>
 
       {/* 5. Filters */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-xs">
-        <div className="border-b border-slate-100 pb-3">
-          <h4 className="text-sm font-bold text-slate-900">Attendance Filters</h4>
-          <p className="text-xs text-slate-500 mt-0.5">Show or hide filter controls on attendance reports</p>
+      <section className="settings-page__card space-y-4">
+        <div className="border-b border-[var(--border-color)] pb-3">
+          <h4 className="settings-page__section-heading">Attendance Filters</h4>
+          <p className="settings-page__section-description">Show or hide filter controls on attendance reports</p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {[
@@ -346,41 +324,41 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
             <label
               key={f.key}
               className={`flex items-center gap-3 p-3.5 rounded-lg border transition-all cursor-pointer select-none ${
-                f.value ? 'border-blue-600/50 bg-blue-50/20' : 'border-slate-200 bg-white hover:bg-slate-50'
+                  f.value ? 'settings-page__choice settings-page__choice--active' : 'settings-page__choice'
               }`}
             >
               <input
                 type="checkbox"
                 checked={f.value}
                 onChange={(e) => f.set(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
               />
-              <span className="text-xs font-bold text-slate-900">{f.label}</span>
+              <span className="text-xs font-bold text-[var(--text-primary)]">{f.label}</span>
             </label>
           ))}
         </div>
       </section>
 
       {/* 6. Table & hours */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-xs">
-        <div className="border-b border-slate-100 pb-3">
-          <h4 className="text-sm font-bold text-slate-900">Table & Hours</h4>
-          <p className="text-xs text-slate-500 mt-0.5">Pagination and expected hours for working-hours reports</p>
+      <section className="settings-page__card space-y-4">
+        <div className="border-b border-[var(--border-color)] pb-3">
+          <h4 className="settings-page__section-heading">Table & Hours</h4>
+          <p className="settings-page__section-description">Pagination and expected hours for working-hours reports</p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-slate-700">Rows per page</span>
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">Rows per page</span>
             <input
               type="number"
               min={5}
               max={100}
               value={rowsPerPage}
               onChange={(e) => setRowsPerPage(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-mono font-medium text-slate-800 outline-none focus:border-blue-600 focus:bg-white"
+              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-mono font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)]"
             />
           </label>
           <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-slate-700">Expected hours per day</span>
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">Expected hours per day</span>
             <input
               type="number"
               min={1}
@@ -388,23 +366,23 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
               step={0.5}
               value={expectedHoursPerDay}
               onChange={(e) => setExpectedHoursPerDay(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-mono font-medium text-slate-800 outline-none focus:border-blue-600 focus:bg-white"
+              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-mono font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)]"
             />
           </label>
         </div>
       </section>
 
       {/* 7. Column visibility */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+      <section className="settings-page__card space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)] pb-3">
           <div>
-            <h4 className="text-sm font-bold text-slate-900">Report Column Visibility</h4>
-            <p className="text-xs text-slate-500 mt-0.5">Select a report to customize its table columns</p>
+            <h4 className="settings-page__section-heading">Report Column Visibility</h4>
+            <p className="settings-page__section-description">Select a report to customize its table columns</p>
           </div>
           <select
             value={selectedReportForFields}
             onChange={(e) => setSelectedReportForFields(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-800 outline-none focus:border-blue-600 cursor-pointer"
+            className="px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer"
           >
             {ATTENDANCE_REPORT_CATALOG.map((r) => (
               <option key={r.id} value={r.id}>
@@ -421,16 +399,16 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
               <label
                 key={f.key}
                 className={`flex items-center gap-2.5 p-3 rounded-lg border transition-all cursor-pointer select-none ${
-                  checked ? 'border-blue-600/50 bg-blue-50/20' : 'border-slate-200 bg-white hover:bg-slate-50'
+                  checked ? 'settings-page__choice settings-page__choice--active' : 'settings-page__choice'
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggleField(selectedReportForFields, f.key)}
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
                 />
-                <span className="text-xs font-semibold text-slate-800">{f.label}</span>
+                <span className="text-xs font-semibold text-[var(--text-primary)]">{f.label}</span>
               </label>
             );
           })}
@@ -438,35 +416,35 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
       </section>
 
       {/* 8. Export */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-xs">
-        <div className="border-b border-slate-100 pb-3">
-          <h4 className="text-sm font-bold text-slate-900">CSV Export</h4>
-          <p className="text-xs text-slate-500 mt-0.5">Control export availability and geofence columns</p>
+      <section className="settings-page__card space-y-4">
+        <div className="border-b border-[var(--border-color)] pb-3">
+          <h4 className="settings-page__section-heading">CSV Export</h4>
+          <p className="settings-page__section-description">Control export availability and geofence columns</p>
         </div>
         <div className="space-y-3">
-          <label className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-all cursor-pointer select-none">
+          <label className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] transition-all cursor-pointer select-none">
             <div>
-              <div className="text-xs font-bold text-slate-900">Allow CSV export</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Show Export CSV on overview and attendance reports</div>
+              <div className="text-[14px] font-semibold text-[var(--text-primary)]">Allow CSV export</div>
+              <div className="settings-page__hint mt-0.5">Show Export CSV on overview and attendance reports</div>
             </div>
             <input
               type="checkbox"
               checked={allowCsvExport}
               onChange={(e) => setAllowCsvExport(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
             />
           </label>
-          <label className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-all cursor-pointer select-none">
+          <label className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] transition-all cursor-pointer select-none">
             <div>
-              <div className="text-xs font-bold text-slate-900">Include geofence in daily punch CSV</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Adds Verified Inside / Outside Geofence column</div>
+              <div className="text-[14px] font-semibold text-[var(--text-primary)]">Include geofence in daily punch CSV</div>
+              <div className="settings-page__hint mt-0.5">Adds Verified Inside / Outside Geofence column</div>
             </div>
             <input
               type="checkbox"
               checked={csvIncludeGeofence}
               onChange={(e) => setCsvIncludeGeofence(e.target.checked)}
               disabled={!allowCsvExport}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer disabled:opacity-40"
+              className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer disabled:opacity-40"
             />
           </label>
         </div>

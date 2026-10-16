@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AppState } from '../../services/store';
 import { NotificationItem } from '../../types';
 import { GoogleIcon } from '../ui/GoogleIcon';
+import { SlideOverDrawer, slideOverBodyClass, slideOverFooterClass, slideOverPrimaryClass } from '@/components/common/SlideOverDrawer';
 
 interface NotificationsModuleProps {
   state: AppState;
@@ -434,23 +435,8 @@ export const NotificationsModule: React.FC<NotificationsModuleProps> = ({
 
       {/* Settings Modal */}
       {showSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 space-y-5 animate-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <GoogleIcon name="tune" size={20} className="text-blue-600" />
-                <h3 className="text-base font-bold text-slate-900">Notification Settings</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowSettings(false)}
-                className="p-1 rounded-xl text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
-              >
-                <GoogleIcon name="close" size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-3.5 text-xs text-slate-700">
+        <SlideOverDrawer title="Notification Settings" onClose={() => setShowSettings(false)}>
+            <div className={`${slideOverBodyClass} text-[var(--text-secondary)]`}>
               <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100 cursor-pointer">
                 <div>
                   <p className="font-bold text-slate-900">Push Notifications</p>
@@ -489,17 +475,12 @@ export const NotificationsModule: React.FC<NotificationsModuleProps> = ({
               </label>
             </div>
 
-            <div className="pt-2 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowSettings(false)}
-                className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all shadow-xs cursor-pointer"
-              >
+            <div className={slideOverFooterClass}>
+              <button type="button" onClick={() => setShowSettings(false)} className={slideOverPrimaryClass}>
                 Done
               </button>
             </div>
-          </div>
-        </div>
+        </SlideOverDrawer>
       )}
     </div>
   );

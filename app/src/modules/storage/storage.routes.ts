@@ -3,6 +3,7 @@ import {
   getPresignedUpload,
   getPresignedDownload,
   registerDocument,
+  listDocuments,
 } from './storage.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 import { requireTenantContext } from '../../middleware/tenant.middleware.js';
@@ -15,3 +16,4 @@ storageRoutes.use(requireTenantContext);
 storageRoutes.post('/presigned-upload', getPresignedUpload);
 storageRoutes.get('/presigned-download', getPresignedDownload);
 storageRoutes.post('/documents', registerDocument);
+storageRoutes.get('/documents', listDocuments);

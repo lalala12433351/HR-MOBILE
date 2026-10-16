@@ -1,12 +1,18 @@
 'use client';
 
 import React, { useState } from 'react';
-import { downloadBlob } from '@/lib/native';
 import { FileText, Folder, Upload, Download, Share2, CheckCircle2, Search, Plus, Trash2, HardDrive } from 'lucide-react';
 import { AppState } from '../../services/store';
 import { DriveItem } from '../../types';
 import { api } from '../../services/apiClient';
 import { GoogleDriveComponent } from '../common/GoogleDriveComponent';
+import {
+  SlideOverDrawer,
+  slideOverBodyClass,
+  slideOverCancelClass,
+  slideOverFooterClass,
+  slideOverPrimaryClass,
+} from '@/components/common/SlideOverDrawer';
 
 interface DocumentsModuleProps {
   state: AppState;
@@ -121,17 +127,17 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold text-slate-900">Document Drive & Cloud Storage</h1>
-          <p className="hidden sm:block text-xs text-slate-500 mt-0.5">Google Drive API integration, Meet transcript automation, and local document workflow</p>
+          <h1 className="text-xl md:text-2xl font-bold text-[var(--text-primary)]">Document Drive & Cloud Storage</h1>
+          <p className="hidden sm:block text-xs text-[var(--text-muted)] mt-0.5">Google Drive API integration, Meet transcript automation, and local document workflow</p>
         </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100/90 p-1 shadow-2xs w-full sm:w-auto">
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--bg-surface-subtle)]/90 p-1 shadow-2xs w-full sm:w-auto">
             <button
               onClick={() => setActiveTab('google-drive')}
               className={`flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === 'google-drive'
-                  ? 'bg-white text-blue-600 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-[var(--bg-surface)] text-blue-600 '
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
             >
               <HardDrive className="h-3.5 w-3.5 shrink-0" />
@@ -141,8 +147,8 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
             <button
               onClick={() => setActiveTab('local-drive')}
               className={`flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === 'local-drive'
-                  ? 'bg-white text-blue-600 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-[var(--bg-surface)] text-blue-600 '
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
             >
               <Folder className="h-3.5 w-3.5 shrink-0" />
@@ -152,7 +158,7 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
 
           <button
             onClick={() => setShowUploadModal(true)}
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition-all cursor-pointer w-full sm:w-auto"
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition-all cursor-pointer w-full sm:w-auto"
           >
             <Upload className="h-4 w-4" /> Upload Document
           </button>
@@ -176,17 +182,17 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
                 <button
                   key={cat}
                   onClick={() => setSelectedFolder(cat === selectedFolder ? 'All' : cat)}
-                  className={`rounded-2xl border p-4 text-left transition-all flex items-center gap-3 ${selectedFolder === cat
+                  className={`rounded-xl border p-4 text-left transition-all flex items-center gap-3 ${selectedFolder === cat
                       ? 'border-blue-600 bg-blue-50/70 shadow-sm'
-                      : 'border-slate-200 bg-white hover:border-slate-300 shadow-2xs'
+                      : 'border-[var(--border-color)] bg-[var(--bg-surface)] hover:border-[var(--border-strong)] shadow-2xs'
                     }`}
                 >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-700 font-bold shrink-0">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 text-blue-700 font-bold shrink-0">
                     <Folder className="h-5 w-5" />
                   </div>
                   <div className="truncate">
-                    <p className="text-xs font-bold text-slate-900 truncate">{cat}</p>
-                    <p className="text-[10px] text-slate-500 font-medium">{count} Files</p>
+                    <p className="text-xs font-bold text-[var(--text-primary)] truncate">{cat}</p>
+                    <p className="text-[10px] text-[var(--text-muted)] font-medium">{count} Files</p>
                   </div>
                 </button>
               );
@@ -196,13 +202,13 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
           {/* Search Bar & Category Filter */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-[var(--text-muted)]" />
               <input
                 type="text"
                 placeholder="Search documents..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-xs font-medium focus:outline-none focus:border-blue-600 shadow-2xs"
+                className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] pl-9 pr-3 py-2 text-xs font-medium focus:outline-none focus:border-blue-600 shadow-2xs"
               />
             </div>
 
@@ -211,9 +217,9 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
                 <button
                   key={cat}
                   onClick={() => setSelectedFolder(cat)}
-                  className={`rounded-xl px-3 py-1.5 text-[11px] font-bold transition-all shrink-0 cursor-pointer ${selectedFolder === cat
+                  className={`rounded-lg px-3 py-1.5 text-[11px] font-bold transition-all shrink-0 cursor-pointer ${selectedFolder === cat
                       ? 'bg-blue-600 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      : 'bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)]'
                     }`}
                 >
                   {cat}
@@ -225,15 +231,15 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
           {/* Mobile Documents Cards (Responsive) */}
           <div className="block md:hidden space-y-3">
             {filteredItems.map((item) => (
-              <div key={item.id} className="p-4 rounded-2xl border border-slate-200 bg-white shadow-2xs space-y-3">
+              <div key={item.id} className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xs space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2.5 min-w-0">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600 shrink-0">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600 shrink-0">
                       <FileText className="h-4.5 w-4.5" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-xs font-semibold text-slate-900 truncate">{item.name}</h3>
-                      <p className="text-[11px] text-slate-500">{item.owner} • {item.modifiedDate}</p>
+                      <h3 className="text-xs font-semibold text-[var(--text-primary)] truncate">{item.name}</h3>
+                      <p className="text-[11px] text-[var(--text-muted)]">{item.owner} • {item.modifiedDate}</p>
                     </div>
                   </div>
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 shrink-0">
@@ -242,25 +248,25 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
                 </div>
 
                 {item.taskTitle && (
-                  <div className="text-[11px] font-medium text-blue-700 bg-blue-50/70 border border-blue-200/60 px-2.5 py-1 rounded-xl flex items-center gap-1.5">
+                  <div className="text-[11px] font-medium text-blue-700 bg-blue-50/70 border border-blue-200/60 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
                     <FileText className="h-3.5 w-3.5 text-blue-500" />
                     <span>Task: {item.taskTitle}</span>
                   </div>
                 )}
 
-                <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
-                  <span className="text-xs font-medium text-slate-500 tabular-nums">{item.size}</span>
+                <div className="flex items-center justify-between pt-1 border-t border-[var(--border-color)] text-xs">
+                  <span className="text-xs font-medium text-[var(--text-muted)] tabular-nums">{item.size}</span>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleDownloadItem(item.name)}
-                      className="flex items-center gap-1 rounded-xl bg-slate-100 hover:bg-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition-all cursor-pointer"
+                      className="flex items-center gap-1 rounded-lg bg-[var(--bg-surface-subtle)] hover:bg-[var(--bg-surface-hover)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-all cursor-pointer"
                     >
                       <Download className="h-3.5 w-3.5" /> Download
                     </button>
                     <button
                       disabled={isSaving}
                       onClick={() => handleDeleteItem(item.id)}
-                      className="flex items-center gap-1 rounded-xl bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 text-xs font-medium text-rose-600 transition-all cursor-pointer disabled:opacity-50"
+                      className="flex items-center gap-1 rounded-lg bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 text-xs font-medium text-rose-600 transition-all cursor-pointer disabled:opacity-50"
                       title="Delete Document"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -271,16 +277,16 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
             ))}
 
             {filteredItems.length === 0 && (
-              <div className="p-8 rounded-2xl border border-slate-200 bg-white text-center text-xs text-slate-400 font-medium shadow-2xs">
+              <div className="p-8 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] text-center text-xs text-[var(--text-muted)] font-medium shadow-2xs">
                 No documents found matching &quot;{searchQuery}&quot;
               </div>
             )}
           </div>
 
           {/* Desktop Documents Table */}
-          <div className="hidden md:block rounded-2xl border border-slate-200 bg-white overflow-x-auto custom-scrollbar touch-pan-x shadow-2xs">
+          <div className="hidden md:block rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-x-auto custom-scrollbar touch-pan-x shadow-2xs">
             <table className="w-full text-left text-xs min-w-[650px]">
-              <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px]">
+              <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] border-b border-[var(--border-color)] font-bold uppercase text-[10px]">
                 <tr>
                   <th className="p-3.5">Document Name</th>
                   <th className="p-3.5">Category</th>
@@ -290,10 +296,10 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
                   <th className="p-3.5 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
+              <tbody className="divide-y divide-[var(--border-color)] font-medium">
                 {filteredItems.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="p-3.5 font-bold text-slate-900">
+                  <tr key={item.id} className="hover:bg-[var(--bg-surface-subtle)]/80 transition-colors">
+                    <td className="p-3.5 font-bold text-[var(--text-primary)]">
                       <div className="flex items-center gap-2">
                         <FileText className="h-4 w-4 text-blue-600 shrink-0" />
                         <span className="truncate">{item.name}</span>
@@ -306,13 +312,13 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
                       )}
                     </td>
                     <td className="p-3.5 font-semibold text-blue-600">{item.folderCategory}</td>
-                    <td className="p-3.5 text-slate-500">{item.size}</td>
-                    <td className="p-3.5 text-slate-500">{item.modifiedDate}</td>
-                    <td className="p-3.5 font-semibold text-slate-800">{item.owner}</td>
+                    <td className="p-3.5 text-[var(--text-muted)]">{item.size}</td>
+                    <td className="p-3.5 text-[var(--text-muted)]">{item.modifiedDate}</td>
+                    <td className="p-3.5 font-semibold text-[var(--text-primary)]">{item.owner}</td>
                     <td className="p-3.5 text-right space-x-2">
                       <button
                         onClick={() => handleDownloadItem(item.name)}
-                        className="rounded-lg bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-200 transition-all cursor-pointer"
+                        className="rounded-lg bg-[var(--bg-surface-subtle)] px-2.5 py-1 text-[10px] font-bold text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] transition-all cursor-pointer"
                       >
                         <Download className="h-3 w-3 inline mr-1" /> Download
                       </button>
@@ -329,7 +335,7 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
 
                 {filteredItems.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-xs text-slate-400 font-semibold">
+                    <td colSpan={6} className="p-8 text-center text-xs text-[var(--text-muted)] font-semibold">
                       No documents found matching "{searchQuery}"
                     </td>
                   </tr>
@@ -340,28 +346,27 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
 
           {/* Upload Document Modal */}
           {showUploadModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-              <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-                <h3 className="text-base font-bold text-slate-900 mb-3">Upload Document to Drive</h3>
-                <form onSubmit={handleUploadSubmit} className="space-y-3 text-xs">
+            <SlideOverDrawer title="Upload Document to Drive" onClose={() => setShowUploadModal(false)}>
+                <form onSubmit={handleUploadSubmit} className="flex-1 flex flex-col justify-between overflow-hidden">
+                  <div className={slideOverBodyClass}>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Document Title</label>
+                    <label className="block font-semibold text-[var(--text-secondary)] mb-1">Document Title</label>
                     <input
                       type="text"
                       required
                       value={docName}
                       onChange={(e) => setDocName(e.target.value)}
                       placeholder="e.g. Q3 Financial Audit Report.pdf"
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-medium"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] p-2 font-medium"
                     />
                   </div>
 
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Folder Category</label>
+                    <label className="block font-semibold text-[var(--text-secondary)] mb-1">Folder Category</label>
                     <select
                       value={docCategory}
                       onChange={(e) => setDocCategory(e.target.value as any)}
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-medium"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] p-2 font-medium"
                     >
                       <option value="Personal">Personal Drive</option>
                       <option value="Company">Company Drive</option>
@@ -371,41 +376,38 @@ export const DocumentsModule: React.FC<DocumentsModuleProps> = ({ state, onUpdat
                   </div>
 
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">File Size</label>
+                    <label className="block font-semibold text-[var(--text-secondary)] mb-1">File Size</label>
                     <input
                       type="text"
                       value={docSize}
                       onChange={(e) => setDocSize(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 font-medium"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] p-2 font-medium"
                     />
                   </div>
 
-                  <div className="rounded-xl border border-dashed border-blue-300 bg-blue-50/50 p-4 text-center">
+                  <div className="rounded-lg border border-dashed border-blue-300 bg-blue-50/50 p-4 text-center">
                     <Upload className="h-6 w-6 text-blue-600 mx-auto mb-1" />
                     <p className="text-xs font-bold text-blue-900">Drag & Drop files or click to browse</p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Supports PDF, DOCX, XLSX, PNG up to 100MB</p>
+                    <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Supports PDF, DOCX, XLSX, PNG up to 100MB</p>
                   </div>
 
-                  <div className="pt-2 flex justify-end gap-2">
+                  </div>
+                  <div className={slideOverFooterClass}>
                 <button
                   type="button"
                   disabled={isSaving}
                   onClick={() => setShowUploadModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-500 font-bold hover:bg-slate-100 disabled:opacity-50"
+                  className={slideOverCancelClass}
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-sm disabled:opacity-50"
-                >
+                <button type="submit" disabled={isSaving} className={slideOverPrimaryClass}>
                   <Upload className="h-4 w-4" />
                   {isSaving ? 'Uploading...' : 'Upload Now'}
                 </button>
-              </div>  </form>
-              </div>
-            </div>
+                  </div>
+                </form>
+            </SlideOverDrawer>
           )}
         </>
       )}

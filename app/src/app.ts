@@ -7,20 +7,27 @@ import { pool } from './config/database.js';
 
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { controlPlaneRoutes } from './modules/control-plane/control-plane.routes.js';
+import { licenseRoutes, tenantLicenseRoutes } from './modules/licenses/license.routes.js';
 import { orgRoutes } from './modules/org/org.routes.js';
 import { identityRoutes } from './modules/identity/identity.routes.js';
 import { attendanceRoutes } from './modules/attendance/attendance.routes.js';
 import { projectRoutes } from './modules/projects/projects.routes.js';
 import { payrollRoutes } from './modules/payroll/payroll.routes.js';
+import { billingRoutes } from './modules/billing/billing.routes.js';
 import { auditCommsRoutes } from './modules/audit-comms/audit.routes.js';
 import { storageRoutes } from './modules/storage/storage.routes.js';
 import { instituteRoutes } from './modules/institute/institute.routes.js';
 import { setupRoutes } from './modules/setup/setup.routes.js';
+import { reportsRoutes } from './modules/reports/reports.routes.js';
+import { chatRoutes } from './modules/chat/chat.routes.js';
+import { supportRoutes } from './modules/support/support.routes.js';
 
 import { requestLogger } from './utils/logger.js';
 
 export function createApp(): Express {
   const app = express();
+  // Behind one load balancer hop; needed so rate limits key on the real client IP.
+  app.set('trust proxy', 1);
 
   // Clean Human-Readable HTTP Request/Response Logger
   if (env.NODE_ENV !== 'test') {
@@ -50,7 +57,7 @@ export function createApp(): Express {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       service: 'enterprise-bos-backend',
-      version: '1.0.5',
+      version: '1.0.6',
       uptime: process.uptime(),
       environment: env.NODE_ENV,
     });
@@ -74,6 +81,10 @@ export function createApp(): Express {
   app.use('/api/auth', authRoutes);
   app.use(`${API_PREFIX}/auth`, authRoutes);
 
+  // Public license catalog (signup picker — no auth)
+  app.use(`${API_PREFIX}/license-plans`, licenseRoutes);
+  app.use(`${API_PREFIX}/license`, tenantLicenseRoutes);
+
   // Global Control Plane (Tenants, Subscriptions, Auth Mappings)
   app.use(`${API_PREFIX}/control-plane`, controlPlaneRoutes);
 
@@ -83,12 +94,16 @@ export function createApp(): Express {
   app.use(`${API_PREFIX}/attendance`, attendanceRoutes);
   app.use(`${API_PREFIX}/projects`, projectRoutes);
   app.use(`${API_PREFIX}/payroll`, payrollRoutes);
+  app.use(`${API_PREFIX}/billing`, billingRoutes);
   app.use(`${API_PREFIX}/audit-comms`, auditCommsRoutes);
   app.use(`${API_PREFIX}/storage`, storageRoutes);
   app.use(`${API_PREFIX}/institute`, instituteRoutes);
   // Workspace onboarding is a tenant-scoped flow and must be registered with
   // the versioned API prefix used by the Next.js client.
   app.use(`${API_PREFIX}/setup`, setupRoutes);
+  app.use(`${API_PREFIX}/reports`, reportsRoutes);
+  app.use(`${API_PREFIX}/chat`, chatRoutes);
+  app.use(`${API_PREFIX}/support`, supportRoutes);
 
   // 404 Route Handler
   app.use((_req: Request, res: Response) => {

@@ -6,6 +6,7 @@ import {
   AdminSetUserPasswordCommand,
   AdminCreateUserCommand,
   AdminUpdateUserAttributesCommand,
+  AdminDeleteUserCommand,
   ListUsersCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
@@ -62,26 +63,17 @@ export interface CognitoAuthTokens {
 // Feature Flag: Set to true to force simulated local developer tokens
 export const ENABLE_LOCAL_DEV_AUTH_FALLBACK = false;
 
-function shouldFallback(error: any): boolean {
-  const isTestRunner =
-    process.env.NODE_ENV === 'test' ||
-    process.env.npm_lifecycle_event === 'test' ||
-    process.env.npm_lifecycle_script?.includes('test') ||
-    process.env.npm_lifecycle_event === 'test:backend';
-
-  const isEmailLimit =
-    error.name === 'LimitExceededException' ||
-    error.name === 'TooManyRequestsException' ||
-    Boolean(error.message && (
-      error.message.includes('daily email limit') ||
-      error.message.includes('email limit') ||
-      error.message.includes('Amazon SES')
-    ));
-
+/**
+ * True only for test runs or an unconfigured placeholder Cognito pool. Unsigned `dev_` tokens
+ * and simulated Cognito results are allowed solely in this mode — never against a live pool,
+ * because anyone can mint a `dev_` token for any email.
+ */
+export function isLocalAuthFallbackEnabled(): boolean {
   return (
     ENABLE_LOCAL_DEV_AUTH_FALLBACK ||
-    isTestRunner ||
-    isEmailLimit ||
+    process.env.NODE_ENV === 'test' ||
+    process.env.npm_lifecycle_event === 'test' ||
+    process.env.npm_lifecycle_event === 'test:backend' ||
     env.COGNITO_USER_POOL_ID.includes('examplepool') ||
     env.COGNITO_CLIENT_ID.includes('exampleclientid')
   );
@@ -225,7 +217,7 @@ export async function cognitoSignUp(params: {
       return { userSub: username, userConfirmed: true };
     }
 
-    if (shouldFallback(lastAdminErr)) {
+    if (isLocalAuthFallbackEnabled()) {
       log.warn(`Cognito signup falling back for test environment: ${lastAdminErr.message}`);
       return { userSub: `sub_test_${Date.now()}`, userConfirmed: true };
     }
@@ -309,15 +301,7 @@ export async function cognitoAdminCreateUser(params: {
   } catch (error: any) {
     // Never pretend Cognito succeeded for live pools — that leaves "Not Activated"
     // employees who cannot log in because no real Cognito user exists.
-    const allowFakeSub =
-      ENABLE_LOCAL_DEV_AUTH_FALLBACK ||
-      process.env.NODE_ENV === 'test' ||
-      process.env.npm_lifecycle_event === 'test' ||
-      process.env.npm_lifecycle_event === 'test:backend' ||
-      env.COGNITO_USER_POOL_ID.includes('examplepool') ||
-      env.COGNITO_CLIENT_ID.includes('exampleclientid');
-
-    if (allowFakeSub) {
+    if (isLocalAuthFallbackEnabled()) {
       return { userSub: `sub_dev_${Date.now()}` };
     }
     throw error;
@@ -343,6 +327,43 @@ export async function cognitoFindUserSubByEmail(email: string): Promise<string |
     log.warn(`Could not look up Cognito user for ${username}`, err);
     return null;
   }
+}
+
+/**
+ * Permanently removes every Cognito user registered under this email.
+ * Returns false (instead of throwing) when Cognito is unreachable, so callers can
+ * treat identity cleanup as best-effort after the database delete has committed.
+ */
+export async function cognitoAdminDeleteUserByEmail(email: string): Promise<boolean> {
+  const username = email.trim().toLowerCase();
+  const usernames = new Set<string>([username]);
+
+  try {
+    const listRes = await cognitoClient.send(
+      new ListUsersCommand({
+        UserPoolId: env.COGNITO_USER_POOL_ID,
+        Filter: `email = "${username.replace(/"/g, '')}"`,
+      })
+    );
+    for (const u of listRes.Users || []) {
+      if (u.Username) usernames.add(u.Username);
+    }
+  } catch (_) {}
+
+  let ok = true;
+  for (const target of usernames) {
+    try {
+      await cognitoClient.send(
+        new AdminDeleteUserCommand({ UserPoolId: env.COGNITO_USER_POOL_ID, Username: target })
+      );
+      log.cognito('AdminDeleteUser', { username: target, status: 'SUCCESS' });
+    } catch (err: any) {
+      if (err?.name === 'UserNotFoundException' || isLocalAuthFallbackEnabled()) continue;
+      ok = false;
+      log.cognito('AdminDeleteUser', { username: target, status: 'FAILED', error: err });
+    }
+  }
+  return ok;
 }
 
 /**
@@ -480,7 +501,7 @@ export async function cognitoLogin(params: {
       error,
     });
 
-    if (shouldFallback(error)) {
+    if (isLocalAuthFallbackEnabled()) {
       console.warn('⚠️ Cognito InitiateAuthCommand fallback for mock/test credentials:', error.message);
       return {
         idToken: `dev_token_id_${Buffer.from(JSON.stringify({ email, sub: `dev_sub_${email}` })).toString('base64')}`,
@@ -546,7 +567,7 @@ export async function cognitoRefreshToken(refreshToken: string, username?: strin
       status: 'FAILED',
       error,
     });
-    if (shouldFallback(error)) {
+    if (isLocalAuthFallbackEnabled()) {
       console.warn('⚠️ Cognito Token Refresh fallback for mock/test credentials:', error.message);
       return {
         idToken: `dev_token_id_refreshed_${Date.now()}`,
@@ -563,17 +584,13 @@ export async function cognitoRefreshToken(refreshToken: string, username?: strin
  * Validates token signature and expiration via aws-jwt-verify against Cognito User Pool.
  */
 export async function verifyCognitoToken(token: string): Promise<CognitoTokenPayload> {
-  const isDevOrTest =
-    ENABLE_LOCAL_DEV_AUTH_FALLBACK ||
-    process.env.NODE_ENV === 'test' ||
-    process.env.npm_lifecycle_event === 'test' ||
-    process.env.npm_lifecycle_event === 'test:backend' ||
-    env.COGNITO_USER_POOL_ID.includes('examplepool') ||
-    env.COGNITO_CLIENT_ID.includes('exampleclientid') ||
-    token.startsWith('dev_token_') ||
-    token.startsWith('dev_');
+  const isDevOrTest = isLocalAuthFallbackEnabled();
 
-  if (token.startsWith('dev_token_') || token.startsWith('dev_')) {
+  if (token.startsWith('dev_')) {
+    if (!isDevOrTest) {
+      log.warn('Rejected unsigned dev_ token: local auth fallback is disabled');
+      throw new Error('Unsigned development tokens are not accepted by this environment.');
+    }
     try {
       const parts = token.split('_');
       const b64 = parts[parts.length - 1];
@@ -671,7 +688,7 @@ export async function cognitoAdminSetUserPassword(params: {
         status: 'FAILED',
         error,
       });
-      if (shouldFallback(error)) return;
+      if (isLocalAuthFallbackEnabled()) return;
     }
   }
 }

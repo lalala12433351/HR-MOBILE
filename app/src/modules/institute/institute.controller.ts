@@ -1,5 +1,11 @@
 import { Request, Response } from 'express';
 import { hashPassword } from '../../utils/crypto.js';
+import {
+  calculateDistanceMeters,
+  isGeofenceRequired,
+  loadAttendancePolicy,
+  selfieLooksPresent,
+} from '../attendance/attendancePolicy.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -859,7 +865,18 @@ export async function getStudentAttendance(req: Request, res: Response): Promise
 
 export async function recordStudentAttendance(req: Request, res: Response): Promise<void> {
   try {
-    let { studentId, batchId, attendanceDate, status = 'Present', checkInTime, checkOutTime, remarks } = req.body;
+    let {
+      studentId,
+      batchId,
+      attendanceDate,
+      status = 'Present',
+      checkInTime,
+      checkOutTime,
+      remarks,
+      latitude,
+      longitude,
+      selfiePhoto,
+    } = req.body;
 
     // Students may only mark their own attendance
     if (req.user && req.user.role === 'student') {
@@ -893,6 +910,58 @@ export async function recordStudentAttendance(req: Request, res: Response): Prom
       studentUuid = sRes.rows[0].id;
     }
 
+    const policy = await loadAttendancePolicy(req);
+    const isCheckOut = Boolean(checkOutTime) && !checkInTime;
+    const selfieRequired = isCheckOut ? policy.requireSelfieCheckOut : policy.requireSelfieCheckIn;
+    if (selfieRequired && !selfieLooksPresent(selfiePhoto) && req.user?.role === 'student') {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'SELFIE_REQUIRED',
+          message: isCheckOut
+            ? 'A check-out selfie is required by attendance policy.'
+            : 'A check-in selfie is required by attendance policy.',
+        },
+      });
+      return;
+    }
+
+    const officeRes = await req.tenantQuery!(
+      `SELECT * FROM offices WHERE is_active = true ORDER BY created_at ASC NULLS LAST LIMIT 1`
+    );
+    const office = officeRes.rows[0] || null;
+    if (isGeofenceRequired(policy, office, false) && req.user?.role === 'student') {
+      const latNum = Number(latitude);
+      const lngNum = Number(longitude);
+      const officeLat = Number(office?.latitude);
+      const officeLng = Number(office?.longitude);
+      if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+        res.status(400).json({
+          success: false,
+          error: { code: 'LOCATION_REQUIRED', message: 'Campus GPS coordinates are required to mark attendance.' },
+        });
+        return;
+      }
+      if (Number.isFinite(officeLat) && Number.isFinite(officeLng)) {
+        const radius = Number(office.geofence_radius_meters) || policy.geofenceRadiusMeters || 150;
+        const distance = calculateDistanceMeters(latNum, lngNum, officeLat, officeLng);
+        if (distance > radius && policy.outOfRadiusAction === 'Block') {
+          res.status(403).json({
+            success: false,
+            error: {
+              code: 'GEOFENCE_VIOLATION',
+              message: `Attendance blocked: you are ${distance}m from campus (limit ${radius}m).`,
+            },
+          });
+          return;
+        }
+      }
+    }
+
+    const remarksValue = selfieLooksPresent(selfiePhoto)
+      ? `${remarks || ''} [selfie]`.trim()
+      : remarks || null;
+
     const result = await req.tenantQuery!(
       `INSERT INTO student_attendance (
         student_id, batch_id, attendance_date, status, check_in_time, check_out_time, remarks
@@ -906,7 +975,7 @@ export async function recordStudentAttendance(req: Request, res: Response): Prom
         remarks = COALESCE(EXCLUDED.remarks, student_attendance.remarks),
         batch_id = COALESCE(EXCLUDED.batch_id, student_attendance.batch_id)
       RETURNING *`,
-      [studentUuid, batchId || null, attendanceDate, status, checkInTime || null, checkOutTime || null, remarks || null]
+      [studentUuid, batchId || null, attendanceDate, status, checkInTime || null, checkOutTime || null, remarksValue]
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });

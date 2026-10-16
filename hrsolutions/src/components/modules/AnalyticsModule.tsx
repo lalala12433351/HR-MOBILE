@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { downloadBlob } from '@/lib/native';
 import { AppState } from '@/services/store';
 import {
   BarChart3,
@@ -117,14 +116,14 @@ export const AnalyticsModule: React.FC<AnalyticsModuleProps> = ({ state }) => {
         <button
           type="button"
           onClick={handleExportCSV}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--text-primary)] text-xs font-bold rounded-xl transition-[transform,background-color] duration-150 active:scale-[0.97] shadow-sm self-start md:self-auto cursor-pointer"
+          className="flex items-center gap-2 px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--text-primary)] text-xs font-bold rounded-lg transition-[transform,background-color] duration-150 active:scale-[0.97] shadow-sm self-start md:self-auto cursor-pointer"
         >
           <Download className="h-4 w-4 text-[var(--primary-blue)]" /> Export Report (CSV)
         </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm">
+        <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">Active Departments</span>
             <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
@@ -135,7 +134,7 @@ export const AnalyticsModule: React.FC<AnalyticsModuleProps> = ({ state }) => {
           <p className="text-[11px] text-emerald-600 mt-1 font-semibold">Configured business units</p>
         </div>
 
-        <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm">
+        <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Active Projects</span>
             <div className="p-2 bg-blue-50 text-[var(--primary-blue)] rounded-lg">
@@ -146,7 +145,7 @@ export const AnalyticsModule: React.FC<AnalyticsModuleProps> = ({ state }) => {
           <p className="text-[11px] text-[var(--text-muted)] mt-1 font-medium">Enterprise workspace projects</p>
         </div>
 
-        <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm">
+        <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Task Completion Velocity</span>
             <div className="p-2 bg-sky-50 text-sky-600 rounded-lg">
@@ -159,7 +158,7 @@ export const AnalyticsModule: React.FC<AnalyticsModuleProps> = ({ state }) => {
           </p>
         </div>
 
-        <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm">
+        <div className="p-5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Headcount Strength</span>
             <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
@@ -172,7 +171,7 @@ export const AnalyticsModule: React.FC<AnalyticsModuleProps> = ({ state }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm space-y-4">
+        <div className="lg:col-span-2 p-6 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm space-y-4">
           <div>
             <h3 className="text-sm font-bold text-[var(--text-primary)]">Project Budget & Operating Cost Trajectory</h3>
             <p className="text-[11px] text-[var(--text-muted)]">Monthly billing vs payroll expenditures in INR (₹)</p>
@@ -229,7 +228,7 @@ export const AnalyticsModule: React.FC<AnalyticsModuleProps> = ({ state }) => {
           </div>
         </div>
 
-        <div className="p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm space-y-4 flex flex-col justify-between">
+        <div className="p-6 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] shadow-sm space-y-4 flex flex-col justify-between">
           <div>
             <h3 className="text-sm font-bold text-[var(--text-primary)]">Department Headcount Share</h3>
             <p className="text-[11px] text-[var(--text-muted)]">Current workforce distribution across departments</p>

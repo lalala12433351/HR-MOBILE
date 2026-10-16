@@ -1,0 +1,35 @@
+name: Notify Mobile Repo Sync
+
+# On push to main, tell HR-Solutions-Moblie to open a sync PR.
+#
+# Required secret (this repo):
+#   MOBILE_REPO_TOKEN — PAT with access to iPrq/HR-Solutions-Moblie
+#                       (needs permission to create repository_dispatch;
+#                        classic PAT: `repo` scope on that repo)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: notify-mobile-sync
+  cancel-in-progress: true
+
+jobs:
+  notify:
+    name: Dispatch sync to HR-Solutions-Moblie
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send repository_dispatch
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.MOBILE_REPO_TOKEN }}
+          repository: iPrq/HR-Solutions-Moblie
+          event-type: hr-solutions-sync
+          client-payload: |
+            {
+              "ref": "${{ github.ref_name }}",
+              "sha": "${{ github.sha }}",
+              "repo": "${{ github.repository }}"
+            }

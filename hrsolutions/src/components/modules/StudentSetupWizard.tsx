@@ -702,12 +702,12 @@ export const StudentSetupWizard: React.FC = () => {
   const activeSchedule = getActiveSchedule();
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col justify-start items-center px-4 py-8 sm:px-6 md:px-8 font-sans">
+    <div className="min-h-screen bg-[#f8fafc] text-[var(--text-primary)] flex flex-col justify-start items-center px-4 py-8 sm:px-6 md:px-8 font-sans">
       <div className="max-w-4xl w-full space-y-6">
         {/* Executive Header conforming strictly to DESIGN.md */}
-        <div className="bg-white rounded-2xl border border-[#e2e8f0] p-5 shadow-[0_1px_3px_0_rgba(15,23,42,0.05)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="bg-[var(--bg-surface)] rounded-lg border border-[#e2e8f0] p-5 shadow-[0_1px_3px_0_rgba(15,23,42,0.05)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-[#2563eb] text-white flex items-center justify-center shadow-md shadow-blue-500/20 shrink-0">
+            <div className="w-12 h-12 rounded-lg bg-[#2563eb] text-white flex items-center justify-center shadow-md shadow-blue-500/20 shrink-0">
               <GraduationCap className="w-6 h-6 stroke-[2.2]" />
             </div>
             <div>
@@ -720,7 +720,7 @@ export const StudentSetupWizard: React.FC = () => {
                 </span>
               </div>
               <p className="text-xs text-[#64748b] font-medium mt-0.5">
-                Configuring workspace & student roster for <span className="font-semibold text-slate-800">{orgName}</span>
+                Configuring workspace & student roster for <span className="font-semibold text-[var(--text-primary)]">{orgName}</span>
               </p>
             </div>
           </div>
@@ -728,7 +728,7 @@ export const StudentSetupWizard: React.FC = () => {
           <button
             type="button"
             onClick={() => router.push('/student-directory')}
-            className="px-3.5 py-2 rounded-xl border border-[#e2e8f0] bg-white hover:bg-[#eff6ff] hover:border-[#bfdbfe] text-[#64748b] hover:text-[#2563eb] text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 self-start sm:self-auto shrink-0"
+            className="px-3.5 py-2 rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] hover:bg-[#eff6ff] hover:border-[#bfdbfe] text-[#64748b] hover:text-[#2563eb] text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 self-start sm:self-auto shrink-0"
           >
             <span>Skip to Directory</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -736,7 +736,7 @@ export const StudentSetupWizard: React.FC = () => {
         </div>
 
         {/* Elevated Rhythmic Stepper Progress Bar (DESIGN.md Stepper) */}
-        <div className="bg-white rounded-2xl border border-[#e2e8f0] p-4 sm:p-5 shadow-[0_1px_3px_0_rgba(15,23,42,0.05)]">
+        <div className="bg-[var(--bg-surface)] rounded-lg border border-[#e2e8f0] p-4 sm:p-5 shadow-[0_1px_3px_0_rgba(15,23,42,0.05)]">
           {/* Mobile Stepper Header */}
           <div className="block sm:hidden space-y-2">
             <div className="flex items-center justify-between">
@@ -791,7 +791,7 @@ export const StudentSetupWizard: React.FC = () => {
                     }`}
                   >
                     <div
-                      className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-all shadow-xs ${
+                      className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs transition-all  ${
                         isDone
                           ? 'bg-[#2563eb] text-white ring-2 ring-blue-500'
                           : isCurrent
@@ -831,7 +831,7 @@ export const StudentSetupWizard: React.FC = () => {
         </div>
 
         {/* Main Content Card */}
-        <div className="bg-white rounded-2xl sm:rounded-3xl border border-[#e2e8f0] p-5 sm:p-7 md:p-8 space-y-6 shadow-[0_1px_3px_0_rgba(15,23,42,0.05)]">
+        <div className="bg-[var(--bg-surface)] rounded-lg sm:rounded-3xl border border-[#e2e8f0] p-5 sm:p-7 md:p-8 space-y-6 shadow-[0_1px_3px_0_rgba(15,23,42,0.05)]">
           {/* STEP 1: Academic Batches */}
           {currentStep === 1 && (
             <div className="space-y-6 animate-fade-in">
@@ -848,11 +848,11 @@ export const StudentSetupWizard: React.FC = () => {
 
                 {/* Quick Add Presets Ribbon */}
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] text-slate-500 font-semibold mr-1 hidden lg:inline">Quick Presets:</span>
+                  <span className="text-[11px] text-[var(--text-muted)] font-semibold mr-1 hidden lg:inline">Quick Presets:</span>
                   <button
                     type="button"
                     onClick={() => addQuickPresetBatches('primary')}
-                    className="px-2.5 py-1.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] hover:bg-[#eff6ff] hover:border-[#bfdbfe] text-xs font-semibold text-slate-700 hover:text-[#2563eb] transition-colors cursor-pointer flex items-center gap-1"
+                    className="px-2.5 py-1.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] hover:bg-[#eff6ff] hover:border-[#bfdbfe] text-xs font-semibold text-[var(--text-secondary)] hover:text-[#2563eb] transition-colors cursor-pointer flex items-center gap-1"
                   >
                     <Plus className="w-3 h-3 text-[#2563eb]" />
                     <span>Primary (1-5)</span>
@@ -860,7 +860,7 @@ export const StudentSetupWizard: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => addQuickPresetBatches('middle')}
-                    className="px-2.5 py-1.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] hover:bg-[#eff6ff] hover:border-[#bfdbfe] text-xs font-semibold text-slate-700 hover:text-[#2563eb] transition-colors cursor-pointer flex items-center gap-1"
+                    className="px-2.5 py-1.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] hover:bg-[#eff6ff] hover:border-[#bfdbfe] text-xs font-semibold text-[var(--text-secondary)] hover:text-[#2563eb] transition-colors cursor-pointer flex items-center gap-1"
                   >
                     <Plus className="w-3 h-3 text-[#2563eb]" />
                     <span>Middle (6-8)</span>
@@ -868,7 +868,7 @@ export const StudentSetupWizard: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => addQuickPresetBatches('highschool')}
-                    className="px-2.5 py-1.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] hover:bg-[#eff6ff] hover:border-[#bfdbfe] text-xs font-semibold text-slate-700 hover:text-[#2563eb] transition-colors cursor-pointer flex items-center gap-1"
+                    className="px-2.5 py-1.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] hover:bg-[#eff6ff] hover:border-[#bfdbfe] text-xs font-semibold text-[var(--text-secondary)] hover:text-[#2563eb] transition-colors cursor-pointer flex items-center gap-1"
                   >
                     <Plus className="w-3 h-3 text-[#2563eb]" />
                     <span>High School (9-12)</span>
@@ -877,60 +877,60 @@ export const StudentSetupWizard: React.FC = () => {
               </div>
 
               {/* Input Form Row */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-[#f8fafc] border border-[#e2e8f0] space-y-4">
+              <div className="p-4 sm:p-5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Academic Year</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Academic Year</label>
                     <input
                       type="text"
                       value={academicYear}
                       onChange={(e) => setAcademicYear(e.target.value)}
                       placeholder="2026-2027"
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-semibold text-[#0f172a] placeholder:text-slate-400 outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-semibold text-[#0f172a] placeholder:text-[var(--text-muted)] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
 
                   <div className="space-y-1 sm:col-span-1 lg:col-span-2">
-                    <label className="block text-[11px] font-semibold text-slate-700">Grade / Class Name *</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Grade / Class Name *</label>
                     <input
                       type="text"
                       placeholder="e.g. Grade 9, Grade 10"
                       value={newGradeInput}
                       onChange={(e) => setNewGradeInput(e.target.value)}
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-slate-400 outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-[var(--text-muted)] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">
-                      Section <span className="text-slate-400 font-normal">(Optional)</span>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">
+                      Section <span className="text-[var(--text-muted)] font-normal">(Optional)</span>
                     </label>
                     <input
                       type="text"
                       placeholder="e.g. A"
                       value={newSectionInput}
                       onChange={(e) => setNewSectionInput(e.target.value)}
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-slate-400 outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-[var(--text-muted)] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Start Bell</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Start Bell</label>
                     <input
                       type="time"
                       value={newBatchStart}
                       onChange={(e) => setNewBatchStart(e.target.value)}
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3 py-2.5 text-xs font-semibold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3 py-2.5 text-xs font-semibold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Dismissal</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Dismissal</label>
                     <input
                       type="time"
                       value={newBatchEnd}
                       onChange={(e) => setNewBatchEnd(e.target.value)}
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3 py-2.5 text-xs font-semibold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3 py-2.5 text-xs font-semibold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
                 </div>
@@ -939,7 +939,7 @@ export const StudentSetupWizard: React.FC = () => {
                   <button
                     type="button"
                     onClick={addBatch}
-                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] active:scale-[0.99] text-white text-xs font-bold transition-all cursor-pointer shadow-sm shadow-blue-500/20 flex items-center justify-center gap-1.5"
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] active:scale-[0.99] text-white text-xs font-bold transition-all cursor-pointer shadow-sm shadow-blue-500/20 flex items-center justify-center gap-1.5"
                     style={{ color: '#ffffff' }}
                   >
                     <Plus className="w-4 h-4 stroke-[2.5]" />
@@ -949,7 +949,7 @@ export const StudentSetupWizard: React.FC = () => {
               </div>
 
               {/* Batches Table adhering to DESIGN.md */}
-              <div className="rounded-2xl border border-[#e2e8f0] bg-white overflow-hidden text-xs shadow-xs">
+              <div className="rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] overflow-hidden text-xs ">
                 <table className="w-full text-left border-collapse">
                   <thead className="bg-[#f8fafc] text-[#64748b] uppercase font-bold text-[10px] border-b border-[#e2e8f0]">
                     <tr>
@@ -959,11 +959,11 @@ export const StudentSetupWizard: React.FC = () => {
                       <th className="p-3.5 text-right pr-4">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-800 font-medium">
+                  <tbody className="divide-y divide-[var(--border-color)] text-[var(--text-primary)] font-medium">
                     {batches.length === 0 ? (
                       <tr>
                         <td colSpan={4} className="p-8 text-center text-[#64748b]">
-                          <p className="font-semibold text-slate-700 text-sm">No grades or batches configured yet</p>
+                          <p className="font-semibold text-[var(--text-secondary)] text-sm">No grades or batches configured yet</p>
                           <p className="text-xs text-[#64748b] mt-1">
                             Enter grade details above or use quick preset buttons to populate.
                           </p>
@@ -980,10 +980,10 @@ export const StudentSetupWizard: React.FC = () => {
                               </span>
                             )}
                           </td>
-                          <td className="p-3.5 font-mono text-slate-700">
+                          <td className="p-3.5 font-mono text-[var(--text-secondary)]">
                             {b.startTime || '08:30'} – {b.endTime || '15:30'}
                           </td>
-                          <td className="p-3.5 text-slate-600 text-[11px]">
+                          <td className="p-3.5 text-[var(--text-secondary)] text-[11px]">
                             {(b.workingDays || selectedDays).length} Days ({(b.workingDays || selectedDays).map(d => d.slice(0,3)).join(', ')})
                           </td>
                           <td className="p-3.5 text-right pr-4">
@@ -1003,7 +1003,7 @@ export const StudentSetupWizard: React.FC = () => {
               </div>
 
               {/* Recessed Summary Ribbon per DESIGN.md */}
-              <div className="p-4 rounded-xl bg-[#eff6ff] border border-[#dbeafe] text-xs text-[#1e3a8a] flex items-center justify-between">
+              <div className="p-4 rounded-lg bg-[#eff6ff] border border-[#dbeafe] text-xs text-[#1e3a8a] flex items-center justify-between">
                 <span className="font-semibold">
                   Configured Batches Count: <strong className="text-[#2563eb] font-bold text-sm ml-1">{batches.length}</strong>
                 </span>
@@ -1029,7 +1029,7 @@ export const StudentSetupWizard: React.FC = () => {
                 <button
                   type="button"
                   onClick={populateSampleStudents}
-                  className="px-3 py-1.5 rounded-xl border border-blue-200 bg-[#eff6ff] hover:bg-blue-100 text-[#2563eb] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
+                  className="px-3 py-1.5 rounded-lg border border-blue-200 bg-[#eff6ff] hover:bg-blue-100 text-[#2563eb] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-[#2563eb]" />
                   <span>Auto-Fill Sample Roster</span>
@@ -1037,39 +1037,39 @@ export const StudentSetupWizard: React.FC = () => {
               </div>
 
               {/* Add Student Form */}
-              <form onSubmit={addStudent} className="p-4 sm:p-5 rounded-2xl bg-[#f8fafc] border border-[#e2e8f0] space-y-4">
+              <form onSubmit={addStudent} className="p-4 sm:p-5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Full Name *</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Full Name *</label>
                     <input
                       type="text"
                       required
                       placeholder="e.g. Aarav Sharma"
                       value={studentName}
                       onChange={(e) => setStudentName(e.target.value.replace(/[^a-zA-Z\s.'-]/g, ''))}
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-slate-400 outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-[var(--text-muted)] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Roll / Student ID *</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Roll / Student ID *</label>
                     <input
                       type="text"
                       required
                       placeholder="e.g. 10A-01 or STU-1001"
                       value={rollNumber}
                       onChange={(e) => setRollNumber(e.target.value.replace(/[^a-zA-Z0-9_\-\/]/g, ''))}
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-mono font-bold text-[#0f172a] placeholder:text-slate-400 outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-mono font-bold text-[#0f172a] placeholder:text-[var(--text-muted)] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Assigned Batch / Grade</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Assigned Batch / Grade</label>
                     {batches.length > 0 ? (
                       <select
                         value={selectedBatchId}
                         onChange={(e) => setSelectedBatchId(e.target.value)}
-                        className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-semibold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                        className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-semibold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                       >
                         <option value="">Select Batch (or Custom)</option>
                         {batches.map((b) => (
@@ -1085,50 +1085,50 @@ export const StudentSetupWizard: React.FC = () => {
                           placeholder="Grade e.g. Class 10"
                           value={customStudentGrade}
                           onChange={(e) => setCustomStudentGrade(e.target.value)}
-                          className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3 py-2.5 text-xs text-[#0f172a] outline-none focus:border-[#2563eb]"
+                          className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3 py-2.5 text-xs text-[#0f172a] outline-none focus:border-[#2563eb]"
                         />
                         <input
                           type="text"
                           placeholder="Sec (A)"
                           value={customStudentSection}
                           onChange={(e) => setCustomStudentSection(e.target.value)}
-                          className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3 py-2.5 text-xs text-[#0f172a] outline-none focus:border-[#2563eb]"
+                          className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3 py-2.5 text-xs text-[#0f172a] outline-none focus:border-[#2563eb]"
                         />
                       </div>
                     )}
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Email Address (Optional)</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Email Address (Optional)</label>
                     <input
                       type="email"
                       placeholder="student@school.edu"
                       value={studentEmail}
                       onChange={(e) => setStudentEmail(e.target.value)}
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-slate-400 outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-[var(--text-muted)] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Guardian Name</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Guardian Name</label>
                     <input
                       type="text"
                       placeholder="e.g. Parent Name"
                       value={guardianName}
                       onChange={(e) => setGuardianName(e.target.value.replace(/[^a-zA-Z\s.'-]/g, ''))}
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-slate-400 outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-[var(--text-muted)] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-semibold text-slate-700">Guardian Phone</label>
+                    <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Guardian Phone</label>
                     <input
                       type="tel"
                       maxLength={10}
                       placeholder="9876543210 (10 digits)"
                       value={guardianPhone}
                       onChange={(e) => setGuardianPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-slate-400 outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                      className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-medium text-[#0f172a] placeholder:text-[var(--text-muted)] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                     />
                   </div>
                 </div>
@@ -1136,7 +1136,7 @@ export const StudentSetupWizard: React.FC = () => {
                 <div className="flex justify-end pt-1">
                   <button
                     type="submit"
-                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] active:scale-[0.99] text-white text-xs font-bold transition-all cursor-pointer shadow-sm shadow-blue-500/20 flex items-center justify-center gap-1.5"
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] active:scale-[0.99] text-white text-xs font-bold transition-all cursor-pointer shadow-sm shadow-blue-500/20 flex items-center justify-center gap-1.5"
                     style={{ color: '#ffffff' }}
                   >
                     <Plus className="w-4 h-4 stroke-[2.5]" />
@@ -1146,7 +1146,7 @@ export const StudentSetupWizard: React.FC = () => {
               </form>
 
               {/* Students Table */}
-              <div className="rounded-2xl border border-[#e2e8f0] bg-white overflow-hidden text-xs shadow-xs max-h-[340px] overflow-y-auto custom-scrollbar">
+              <div className="rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] overflow-hidden text-xs  max-h-[340px] overflow-y-auto custom-scrollbar">
                 <table className="w-full text-left border-collapse">
                   <thead className="bg-[#f8fafc] text-[#64748b] uppercase font-bold text-[10px] border-b border-[#e2e8f0] sticky top-0 z-10">
                     <tr>
@@ -1157,11 +1157,11 @@ export const StudentSetupWizard: React.FC = () => {
                       <th className="p-3.5 text-right pr-4">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-800 font-medium">
+                  <tbody className="divide-y divide-[var(--border-color)] text-[var(--text-primary)] font-medium">
                     {students.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="p-8 text-center text-[#64748b]">
-                          <p className="font-semibold text-slate-700 text-sm">No students enrolled yet</p>
+                          <p className="font-semibold text-[var(--text-secondary)] text-sm">No students enrolled yet</p>
                           <p className="text-xs text-[#64748b] mt-1">
                             Fill in student details above or click &ldquo;Auto-Fill Sample Roster&rdquo; for instant setup.
                           </p>
@@ -1189,7 +1189,7 @@ export const StudentSetupWizard: React.FC = () => {
                               {s.grade}
                             </span>
                           </td>
-                          <td className="p-3.5 text-slate-600 font-mono text-[11px]">
+                          <td className="p-3.5 text-[var(--text-secondary)] font-mono text-[11px]">
                             {s.guardianName} ({s.guardianPhone || '—'})
                           </td>
                           <td className="p-3.5 text-right pr-4">
@@ -1209,7 +1209,7 @@ export const StudentSetupWizard: React.FC = () => {
               </div>
 
               {/* Recessed Summary Ribbon per DESIGN.md */}
-              <div className="p-4 rounded-xl bg-[#eff6ff] border border-[#dbeafe] text-xs text-[#1e3a8a] flex items-center justify-between">
+              <div className="p-4 rounded-lg bg-[#eff6ff] border border-[#dbeafe] text-xs text-[#1e3a8a] flex items-center justify-between">
                 <span className="font-semibold">
                   Enrolled Students Count: <strong className="text-[#2563eb] font-bold text-sm ml-1">{students.length}</strong>
                 </span>
@@ -1235,7 +1235,7 @@ export const StudentSetupWizard: React.FC = () => {
               {batches.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-[var(--text-secondary)] flex items-center gap-1.5">
                       <Sliders className="w-3.5 h-3.5 text-[#2563eb]" />
                       <span>Select Scope to Configure</span>
                     </span>
@@ -1249,7 +1249,7 @@ export const StudentSetupWizard: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setSelectedScheduleScope('all')}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-2 ${
+                      className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-2 ${
                         selectedScheduleScope === 'all'
                           ? 'bg-[#2563eb] text-white shadow-sm shadow-blue-500/25'
                           : 'bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0]'
@@ -1274,7 +1274,7 @@ export const StudentSetupWizard: React.FC = () => {
                           key={b.id}
                           type="button"
                           onClick={() => setSelectedScheduleScope(b.id)}
-                          className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-2 ${
+                          className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-2 ${
                             isSelected
                               ? 'bg-[#2563eb] text-white shadow-sm shadow-blue-500/25'
                               : 'bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0]'
@@ -1305,9 +1305,9 @@ export const StudentSetupWizard: React.FC = () => {
 
               {/* Active Scope Status Ribbon */}
               {selectedScheduleScope !== 'all' && activeSchedule.batch && (
-                <div className="p-3.5 rounded-xl bg-[#f8fafc] border border-[#e2e8f0] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                <div className="p-3.5 rounded-lg bg-[#f8fafc] border border-[#e2e8f0] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-700">
+                    <span className="text-[var(--text-secondary)]">
                       Configuring custom schedule for{' '}
                       <strong className="text-[#0f172a] font-bold">
                         {activeSchedule.batch.grade}{' '}
@@ -1320,7 +1320,7 @@ export const StudentSetupWizard: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => resetBatchToCampusDefault(activeSchedule.batch!.id)}
-                      className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-white hover:bg-slate-100 text-[#475569] text-[11px] font-semibold cursor-pointer transition-colors flex items-center gap-1"
+                      className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[#475569] text-[11px] font-semibold cursor-pointer transition-colors flex items-center gap-1"
                     >
                       <RotateCcw className="w-3 h-3" />
                       <span>Reset to Campus Default</span>
@@ -1340,35 +1340,35 @@ export const StudentSetupWizard: React.FC = () => {
 
               {/* Time Inputs Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                <div className="p-4.5 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] space-y-2">
+                <div className="p-4.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800 block">Morning Entry Bell</span>
+                    <span className="text-xs font-bold text-[var(--text-primary)] block">Morning Entry Bell</span>
                     <Clock className="w-4 h-4 text-[#2563eb]" />
                   </div>
                   <input
                     type="time"
                     value={activeSchedule.startTime}
                     onChange={(e) => updateActiveSchedule({ startTime: e.target.value })}
-                    className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-mono font-bold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                    className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-mono font-bold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                   />
                 </div>
 
-                <div className="p-4.5 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] space-y-2">
+                <div className="p-4.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800 block">Dismissal Time</span>
+                    <span className="text-xs font-bold text-[var(--text-primary)] block">Dismissal Time</span>
                     <Clock className="w-4 h-4 text-[#2563eb]" />
                   </div>
                   <input
                     type="time"
                     value={activeSchedule.endTime}
                     onChange={(e) => updateActiveSchedule({ endTime: e.target.value })}
-                    className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-mono font-bold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                    className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-mono font-bold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                   />
                 </div>
 
-                <div className="p-4.5 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] space-y-2">
+                <div className="p-4.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800 block">Late Grace Buffer (Mins)</span>
+                    <span className="text-xs font-bold text-[var(--text-primary)] block">Late Grace Buffer (Mins)</span>
                     <Sliders className="w-4 h-4 text-[#2563eb]" />
                   </div>
                   <input
@@ -1377,7 +1377,7 @@ export const StudentSetupWizard: React.FC = () => {
                     max={60}
                     value={activeSchedule.gracePeriodMins}
                     onChange={(e) => updateActiveSchedule({ gracePeriodMins: e.target.value })}
-                    className="w-full rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs font-mono font-bold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
+                    className="w-full rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-mono font-bold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-4 focus:ring-blue-600/10 transition-all"
                   />
                 </div>
               </div>
@@ -1402,7 +1402,7 @@ export const StudentSetupWizard: React.FC = () => {
                           workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
                         })
                       }
-                      className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#eff6ff] hover:text-[#2563eb] text-[#64748b] font-semibold cursor-pointer transition-colors"
+                      className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] hover:bg-[#eff6ff] hover:text-[#2563eb] text-[#64748b] font-semibold cursor-pointer transition-colors"
                     >
                       Mon – Fri (5 Days)
                     </button>
@@ -1420,7 +1420,7 @@ export const StudentSetupWizard: React.FC = () => {
                           ],
                         })
                       }
-                      className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#eff6ff] hover:text-[#2563eb] text-[#64748b] font-semibold cursor-pointer transition-colors"
+                      className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] hover:bg-[#eff6ff] hover:text-[#2563eb] text-[#64748b] font-semibold cursor-pointer transition-colors"
                     >
                       Mon – Sat (6 Days)
                     </button>
@@ -1439,7 +1439,7 @@ export const StudentSetupWizard: React.FC = () => {
                           ],
                         })
                       }
-                      className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#eff6ff] hover:text-[#2563eb] text-[#64748b] font-semibold cursor-pointer transition-colors"
+                      className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] hover:bg-[#eff6ff] hover:text-[#2563eb] text-[#64748b] font-semibold cursor-pointer transition-colors"
                     >
                       All 7 Days
                     </button>
@@ -1455,10 +1455,10 @@ export const StudentSetupWizard: React.FC = () => {
                         key={d.key}
                         type="button"
                         onClick={() => toggleDayForActiveSchedule(d.key)}
-                        className={`py-3 sm:py-3.5 px-1 rounded-2xl border text-center font-bold text-xs transition-all cursor-pointer active:scale-98 ${
+                        className={`py-3 sm:py-3.5 px-1 rounded-lg border text-center font-bold text-xs transition-all cursor-pointer active:scale-98 ${
                           isSelected
                             ? 'border-[#2563eb] bg-[#2563eb] text-white shadow-sm shadow-blue-500/25'
-                            : 'border-[#e2e8f0] bg-white text-[#64748b] hover:text-[#0f172a] hover:border-slate-300'
+                            : 'border-[#e2e8f0] bg-[var(--bg-surface)] text-[#64748b] hover:text-[#0f172a] hover:border-[var(--border-strong)]'
                         }`}
                         style={isSelected ? { color: '#ffffff' } : undefined}
                       >
@@ -1475,7 +1475,7 @@ export const StudentSetupWizard: React.FC = () => {
                   })}
                 </div>
 
-                <div className="p-4 rounded-xl bg-[#eff6ff] border border-[#dbeafe] text-xs text-[#1e3a8a] flex items-center justify-between">
+                <div className="p-4 rounded-lg bg-[#eff6ff] border border-[#dbeafe] text-xs text-[#1e3a8a] flex items-center justify-between">
                   <span>
                     Selected Schedule:{' '}
                     <strong className="text-[#2563eb] font-bold">
@@ -1507,7 +1507,7 @@ export const StudentSetupWizard: React.FC = () => {
                     </button>
                   </div>
 
-                  <div className="rounded-2xl border border-[#e2e8f0] bg-white overflow-hidden text-xs shadow-xs">
+                  <div className="rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] overflow-hidden text-xs ">
                     <table className="w-full text-left border-collapse">
                       <thead className="bg-[#f8fafc] text-[#64748b] uppercase font-bold text-[10px] border-b border-[#e2e8f0]">
                         <tr>
@@ -1519,7 +1519,7 @@ export const StudentSetupWizard: React.FC = () => {
                           <th className="p-3 text-right pr-4">Action</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-800 font-medium">
+                      <tbody className="divide-y divide-[var(--border-color)] text-[var(--text-primary)] font-medium">
                         {batches.map((b) => {
                           const bStart = b.startTime || startTime;
                           const bEnd = b.endTime || endTime;
@@ -1548,10 +1548,10 @@ export const StudentSetupWizard: React.FC = () => {
                                   </span>
                                 )}
                               </td>
-                              <td className="p-3 font-mono text-slate-700">
+                              <td className="p-3 font-mono text-[var(--text-secondary)]">
                                 {bStart} — {bEnd}
                               </td>
-                              <td className="p-3 text-slate-600 font-mono text-[11px]">
+                              <td className="p-3 text-[var(--text-secondary)] font-mono text-[11px]">
                                 {bGrace} mins
                               </td>
                               <td className="p-3 text-[#0f172a] text-[11px]">
@@ -1575,7 +1575,7 @@ export const StudentSetupWizard: React.FC = () => {
                                   className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
                                     isCurrentTab
                                       ? 'bg-[#2563eb] text-white'
-                                      : 'border border-[#e2e8f0] bg-white hover:bg-slate-100 text-[#2563eb]'
+                                      : 'border border-[#e2e8f0] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[#2563eb]'
                                   }`}
                                   style={isCurrentTab ? { color: '#ffffff' } : undefined}
                                 >
@@ -1608,19 +1608,19 @@ export const StudentSetupWizard: React.FC = () => {
 
               {/* 3 Executive Stat Cards per DESIGN.md */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-5 rounded-2xl bg-white border border-[#e2e8f0] shadow-xs space-y-1">
+                <div className="p-5 rounded-lg bg-[var(--bg-surface)] border border-[#e2e8f0]  space-y-1">
                   <p className="text-[#64748b] text-xs font-semibold">Enrolled Students</p>
                   <p className="text-3xl font-extrabold text-[#2563eb] tracking-tight">{students.length}</p>
                   <p className="text-[11px] text-[#64748b]">Roster accounts ready for login</p>
                 </div>
 
-                <div className="p-5 rounded-2xl bg-white border border-[#e2e8f0] shadow-xs space-y-1">
+                <div className="p-5 rounded-lg bg-[var(--bg-surface)] border border-[#e2e8f0]  space-y-1">
                   <p className="text-[#64748b] text-xs font-semibold">Academic Batches</p>
                   <p className="text-3xl font-extrabold text-[#0f172a] tracking-tight">{batches.length}</p>
                   <p className="text-[11px] text-[#64748b]">Grades & sections configured</p>
                 </div>
 
-                <div className="p-5 rounded-2xl bg-white border border-[#e2e8f0] shadow-xs space-y-1">
+                <div className="p-5 rounded-lg bg-[var(--bg-surface)] border border-[#e2e8f0]  space-y-1">
                   <p className="text-[#64748b] text-xs font-semibold">Campus Default Hours</p>
                   <p className="text-base font-bold text-[#0f172a] font-mono mt-1">{startTime} – {endTime}</p>
                   <p className="text-[11px] text-[#64748b]">
@@ -1651,7 +1651,7 @@ export const StudentSetupWizard: React.FC = () => {
                       return (
                         <div
                           key={b.id}
-                          className="p-4 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-between gap-3 text-xs shadow-2xs"
+                          className="p-4 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] flex items-center justify-between gap-3 text-xs shadow-2xs"
                         >
                           <div className="space-y-1">
                             <span className="font-bold text-[#0f172a] text-sm block">
@@ -1672,7 +1672,7 @@ export const StudentSetupWizard: React.FC = () => {
               )}
 
               {/* Recessed Confirmation Box */}
-              <div className="rounded-2xl border border-[#dbeafe] bg-[#eff6ff] p-5 text-xs text-[#1e3a8a] space-y-2 leading-relaxed shadow-xs">
+              <div className="rounded-lg border border-[#dbeafe] bg-[#eff6ff] p-5 text-xs text-[#1e3a8a] space-y-2 leading-relaxed ">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-[#2563eb]" />
                   <p className="font-bold text-[#0f172a] text-sm">Ready for Activation</p>
@@ -1690,7 +1690,7 @@ export const StudentSetupWizard: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setCurrentStep((prev) => (prev - 1) as any)}
-                className="px-5 py-2.5 rounded-xl border border-[#e2e8f0] bg-white hover:bg-[#f8fafc] text-[#475569] hover:text-[#0f172a] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                className="px-5 py-2.5 rounded-lg border border-[#e2e8f0] bg-[var(--bg-surface)] hover:bg-[#f8fafc] text-[#475569] hover:text-[#0f172a] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Back</span>
@@ -1703,7 +1703,7 @@ export const StudentSetupWizard: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setCurrentStep((prev) => (prev + 1) as any)}
-                className="px-6 py-2.5 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] active:scale-[0.99] text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-blue-500/25 flex items-center gap-1.5"
+                className="px-6 py-2.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] active:scale-[0.99] text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-blue-500/25 flex items-center gap-1.5"
                 style={{ color: '#ffffff' }}
               >
                 <span>Continue to Step {currentStep + 1}</span>
@@ -1714,7 +1714,7 @@ export const StudentSetupWizard: React.FC = () => {
                 type="button"
                 disabled={isCompleting}
                 onClick={handleFinishSetup}
-                className="px-7 py-3 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] active:scale-[0.99] text-white text-xs font-bold transition-all cursor-pointer shadow-lg shadow-blue-500/25 flex items-center gap-2 disabled:opacity-50"
+                className="px-7 py-3 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] active:scale-[0.99] text-white text-xs font-bold transition-all cursor-pointer shadow-lg shadow-blue-500/25 flex items-center gap-2 disabled:opacity-50"
                 style={{ color: '#ffffff' }}
               >
                 {isCompleting ? (

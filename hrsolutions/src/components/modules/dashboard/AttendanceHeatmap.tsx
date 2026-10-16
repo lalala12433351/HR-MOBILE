@@ -2,8 +2,8 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
+import { DashPanel } from './DashPanel';
 
 type TimeRangeOption = 'this_month' | 'last_month' | 'this_week' | 'this_quarter';
 
@@ -14,14 +14,11 @@ const timeRangeLabels: Record<TimeRangeOption, string> = {
   this_quarter: 'This Quarter',
 };
 
-export const AttendanceHeatmap: React.FC = () => {
-  const { state } = useApp();
+export const AttendanceHeatmap: React.FC<{ className?: string }> = ({ className = '' }) => {
   const [timeRange, setTimeRange] = useState<TimeRangeOption>('this_month');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const dashboardState = useDashboardContext();
-
-  const isDark = (state.customOptions?.featureToggles?.themeMode || 'light') === 'dark';
 
   const employees = dashboardState.employees || [];
   const attendance = dashboardState.attendance || [];
@@ -208,64 +205,60 @@ export const AttendanceHeatmap: React.FC = () => {
   }, [employees, filteredAttendance, weekdayOccurrences]);
 
   const getCellBadgeClass = (score: number) => {
-    if (score > 85) return 'bg-[#1e3a8a] text-white';
-    if (score >= 61) return 'bg-[#38bdf8] text-[#0f172a]';
-    if (score >= 25) return 'bg-[#e0f2fe] text-[#0284c7]';
-    return 'bg-[#f1f5f9] text-slate-400';
+    if (score > 85) return 'bg-[var(--primary-blue)] text-white';
+    if (score >= 61) return 'bg-[color-mix(in_srgb,var(--primary-blue)_42%,var(--bg-surface))] text-[var(--text-primary)]';
+    if (score >= 25) return 'bg-[color-mix(in_srgb,var(--primary-blue)_14%,var(--bg-surface))] text-[var(--text-secondary)]';
+    return 'bg-[var(--bg-surface-subtle)] text-[var(--text-muted)]';
   };
 
-  return (
-    <div className="dash-card p-5" data-purpose="attendance-heatmap">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="text-base font-bold text-[var(--text-primary)]">Attendance Overview</h2>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-2xl font-extrabold text-[var(--text-primary)]">{attendanceRate}%</span>
+  const rangeControl = (
+    <div className="flex items-center gap-3">
+      <span className="dash-kpi">{attendanceRate}%</span>
+      <div className="relative" ref={dropdownRef}>
+        <button
+          type="button"
+          onClick={() => setDropdownOpen(!dropdownOpen)}
+          className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium rounded-[7px] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] cursor-pointer"
+        >
+          <span>{timeRangeLabels[timeRange]}</span>
+          <ChevronDown className={`w-3.5 h-3.5 text-[var(--text-muted)] transition-transform ${dropdownOpen ? 'rotate-180 text-[var(--studio-navy)]' : ''}`} />
+        </button>
+
+        {dropdownOpen && (
+          <div className="absolute right-0 top-full mt-1 w-44 bg-[var(--bg-surface)] rounded-[9px] border border-[var(--border-color)] py-1 z-50">
+            {(Object.keys(timeRangeLabels) as TimeRangeOption[]).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => {
+                  setTimeRange(option);
+                  setDropdownOpen(false);
+                }}
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between cursor-pointer ${
+                  timeRange === option
+                    ? 'bg-[var(--studio-selected)] text-[var(--studio-navy)] font-bold'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)]'
+                }`}
+              >
+                <span>{timeRangeLabels[option]}</span>
+                {timeRange === option && <Check className="w-3.5 h-3.5 text-[var(--studio-navy)]" />}
+              </button>
+            ))}
           </div>
-        </div>
-
-        {/* Interactive Dropdown */}
-        <div className="relative" ref={dropdownRef}>
-          <button
-            type="button"
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition cursor-pointer active:scale-98"
-          >
-            <span>{timeRangeLabels[timeRange]}</span>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${dropdownOpen ? 'rotate-180 text-blue-600' : ''}`} />
-          </button>
-
-          {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1.5 w-44 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
-              {(Object.keys(timeRangeLabels) as TimeRangeOption[]).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => {
-                    setTimeRange(option);
-                    setDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition cursor-pointer ${
-                    timeRange === option
-                      ? 'bg-blue-50 text-blue-700 font-bold'
-                      : 'text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <span>{timeRangeLabels[option]}</span>
-                  {timeRange === option && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
       </div>
+    </div>
+  );
+
+  return (
+    <DashPanel title="Attendance overview" action={rangeControl} className={className} purpose="attendance-heatmap">
 
       {/* Heatmap Department Matrix */}
-      <div className="mt-4 overflow-x-auto">
-        <div className="min-w-[420px]">
+      <div className="mt-3 overflow-x-auto">
+        <div>
           {/* Header */}
-          <div className="grid grid-cols-6 gap-2 text-center text-xs font-semibold text-slate-400 mb-2">
-            <span className="text-left text-slate-500 font-bold pl-1">Department</span>
+          <div className="grid grid-cols-6 gap-2 text-center text-[11px] font-medium text-[var(--text-muted)] mb-2">
+            <span className="text-left pl-1">Department</span>
             <span>Mon</span>
             <span>Tue</span>
             <span>Wed</span>
@@ -274,42 +267,42 @@ export const AttendanceHeatmap: React.FC = () => {
           </div>
 
           {departmentRows.length === 0 ? (
-            <div className="py-6 text-center text-xs text-slate-400">
-              No department records found
+            <div className="dash-empty-state">
+              <p>No department records found</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {departmentRows.map((row) => (
                 <div key={row.name} className="grid grid-cols-6 gap-2 items-center text-xs">
-                  <span className="text-slate-800 font-semibold truncate pr-1" title={row.name}>
+                  <span className="text-[var(--text-primary)] font-medium truncate pr-1" title={row.name}>
                     {row.name}
                   </span>
                   <div
-                    className={`h-7 rounded-md flex items-center justify-center text-[10px] font-bold ${getCellBadgeClass(row.mon)}`}
+                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.mon)}`}
                     title={`Mon: ${row.mon}%`}
                   >
                     {row.mon}%
                   </div>
                   <div
-                    className={`h-7 rounded-md flex items-center justify-center text-[10px] font-bold ${getCellBadgeClass(row.tue)}`}
+                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.tue)}`}
                     title={`Tue: ${row.tue}%`}
                   >
                     {row.tue}%
                   </div>
                   <div
-                    className={`h-7 rounded-md flex items-center justify-center text-[10px] font-bold ${getCellBadgeClass(row.wed)}`}
+                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.wed)}`}
                     title={`Wed: ${row.wed}%`}
                   >
                     {row.wed}%
                   </div>
                   <div
-                    className={`h-7 rounded-md flex items-center justify-center text-[10px] font-bold ${getCellBadgeClass(row.thu)}`}
+                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.thu)}`}
                     title={`Thu: ${row.thu}%`}
                   >
                     {row.thu}%
                   </div>
                   <div
-                    className={`h-7 rounded-md flex items-center justify-center text-[10px] font-bold ${getCellBadgeClass(row.fri)}`}
+                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.fri)}`}
                     title={`Fri: ${row.fri}%`}
                   >
                     {row.fri}%
@@ -321,25 +314,28 @@ export const AttendanceHeatmap: React.FC = () => {
         </div>
       </div>
 
-      {/* Density Token Legend */}
-      <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
-        <span className="font-medium text-slate-600">Density Scale:</span>
+      <div className="mt-3 pt-2.5 border-t border-[var(--border-color)] flex flex-wrap items-center justify-between gap-2 text-[10px] text-[var(--text-muted)]">
+        <span className="font-medium text-[var(--text-secondary)]">Density</span>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-[#f1f5f9] border border-slate-200"></span> &lt;25%
+            <span className="w-4 h-2.5 rounded-sm bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]" />
+            &lt;25%
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-[#e0f2fe]"></span> 25%–60%
+            <span className="w-4 h-2.5 rounded-sm bg-[color-mix(in_srgb,var(--primary-blue)_14%,var(--bg-surface))]" />
+            25%–60%
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-[#38bdf8]"></span> 61%–85%
+            <span className="w-4 h-2.5 rounded-sm bg-[color-mix(in_srgb,var(--primary-blue)_42%,var(--bg-surface))]" />
+            61%–85%
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-[#1e3a8a]"></span> &gt;85%
+            <span className="w-4 h-2.5 rounded-sm bg-[var(--primary-blue)]" />
+            &gt;85%
           </span>
         </div>
       </div>
-    </div>
+    </DashPanel>
   );
 };
 

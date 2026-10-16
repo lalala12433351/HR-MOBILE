@@ -2,9 +2,13 @@ import { Request, Response } from 'express';
 import { pool } from '../../config/database.js';
 import { provisionTenantSchema } from '../../db/migrator.js';
 import { sanitizeSchemaName } from '../../db/queryRunner.js';
-import { cognitoSignUp, cognitoLogin, cognitoRefreshToken, verifyCognitoToken, cognitoAdminSetUserPassword } from '../../config/cognito.js';
+import { cognitoSignUp, cognitoLogin, cognitoRefreshToken } from '../../config/cognito.js';
+import { isEmailRegistered, verifyEmailVerificationToken } from './emailFlows.controller.js';
 import { hashPassword, signJwt, verifyPassword } from '../../utils/crypto.js';
 import { log } from '../../utils/logger.js';
+import { isFounderEmployeeCode, pickEffectiveAuthRole } from '../../utils/roles.js';
+import { ensureOwnerOrgDefaults } from '../../utils/orgDefaults.js';
+import { getPlanByIdOrKey, issueLicense, syncAndSummarizeLicense } from '../licenses/license.service.js';
 
 export interface PasswordValidationResult {
   isValid: boolean;
@@ -59,6 +63,32 @@ export function validateCognitoPassword(password: string): PasswordValidationRes
   };
 }
 
+function readTenantAddress(body: Record<string, unknown>) {
+  const address = String(body.address || body.streetAddress || '').trim();
+  const city = String(body.city || '').trim();
+  const stateProvince = String(body.stateProvince || body.state || '').trim();
+  const postalCode = String(body.postalCode || body.zip || '').trim();
+  const country = String(body.country || '').trim();
+  return { address, city, stateProvince, postalCode, country };
+}
+
+function tenantAddressPayload(row: {
+  address?: string | null;
+  city?: string | null;
+  state_province?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+} | null | undefined) {
+  if (!row) return {};
+  return {
+    address: row.address || '',
+    city: row.city || '',
+    stateProvince: row.state_province || '',
+    postalCode: row.postal_code || '',
+    country: row.country || '',
+  };
+}
+
 export async function register(req: Request, res: Response): Promise<void> {
   const {
     name,
@@ -74,7 +104,10 @@ export async function register(req: Request, res: Response): Promise<void> {
     contactPhone,
     designation,
     adminRoleTitle,
+    planId,
+    billingCycle,
   } = req.body;
+  const tenantAddress = readTenantAddress(req.body || {});
 
   const resolvedName = (name || adminName || 'Administrator').trim();
   const resolvedEmail = (email || adminEmail || '').trim().toLowerCase();
@@ -90,6 +123,44 @@ export async function register(req: Request, res: Response): Promise<void> {
     res.status(400).json({
       success: false,
       error: { code: 'BAD_REQUEST', message: 'Company/Tenant Name, Admin Email, and Password are required.' },
+    });
+    return;
+  }
+
+  if (!tenantAddress.address || !tenantAddress.city || !tenantAddress.country) {
+    log.warn('Registration Rejected: Missing company address details', { email: resolvedEmail });
+    res.status(400).json({
+      success: false,
+      error: {
+        code: 'BAD_REQUEST',
+        message: 'Company street address, city, and country are required.',
+      },
+    });
+    return;
+  }
+
+  const selectedPlan = await getPlanByIdOrKey(pool, String(planId || '').trim());
+  if (!selectedPlan || !selectedPlan.isActive || !selectedPlan.isPublic) {
+    log.warn('Registration Rejected: Missing or invalid license plan', { planId });
+    res.status(400).json({
+      success: false,
+      error: {
+        code: 'PLAN_REQUIRED',
+        message: 'Choose a license plan before creating your workspace.',
+      },
+    });
+    return;
+  }
+  const selectedCycle = billingCycle === 'annual' ? 'annual' : 'monthly';
+
+  if (!verifyEmailVerificationToken(req.body.verificationToken, resolvedEmail)) {
+    log.warn('Registration Rejected: Email not verified', { email: resolvedEmail });
+    res.status(403).json({
+      success: false,
+      error: {
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Please verify your email address with the code we sent before creating your workspace.',
+      },
     });
     return;
   }
@@ -126,6 +197,18 @@ export async function register(req: Request, res: Response): Promise<void> {
       adminEmail: resolvedEmail,
       industry,
     });
+
+    if (await isEmailRegistered(resolvedEmail, client)) {
+      log.warn('Registration Rejected: Email already registered', { email: resolvedEmail });
+      res.status(409).json({
+        success: false,
+        error: {
+          code: 'USER_ALREADY_EXISTS',
+          message: 'An account with this email address already exists. Please log in instead.',
+        },
+      });
+      return;
+    }
 
     // Generate unique, valid tenant slug and schema name
     let baseSlug = (customSlug || resolvedTenantName)
@@ -179,23 +262,29 @@ export async function register(req: Request, res: Response): Promise<void> {
       } catch (_) {}
     } catch (signUpErr: any) {
       if (signUpErr.name === 'UsernameExistsException') {
-        log.info(`Cognito user "${resolvedEmail}" already exists. Authenticating credentials to link workspace...`);
+        // Only reuse a Cognito user if this app has no mapping yet (failed first signup).
+        // An existing mapping means the email is already taken.
+        if (await isEmailRegistered(resolvedEmail, client)) {
+          log.warn('Registration Rejected: Cognito user already mapped', { email: resolvedEmail });
+          res.status(409).json({
+            success: false,
+            error: {
+              code: 'USER_ALREADY_EXISTS',
+              message: 'An account with this email address already exists. Please log in instead.',
+            },
+          });
+          return;
+        }
+        log.info(`Cognito user "${resolvedEmail}" exists with no workspace mapping. Authenticating to finish registration...`);
         try {
           authTokens = await cognitoLogin({ email: resolvedEmail, password: resolvedPassword });
           userSub = authTokens.idToken || `sub_${Date.now()}`;
-          const existingMapping = await client.query(
-            'SELECT cognito_sub FROM public.global_auth_mapping WHERE email = $1 LIMIT 1',
-            [resolvedEmail]
-          );
-          if (existingMapping.rows.length > 0 && existingMapping.rows[0].cognito_sub) {
-            userSub = existingMapping.rows[0].cognito_sub;
-          }
         } catch (loginErr: any) {
           res.status(409).json({
             success: false,
             error: {
               code: 'USER_ALREADY_EXISTS',
-              message: 'An account with this email address already exists. Please sign in or use the correct account password.',
+              message: 'An account with this email address already exists. Please log in instead.',
             },
           });
           return;
@@ -212,21 +301,50 @@ export async function register(req: Request, res: Response): Promise<void> {
     });
     await client.query('BEGIN');
 
+    if (await isEmailRegistered(resolvedEmail, client)) {
+      await client.query('ROLLBACK');
+      log.warn('Registration Rejected: Email already registered', { email: resolvedEmail });
+      res.status(409).json({
+        success: false,
+        error: {
+          code: 'USER_ALREADY_EXISTS',
+          message: 'An account with this email address already exists. Please log in instead.',
+        },
+      });
+      return;
+    }
+
     // Insert Tenant into public.tenants
     const tenantRes = await client.query(
-      `INSERT INTO public.tenants (slug, name, schema_name, status, plan, admin_email, contact_phone, industry)
-       VALUES ($1, $2, $3, 'active', 'enterprise', $4, $5, $6)
+      `INSERT INTO public.tenants (
+         slug, name, schema_name, status, plan, admin_email, contact_phone, industry,
+         address, city, state_province, postal_code, country
+       )
+       VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
-      [tenantSlug, resolvedTenantName, schemaName, resolvedEmail, contactPhone || null, industry]
+      [
+        tenantSlug,
+        resolvedTenantName,
+        schemaName,
+        selectedPlan.key,
+        resolvedEmail,
+        contactPhone || null,
+        industry,
+        tenantAddress.address,
+        tenantAddress.city,
+        tenantAddress.stateProvince || null,
+        tenantAddress.postalCode || null,
+        tenantAddress.country,
+      ]
     );
     const tenantRecord = tenantRes.rows[0];
 
-    // Create Tenant Subscription Record
-    await client.query(
-      `INSERT INTO public.tenant_subscriptions (tenant_id, tier, max_employees, status, billing_cycle)
-       VALUES ($1, 'enterprise', 500, 'active', 'monthly')`,
-      [tenantRecord.id]
-    );
+    await issueLicense(client, {
+      tenantId: tenantRecord.id,
+      plan: selectedPlan,
+      billingCycle: selectedCycle,
+      actorEmail: resolvedEmail,
+    });
 
     // Insert Global Auth Mapping for Cognito Sub <-> Tenant
     await client.query(
@@ -240,7 +358,7 @@ export async function register(req: Request, res: Response): Promise<void> {
 
     await client.query('COMMIT');
 
-    // Step 3–4: schema provision + admin seed. On failure, compensate control-plane rows.
+    // Step 3â€“4: schema provision + admin seed. On failure, compensate control-plane rows.
     const compensateRegistration = async () => {
       try {
         await client.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
@@ -264,41 +382,35 @@ export async function register(req: Request, res: Response): Promise<void> {
       const resolvedAdminDesignation = designation || adminRoleTitle || 'Founder & CEO';
 
       await client.query(`SET search_path TO "${schemaName}", public`);
-
-      let jobRoleId: string | null = null;
       try {
-        const code = resolvedAdminDesignation.slice(0, 4).toUpperCase() + Math.floor(10 + Math.random() * 90);
-        const jbRes = await client.query(
-          `INSERT INTO "${schemaName}".job_roles (title, code)
-           VALUES ($1, $2)
-           ON CONFLICT (code) DO UPDATE SET title = EXCLUDED.title
-           RETURNING id`,
-          [resolvedAdminDesignation, code]
+        const leadership = await ensureOwnerOrgDefaults(
+          (text, params) => client.query(text, params),
+          { industry, jobTitle: resolvedAdminDesignation }
         );
-        jobRoleId = jbRes.rows[0]?.id || null;
-      } catch (_) {}
 
-      await client.query(
-        `INSERT INTO "${schemaName}".employees (
-           cognito_sub, employee_code, first_name, last_name, email, phone,
-           office_id, department_id, job_role_id, role, employment_status, account_status,
-           date_of_joining, has_completed_profile, onboarding_progress, onboarding_status
-         ) VALUES (
-           $1, 'EMP001', $2, $3, $4, $5,
-           NULL, NULL, $6, 'super_admin', 'active', 'Activated',
-           CURRENT_DATE, false, 0, 'NOT_STARTED'
-         )
-         ON CONFLICT (email) DO UPDATE SET
-           cognito_sub = EXCLUDED.cognito_sub,
-           job_role_id = COALESCE(EXCLUDED.job_role_id, "${schemaName}".employees.job_role_id),
-           role = 'super_admin',
-           onboarding_status = 'NOT_STARTED',
-           has_completed_profile = false,
-           onboarding_progress = 0`,
-        [userSub, firstName, lastName, resolvedEmail, contactPhone || null, jobRoleId]
-      );
-
-      await client.query('RESET search_path');
+        await client.query(
+          `INSERT INTO "${schemaName}".employees (
+             cognito_sub, employee_code, first_name, last_name, email, phone,
+             office_id, department_id, job_role_id, role, employment_status, account_status,
+             date_of_joining, has_completed_profile, onboarding_progress, onboarding_status
+           ) VALUES (
+             $1, 'EMP001', $2, $3, $4, $5,
+             NULL, $6, $7, 'super_admin', 'active', 'Activated',
+             CURRENT_DATE, false, 0, 'NOT_STARTED'
+           )
+           ON CONFLICT (email) DO UPDATE SET
+             cognito_sub = EXCLUDED.cognito_sub,
+             department_id = COALESCE(EXCLUDED.department_id, "${schemaName}".employees.department_id),
+             job_role_id = COALESCE(EXCLUDED.job_role_id, "${schemaName}".employees.job_role_id),
+             role = 'super_admin',
+             onboarding_status = 'NOT_STARTED',
+             has_completed_profile = false,
+             onboarding_progress = 0`,
+          [userSub, firstName, lastName, resolvedEmail, contactPhone || null, leadership.departmentId, leadership.jobRoleId]
+        );
+      } finally {
+        await client.query('RESET search_path');
+      }
 
       log.success(`Tenant "${resolvedTenantName}" and Super Admin "${resolvedEmail}" fully initialized!`, {
         tenantSlug,
@@ -319,6 +431,8 @@ export async function register(req: Request, res: Response): Promise<void> {
             name: tenantRecord.name,
             schema: tenantRecord.schema_name,
             industry: tenantRecord.industry,
+            ...tenantAddressPayload(tenantRecord),
+            license: await syncAndSummarizeLicense(pool, tenantRecord.id, resolvedEmail),
           },
           user: {
             id: userSub,
@@ -341,7 +455,7 @@ export async function register(req: Request, res: Response): Promise<void> {
     }
     log.error('Tenant Registration Failed', err);
 
-    if (err.name === 'UsernameExistsException') {
+    if (err.name === 'UsernameExistsException' || err.code === '23505') {
       res.status(409).json({
         success: false,
         error: { code: 'USER_ALREADY_EXISTS', message: 'An account with this email address already exists. Please log in instead.' },
@@ -456,7 +570,8 @@ export async function login(req: Request, res: Response): Promise<void> {
     // 2. Resolve user's tenant mapping and profile from PostgreSQL
     log.info(`Resolving tenant workspace for "${cleanEmail}" from Control Plane...`);
     let mappingRes = await pool.query(
-      `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.name as tenant_name, t.schema_name, t.status as tenant_status, t.industry as tenant_industry
+      `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.name as tenant_name, t.schema_name, t.status as tenant_status, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
+              t.address, t.city, t.state_province, t.postal_code, t.country
        FROM public.global_auth_mapping gam
        JOIN public.tenants t ON gam.tenant_id = t.id
        WHERE LOWER(gam.email) = $1
@@ -470,7 +585,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     // Fallback: If auth mapping missing for demo/existing tenant, resolve from tenant schema (Employees or Students)
     if (!authRecord) {
       log.info(`Checking tenant schemas for existing user "${cleanEmail}"...`);
-      const tenants = await pool.query('SELECT id, slug, name, schema_name, status, industry FROM public.tenants WHERE status != $1', ['decommissioned']);
+      const tenants = await pool.query('SELECT id, slug, name, schema_name, status, industry, address, city, state_province, postal_code, country FROM public.tenants WHERE status != $1', ['decommissioned']);
       for (const t of tenants.rows) {
         try {
           // Check employee table
@@ -498,6 +613,11 @@ export async function login(req: Request, res: Response): Promise<void> {
               schema_name: t.schema_name,
               tenant_status: t.status,
               tenant_industry: t.industry,
+              address: t.address,
+              city: t.city,
+              state_province: t.state_province,
+              postal_code: t.postal_code,
+              country: t.country,
             };
             break;
           }
@@ -529,6 +649,11 @@ export async function login(req: Request, res: Response): Promise<void> {
               schema_name: t.schema_name,
               tenant_status: t.status,
               tenant_industry: t.industry || 'Institute',
+              address: t.address,
+              city: t.city,
+              state_province: t.state_province,
+              postal_code: t.postal_code,
+              country: t.country,
             };
             break;
           }
@@ -658,28 +783,41 @@ export async function login(req: Request, res: Response): Promise<void> {
     if (student) {
       resolvedFullName = `${student.first_name || ''} ${student.last_name || ''}`.trim() || student.student_id;
       resolvedRole = 'student';
-      resolvedDepartment = student.batch_grade ? `${student.batch_grade}${student.batch_section ? ' • Sec ' + student.batch_section : ''}` : (student.grade || 'Academic');
+      resolvedDepartment = student.batch_grade ? `${student.batch_grade}${student.batch_section ? ' â€¢ Sec ' + student.batch_section : ''}` : (student.grade || 'Academic');
       resolvedDesignation = student.roll_number ? `Roll: ${student.roll_number}` : 'Student';
     } else if (employee) {
       const first = String(employee.first_name || '').trim();
       const last = String(employee.last_name || '').trim();
       // Ignore historical setup placeholder "User" when no real last name was provided
       resolvedFullName = `${first}${last && last !== 'User' ? ` ${last}` : ''}`.trim() || first;
-      // Prefer tenant employee.role — except platform_admin mapping must not be demoted
-      if (employee.role && authRecord.role !== 'platform_admin') {
-        resolvedRole = employee.role;
-        if (authRecord.role && authRecord.role !== employee.role) {
+      const founderRole =
+        String(authRecord.admin_email || authRecord.tenant_admin_email || '').trim().toLowerCase() === cleanEmail ||
+        isFounderEmployeeCode(employee.employee_code)
+          ? 'super_admin'
+          : undefined;
+      if (authRecord.role === 'platform_admin') {
+        resolvedRole = 'platform_admin';
+      } else {
+        resolvedRole = pickEffectiveAuthRole([authRecord.role, founderRole, employee.role]);
+        if (authRecord.role && authRecord.role !== resolvedRole) {
           pool
             .query('UPDATE public.global_auth_mapping SET role = $1 WHERE id = $2', [
-              employee.role,
+              resolvedRole,
               authRecord.id,
             ])
-            .catch((err) => log.warn('Could not sync global_auth_mapping role from employee row', err));
+            .catch((err) => log.warn('Could not sync global_auth_mapping role', err));
         }
-      } else if (authRecord.role === 'platform_admin') {
-        resolvedRole = 'platform_admin';
+        if (resolvedRole === 'super_admin' && employee.role !== 'super_admin') {
+          pool
+            .query(
+              `UPDATE "${schema}".employees SET role = 'super_admin', updated_at = CURRENT_TIMESTAMP
+               WHERE id = $1 AND role IS DISTINCT FROM 'super_admin'`,
+              [employee.id]
+            )
+            .catch((err) => log.warn('Could not restore workspace owner role', err));
+        }
       }
-      resolvedDepartment = employee.department_name || (resolvedRole === 'super_admin' ? 'Operations' : 'General Operations');
+      resolvedDepartment = employee.department_name || (resolvedRole === 'super_admin' ? 'Management' : 'General Operations');
       resolvedDesignation = employee.job_title || employee.designation || (resolvedRole === 'super_admin' ? 'Founder & CEO' : 'Team Member');
       resolvedOnboardingStatus = employee.onboarding_status || undefined;
       resolvedHasCompletedProfile =
@@ -715,6 +853,10 @@ export async function login(req: Request, res: Response): Promise<void> {
           name: authRecord.tenant_name,
           schema: authRecord.schema_name,
           industry: authRecord.tenant_industry || 'Office',
+          ...tenantAddressPayload(authRecord),
+          license: authRecord.tenant_uuid
+            ? await syncAndSummarizeLicense(pool, authRecord.tenant_uuid, cleanEmail)
+            : null,
         },
         user: {
           id: student?.id || employee?.id || authRecord.id,
@@ -839,7 +981,7 @@ export async function studentLogin(req: Request, res: Response): Promise<void> {
           break;
         }
       } catch (_) {
-        // schema may lack institute tables — skip
+        // schema may lack institute tables â€” skip
       }
     }
 
@@ -904,7 +1046,7 @@ export async function studentLogin(req: Request, res: Response): Promise<void> {
       student.student_id ||
       'Student';
     const department = student.batch_grade
-      ? `${student.batch_grade}${student.batch_section ? ' • Sec ' + student.batch_section : ''}`
+      ? `${student.batch_grade}${student.batch_section ? ' â€¢ Sec ' + student.batch_section : ''}`
       : student.grade || 'Academic';
     const designation = student.roll_number ? `Roll: ${student.roll_number}` : 'Student';
 
@@ -1029,7 +1171,7 @@ export async function me(req: Request, res: Response): Promise<void> {
       ? `${studentData.first_name || ''} ${studentData.last_name || ''}`.trim() || studentData.student_id
       : null;
     const studentDept = studentData?.batch_grade
-      ? `${studentData.batch_grade}${studentData.batch_section ? ' • Sec ' + studentData.batch_section : ''}`
+      ? `${studentData.batch_grade}${studentData.batch_section ? ' â€¢ Sec ' + studentData.batch_section : ''}`
       : studentData?.grade || undefined;
 
     res.json({
@@ -1055,7 +1197,7 @@ export async function me(req: Request, res: Response): Promise<void> {
             || (studentData?.roll_number ? `Roll: ${studentData.roll_number}` : undefined)
             || (req.user.role === 'platform_admin' ? 'Platform Operator' : undefined)
             || (req.user.role === 'super_admin' ? 'Founder & CEO' : studentData ? 'Student' : 'Team Member'),
-          department: employeeData?.department_name || studentDept || (req.user.role === 'platform_admin' ? 'Platform' : 'Operations'),
+          department: employeeData?.department_name || studentDept || (req.user.role === 'platform_admin' ? 'Platform' : 'Management'),
           avatar: employeeData?.avatar || employeeData?.avatar_url || studentData?.avatar_url || undefined,
           onboardingStatus: employeeData?.onboarding_status || 'NOT_STARTED',
           onboarding_status: employeeData?.onboarding_status || 'NOT_STARTED',
@@ -1072,10 +1214,16 @@ export async function me(req: Request, res: Response): Promise<void> {
                 ? 100
                 : undefined,
         },
-        tenant: req.tenant || {
-          id: req.user.tenant_id,
-          schema: req.user.db_schema,
-          userSub: req.user.sub,
+        tenant: {
+          ...(req.tenant || {
+            id: req.user.tenant_id,
+            schema: req.user.db_schema,
+            userSub: req.user.sub,
+          }),
+          license:
+            req.user.role === 'platform_admin'
+              ? null
+              : await syncAndSummarizeLicense(pool, req.tenant?.id || req.user.tenant_id, req.user.email),
         },
       },
     });
@@ -1087,87 +1235,3 @@ export async function me(req: Request, res: Response): Promise<void> {
     });
   }
 }
-
-export async function resetPassword(req: Request, res: Response): Promise<void> {
-  try {
-    const { email, newPassword, password } = req.body;
-    const targetPassword = newPassword || password;
-
-    if (!email || !targetPassword) {
-      log.warn('Password Reset Rejected: Missing email or password');
-      res.status(400).json({
-        success: false,
-        error: { code: 'BAD_REQUEST', message: 'Email and new password are required.' },
-      });
-      return;
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = String(targetPassword).trim();
-
-    const passwordValidation = validateCognitoPassword(cleanPassword);
-    if (!passwordValidation.isValid) {
-      log.warn('Password Reset Rejected: Password does not meet AWS Cognito policy', {
-        email: cleanEmail,
-        missing: passwordValidation.message,
-      });
-      res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_PASSWORD',
-          message: passwordValidation.message || 'Password must be at least 8 characters long with uppercase, lowercase, numbers, and symbols.',
-        },
-      });
-      return;
-    }
-
-    log.info(`Updating AWS Cognito password for "${cleanEmail}"...`);
-    await cognitoAdminSetUserPassword({
-      username: cleanEmail,
-      password: cleanPassword,
-      permanent: true,
-    });
-
-    // Update password & status in tenant schema if user exists (employees / students)
-    try {
-      const mappingRes = await pool.query(
-        `SELECT gam.*, t.schema_name 
-         FROM public.global_auth_mapping gam 
-         JOIN public.tenants t ON gam.tenant_id = t.id 
-         WHERE LOWER(gam.email) = $1 LIMIT 1`,
-        [cleanEmail]
-      );
-      if (mappingRes.rows.length > 0) {
-        const schema = mappingRes.rows[0].schema_name;
-        // Update employees
-        await pool.query(
-          `UPDATE "${schema}".employees 
-           SET password = $1, account_status = 'Active', updated_at = CURRENT_TIMESTAMP 
-           WHERE LOWER(email) = $2`,
-          [cleanPassword, cleanEmail]
-        ).catch(() => {});
-        // Update students
-        await pool.query(
-          `UPDATE "${schema}".students 
-           SET updated_at = CURRENT_TIMESTAMP 
-           WHERE LOWER(email) = $1 OR LOWER(student_id) = $1 OR LOWER(roll_number) = $1`,
-          [cleanEmail]
-        ).catch(() => {});
-      }
-    } catch (_) {}
-
-    log.success(`Password updated successfully for "${cleanEmail}"!`);
-
-    res.json({
-      success: true,
-      message: 'Password updated successfully. Please login with your new credentials.',
-    });
-  } catch (err: any) {
-    log.error('Password Update Failed', err);
-    res.status(500).json({
-      success: false,
-      error: { code: 'SERVER_ERROR', message: err.message || 'Failed to update password.' },
-    });
-  }
-}
-

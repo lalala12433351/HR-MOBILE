@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import {
   Receipt,
   Download,
@@ -24,14 +25,13 @@ import {
   Search,
   Filter,
   Plus,
-  Settings,
   Layers,
   Briefcase,
 } from 'lucide-react';
 import { AppState } from '@/services/store';
 import { Employee, PayrollRecord, EmployeePayslipDocument, SalaryType } from '@/types';
 import { api } from '@/services/apiClient';
-import { PayrollSettingsView } from './PayrollSettingsView';
+import { buildPayslipDraft, PayslipStudio, PayslipSalaryInput } from '../print/PayslipStudio';
 
 interface PaySlipModuleProps {
   state: AppState;
@@ -107,8 +107,9 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
   const [selectedPeriod, setSelectedPeriod] = useState<string>(
     () => `${new Date().toLocaleString('default', { month: 'long' })} ${new Date().getFullYear()}`
   );
-  const [activeView, setActiveView] = useState<'payslip' | 'all_payrolls' | 'tax_summary' | 'payroll_settings'>('payslip');
+  const [activeView, setActiveView] = useState<'payslip' | 'all_payrolls' | 'tax_summary'>('payslip');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [showPayslipStudio, setShowPayslipStudio] = useState(false);
 
   const selectedEmployee: Employee = useMemo(() => {
     return state.employees.find((e) => e.id === selectedEmployeeId) || state.employees[0] || fallbackEmployee;
@@ -286,7 +287,7 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
   ];
 
   const handlePrint = () => {
-    window.print();
+    setShowPayslipStudio(true);
   };
 
   const handleDownload = () => {
@@ -557,19 +558,7 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
         >
           YTD Tax & Deductions Summary
         </button>
-        {!isEmployee && (
-          <button
-            onClick={() => setActiveView('payroll_settings')}
-            className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-              activeView === 'payroll_settings'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#18181d]'
-            }`}
-          >
-            <Settings className="h-3.5 w-3.5" />
-            <span>Payroll Settings & Groups</span>
-          </button>
-        )}
+        {!isEmployee && <Link href="/settings?section=payroll" className="px-4 py-2 text-xs font-bold text-slate-600 transition-all hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-[#18181d]">Payroll settings</Link>}
       </div>
 
       {/* Clean KPI Cards */}
@@ -1003,12 +992,17 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
         </div>
       )}
 
-      {/* VIEW 4: PAYROLL SETTINGS & GROUPS */}
-      {activeView === 'payroll_settings' && (
-        <PayrollSettingsView
-          state={state}
-          onUpdateState={onUpdateState}
-          onBackToPayroll={() => setActiveView('payslip')}
+      {showPayslipStudio && (
+        <PayslipStudio
+          key={`${selectedEmployee.id}-${selectedPeriod}`}
+          initial={buildPayslipDraft({
+            employee: selectedEmployee,
+            organization: state.organization,
+            period: selectedPeriod,
+            status: 'Paid',
+            salary: salaryData as PayslipSalaryInput,
+          })}
+          onClose={() => setShowPayslipStudio(false)}
         />
       )}
     </div>

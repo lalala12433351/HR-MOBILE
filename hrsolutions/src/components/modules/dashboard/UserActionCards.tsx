@@ -2,71 +2,67 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { GoogleIcon } from '@/components/ui/GoogleIcon';
+import { PixbeIcon, PixbeIconName } from '@/components/common/PixbeIcon';
+import { DashboardClockInCard } from './DashboardClockInCard';
+import { OnLeaveTodayCard } from './OnLeaveTodayCard';
+import { UpcomingHolidaysCard } from './UpcomingHolidaysCard';
 
 export const UserActionCards: React.FC = () => {
   const router = useRouter();
 
   const cards = [
     {
-      id: 'attendance',
-      title: 'Attendance',
-      path: '/attendance',
-      iconName: 'event_available',
-      iconBg: 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400',
-    },
-    {
       id: 'leaves',
-      title: 'Leaves',
+      title: 'Request leave',
+      description: 'Apply or check a balance',
       path: '/leaves',
-      iconName: 'beach_access',
-      iconBg: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400',
+      iconName: 'leave-action' as PixbeIconName,
     },
     {
       id: 'tasks',
-      title: 'Tasks',
+      title: 'Open tasks',
+      description: 'See what is assigned to you',
       path: '/projects',
-      iconName: 'task_alt',
-      iconBg: 'bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400',
+      iconName: 'tasks-action' as PixbeIconName,
     },
     {
       id: 'payslips',
-      title: 'Payslips',
+      title: 'Get a payslip',
+      description: 'Download a recent slip',
       path: '/payroll',
-      iconName: 'receipt_long',
-      iconBg: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400',
+      iconName: 'payslips-action' as PixbeIconName,
     },
   ];
 
   return (
-    <section aria-label="Quick Actions" className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
-      {cards.map((card) => {
-        return (
+    <section aria-label="Today’s work" className="dash-figures dash-figures--member">
+      <div className="dash-workday">
+        <DashboardClockInCard />
+      </div>
+
+      <div className="dash-action-rail">
+        {cards.map((card) => (
           <button
             key={card.id}
             type="button"
             onClick={() => router.push(card.path)}
-            className="dash-card dash-surface p-3.5 sm:p-5 text-left flex flex-col justify-between group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+            className="dash-action"
           >
-            <div className="flex items-center justify-between w-full">
-              <div
-                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center ${card.iconBg}`}
-              >
-                <GoogleIcon name={card.iconName} size={20} weight={500} />
-              </div>
-              <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center text-slate-300 dark:text-slate-600 group-hover:text-blue-600 dark:group-hover:text-blue-400 group-hover:bg-blue-50 dark:group-hover:bg-blue-950/40 transition-[color,background-color] duration-150 ease-out">
-                <GoogleIcon name="arrow_outward" size={15} weight={500} />
-              </div>
-            </div>
-
-            <div className="mt-3 sm:mt-4">
-              <h3 className="text-sm sm:text-base font-bold text-[var(--text-primary)] tracking-tight leading-tight">
-                {card.title}
-              </h3>
-            </div>
+            <span className="inline-flex items-center gap-3 min-w-0">
+              <PixbeIcon name={card.iconName} className="h-4 w-4 text-[var(--studio-navy)] shrink-0" />
+              <span className="dash-action-copy">
+                <strong>{card.title}</strong>
+                <small>{card.description}</small>
+              </span>
+            </span>
           </button>
-        );
-      })}
+        ))}
+      </div>
+
+      <div className="dash-today-fill">
+        <OnLeaveTodayCard scope="coworkers" limit={4} />
+        <UpcomingHolidaysCard limit={4} />
+      </div>
     </section>
   );
 };

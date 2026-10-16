@@ -44,25 +44,13 @@ interface StudentDirectoryModuleProps {
   onUpdateState: (updater: (prev: AppState) => AppState) => void;
 }
 
-// Avatar palette for initial badges
+// Avatar palette — consistent neutral theme
 const AVATAR_PALETTE = [
-  { bg: 'bg-orange-500/20 text-orange-300 border-orange-500/30' },
-  { bg: 'bg-teal-500/20 text-teal-300 border-teal-500/30' },
-  { bg: 'bg-sky-500/20 text-sky-300 border-sky-500/30' },
-  { bg: 'bg-rose-500/20 text-rose-300 border-rose-500/30' },
-  { bg: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
-  { bg: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
-  { bg: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' },
-  { bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+  { bg: 'bg-slate-100 text-slate-600 border-slate-200' },
 ];
 
-const getStudentAvatarStyle = (name: string) => {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const index = Math.abs(hash) % AVATAR_PALETTE.length;
-  return AVATAR_PALETTE[index];
+const getStudentAvatarStyle = (_name: string) => {
+  return AVATAR_PALETTE[0];
 };
 
 const getInitials = (name: string): string => {
@@ -543,8 +531,8 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
       {/* Header & Title Actions (Transparent Header) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-1">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900">Student Directory</h1>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-[var(--text-primary)]">Student Directory</h1>
+          <p className="text-xs text-[var(--text-muted)] font-medium mt-0.5">
             Manage academic batches, student rosters, parent contacts, and daily attendance logs
           </p>
         </div>
@@ -553,7 +541,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
           {canManageStudents && (
             <Link
               href="/setup-students"
-              className="flex items-center gap-1.5 rounded-xl border border-slate-200/90 bg-white hover:bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 transition-all cursor-pointer shadow-2xs"
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--border-color)]/90 bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] px-3.5 py-2 text-xs font-bold text-[var(--text-secondary)] transition-all cursor-pointer shadow-2xs"
             >
               <Sparkles className="h-3.5 w-3.5 text-blue-600" /> Setup Wizard
             </Link>
@@ -561,15 +549,15 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
 
           <button
             onClick={handleDownloadCSV}
-            className="flex items-center gap-1.5 rounded-xl border border-slate-200/90 bg-white hover:bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 transition-all cursor-pointer shadow-2xs"
+            className="flex items-center gap-1.5 rounded-lg border border-[var(--border-color)]/90 bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] px-3.5 py-2 text-xs font-bold text-[var(--text-secondary)] transition-all cursor-pointer shadow-2xs"
           >
-            <Download className="h-3.5 w-3.5 text-slate-500" /> Export CSV
+            <Download className="h-3.5 w-3.5 text-[var(--text-muted)]" /> Export CSV
           </button>
 
           {canManageStudents && (
             <button
               onClick={() => setShowAddStudentDrawer(true)}
-              className="flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 px-4 py-2 text-xs font-bold text-white transition-all cursor-pointer shadow-xs active:scale-98"
+              className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 px-4 py-2 text-xs font-bold text-white transition-all cursor-pointer  active:scale-98"
             >
               <Plus className="h-3.5 w-3.5" /> Add Student
             </button>
@@ -584,37 +572,37 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar touch-pan-x py-1 w-full">
         <button
           onClick={() => setActiveTab('roster')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
             activeTab === 'roster'
               ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-              : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/80 shadow-2xs'
+              : 'bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] border border-[var(--border-color)]/80 shadow-2xs'
           }`}
         >
-          <Users className={`h-4 w-4 shrink-0 ${activeTab === 'roster' ? 'text-white' : 'text-slate-500'}`} />
+          <Users className={`h-4 w-4 shrink-0 ${activeTab === 'roster' ? 'text-white' : 'text-[var(--text-muted)]'}`} />
           <span>Students Roster ({allStudentsList.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('overview')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
             activeTab === 'overview'
               ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-              : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/80 shadow-2xs'
+              : 'bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] border border-[var(--border-color)]/80 shadow-2xs'
           }`}
         >
-          <BookOpen className={`h-4 w-4 shrink-0 ${activeTab === 'overview' ? 'text-white' : 'text-slate-500'}`} />
+          <BookOpen className={`h-4 w-4 shrink-0 ${activeTab === 'overview' ? 'text-white' : 'text-[var(--text-muted)]'}`} />
           <span>Grades & Academic Overview</span>
         </button>
 
         <button
           onClick={() => setActiveTab('timetable')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
             activeTab === 'timetable'
               ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-              : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/80 shadow-2xs'
+              : 'bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] border border-[var(--border-color)]/80 shadow-2xs'
           }`}
         >
-          <Calendar className={`h-4 w-4 shrink-0 ${activeTab === 'timetable' ? 'text-white' : 'text-slate-500'}`} />
+          <Calendar className={`h-4 w-4 shrink-0 ${activeTab === 'timetable' ? 'text-white' : 'text-[var(--text-muted)]'}`} />
           <span>Batch Timetables & Schedules</span>
         </button>
       </div>
@@ -626,17 +614,17 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
 
       {/* Empty State when no students exist and on roster/overview tabs */}
       {activeTab !== 'timetable' && allStudentsList.length === 0 ? (
-        <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center space-y-4 shadow-2xs">
+        <div className="rounded-3xl border border-[var(--border-color)] bg-[var(--bg-surface)] p-12 text-center space-y-4 shadow-2xs">
           <div className="max-w-md mx-auto space-y-1.5">
-            <h3 className="text-lg font-bold text-slate-900">No Students Enrolled Yet</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
+            <h3 className="text-lg font-bold text-[var(--text-primary)]">No Students Enrolled Yet</h3>
+            <p className="text-xs text-[var(--text-muted)] leading-relaxed">
               Enroll students and manage academic rosters directly using the Add Student modal.
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-3">
             <button
               onClick={() => setShowAddStudentDrawer(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20 active:scale-98 cursor-pointer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-md shadow-blue-600/20 active:scale-98 cursor-pointer"
             >
               <Plus className="h-4 w-4" /> Enroll New Student
             </button>
@@ -646,10 +634,10 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
         <>
 
           {/* Search & Filter Strip */}
-          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-[var(--bg-surface)] p-3 rounded-lg border border-[var(--border-color)] shadow-2xs">
             {/* Search Input */}
             <div className="relative w-full sm:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-muted)]" />
               <input
                 type="text"
                 value={searchQuery}
@@ -658,7 +646,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                   setCurrentPage(1);
                 }}
                 placeholder="Search student by name, roll no..."
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3.5 py-2 text-xs font-medium text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-blue-500 transition-all"
+                className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] pl-9 pr-3.5 py-2 text-xs font-medium text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:bg-[var(--bg-surface)] focus:border-blue-500 transition-all"
               />
             </div>
 
@@ -671,7 +659,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                   setGradeFilter(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 outline-none focus:bg-white focus:border-blue-500 cursor-pointer"
+                className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] outline-none focus:bg-[var(--bg-surface)] focus:border-blue-500 cursor-pointer"
               >
                 <option value="All">All Grades & Sections</option>
                 {uniqueGrades.map((g) => (
@@ -688,7 +676,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                   setStatusFilter(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 outline-none focus:bg-white focus:border-blue-500 cursor-pointer"
+                className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] outline-none focus:bg-[var(--bg-surface)] focus:border-blue-500 cursor-pointer"
               >
                 <option value="All">All Status</option>
                 <option value="Active">Active</option>
@@ -704,7 +692,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
               {/* Mobile Responsive Student Cards */}
               <div className="block md:hidden space-y-3">
                 {paginatedStudents.length === 0 ? (
-                  <div className="p-8 rounded-2xl border border-slate-200 bg-white text-center text-xs text-slate-400 font-semibold shadow-2xs">
+                  <div className="p-8 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-center text-xs text-[var(--text-muted)] font-semibold shadow-2xs">
                     No students match the specified filters.
                   </div>
                 ) : (
@@ -717,7 +705,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                     return (
                       <div
                         key={stud.id}
-                        className={`p-4 rounded-2xl border border-slate-200 bg-white shadow-2xs space-y-3 cursor-pointer hover:border-blue-300 transition-all ${
+                        className={`p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xs space-y-3 cursor-pointer hover:border-blue-300 transition-all ${
                           isSelected ? 'ring-2 ring-blue-500 bg-blue-50/20' : ''
                         }`}
                         onClick={() => setInspectedStudent(stud)}
@@ -730,8 +718,8 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                               className="h-10 w-10 text-xs shrink-0 ring-1 ring-slate-200/80"
                             />
                             <div className="min-w-0">
-                              <h3 className="font-bold text-sm text-slate-900 truncate hover:text-blue-600">{stud.name}</h3>
-                              <p className="text-xs text-slate-500 truncate">{stud.grade || '—'}{stud.section && !(stud.grade || '').includes(stud.section) ? ` • Sec ${stud.section}` : ''} • Roll #{stud.rollNumber}</p>
+                              <h3 className="font-bold text-sm text-[var(--text-primary)] truncate hover:text-blue-600">{stud.name}</h3>
+                              <p className="text-xs text-[var(--text-muted)] truncate">{stud.grade || '—'}{stud.section && !(stud.grade || '').includes(stud.section) ? ` • Sec ${stud.section}` : ''} • Roll #{stud.rollNumber}</p>
                             </div>
                           </div>
                           <div className="shrink-0">
@@ -739,12 +727,12 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-                          <span className="px-2.5 py-0.5 rounded-lg bg-slate-100 font-medium text-[11px] text-slate-700">
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+                          <span className="px-2.5 py-0.5 rounded-lg bg-[var(--bg-surface-subtle)] font-medium text-[11px] text-[var(--text-secondary)]">
                             Guardian: {stud.guardianName || '—'}
                           </span>
                           <div className="flex items-center gap-1">
-                            <span className={`px-2 py-0.5 rounded-lg font-bold text-[11px] ${attStat.isBelow ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-700'}`}>
+                            <span className={`px-2 py-0.5 rounded-lg font-bold text-[11px] ${attStat.isBelow ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)]'}`}>
                               Att: {attStat.rate}%
                             </span>
                             {attStat.isBelow && (
@@ -755,7 +743,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+                        <div className="flex items-center justify-between pt-2 border-t border-[var(--border-color)] text-xs">
                           <button
                             type="button"
                             onClick={(e) => {
@@ -784,15 +772,15 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
               </div>
 
               {/* Desktop Roster Table */}
-              <div className="hidden md:block rounded-xl border border-slate-200 bg-white overflow-x-auto custom-scrollbar touch-pan-x shadow-2xs">
+              <div className="hidden md:block rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-x-auto custom-scrollbar touch-pan-x shadow-2xs">
                 <table className="w-full text-left text-xs border-collapse min-w-[720px]">
-                  <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold text-[10px] uppercase">
+                  <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] border-b border-[var(--border-color)] font-bold text-[10px] uppercase">
                     <tr>
                       {canManageStudents && (
                         <th className="p-3.5 w-10">
                           <button
                             onClick={toggleSelectAll}
-                            className="text-slate-400 hover:text-slate-600 flex items-center cursor-pointer"
+                            className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] flex items-center cursor-pointer"
                           >
                             {selectedStudentIds.length > 0 && selectedStudentIds.length === paginatedStudents.length ? (
                               <CheckSquare className="h-4 w-4 text-blue-600" />
@@ -802,7 +790,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                           </button>
                         </th>
                       )}
-                      <th className="p-3.5 text-slate-900 font-bold">Student Name ▾</th>
+                      <th className="p-3.5 text-[var(--text-primary)] font-bold">Student Name ▾</th>
                       <th className="p-3.5">Roll Number / Login Pass ▾</th>
                       <th className="p-3.5">Grade / Section ▾</th>
                       <th className="p-3.5">Attendance Rate ▾</th>
@@ -812,10 +800,10 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                       <th className="p-3.5 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="font-medium text-slate-700 divide-y divide-slate-100">
+                  <tbody className="font-medium text-[var(--text-secondary)] divide-y divide-[var(--border-color)]">
                     {paginatedStudents.length === 0 ? (
                       <tr>
-                        <td colSpan={canManageStudents ? 9 : 8} className="p-8 text-center text-xs text-slate-400">
+                        <td colSpan={canManageStudents ? 9 : 8} className="p-8 text-center text-xs text-[var(--text-muted)]">
                           No students match the specified filters. Click &ldquo;+ Add Student&rdquo; to add new entries.
                         </td>
                       </tr>
@@ -828,7 +816,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                         return (
                           <tr
                             key={stud.id}
-                            className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-blue-50/60' : ''
+                            className={`hover:bg-[var(--bg-surface-subtle)] transition-colors ${isSelected ? 'bg-blue-50/60' : ''
                               }`}
                           >
                             {/* Checkbox */}
@@ -836,7 +824,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                               <td className="p-3.5">
                                 <button
                                   onClick={() => toggleSelectStudent(stud.id)}
-                                  className="text-slate-400 hover:text-slate-600 flex items-center cursor-pointer"
+                                  className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] flex items-center cursor-pointer"
                                 >
                                   {isSelected ? (
                                     <CheckSquare className="h-4 w-4 text-blue-600" />
@@ -858,24 +846,24 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                 <div>
                                   <p
                                     onClick={() => setInspectedStudent(stud)}
-                                    className="font-bold text-slate-900 hover:text-blue-600 cursor-pointer transition-colors"
+                                    className="font-bold text-[var(--text-primary)] hover:text-blue-600 cursor-pointer transition-colors"
                                   >
                                     {stud.name}
                                   </p>
-                                  <p className="text-[11px] text-slate-500 font-mono">{stud.email}</p>
+                                  <p className="text-[11px] text-[var(--text-muted)] font-mono">{stud.email}</p>
                                 </div>
                               </div>
                             </td>
 
                             {/* Roll Number */}
                             <td className="p-3.5 font-mono whitespace-nowrap">
-                              <span className="bg-slate-100 px-2.5 py-1 rounded border border-slate-200 text-blue-700 font-bold text-xs">
+                              <span className="bg-[var(--bg-surface-subtle)] px-2.5 py-1 rounded border border-[var(--border-color)] text-blue-700 font-bold text-xs">
                                 {stud.rollNumber}
                               </span>
                             </td>
 
                             {/* Grade / Section */}
-                            <td className="p-3.5 text-slate-700 whitespace-nowrap">
+                            <td className="p-3.5 text-[var(--text-secondary)] whitespace-nowrap">
                               {stud.grade ? `${stud.grade}${stud.section && !stud.grade.includes(stud.section) ? ` • Sec ${stud.section}` : ''}` : '—'}
                             </td>
 
@@ -885,7 +873,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                 const attStat = studentAttendanceStatsMap.get(stud.id) || { totalDays: 0, attendedDays: 0, rate: 0, isBelow: false };
                                 return (
                                   <div className="flex items-center gap-1.5">
-                                    <span className={`font-bold text-xs ${attStat.isBelow ? 'text-amber-800' : 'text-slate-800'}`}>
+                                    <span className={`font-bold text-xs ${attStat.isBelow ? 'text-amber-800' : 'text-[var(--text-primary)]'}`}>
                                       {attStat.rate}%
                                     </span>
                                     {attStat.isBelow && (
@@ -899,12 +887,12 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                             </td>
 
                             {/* Guardian Name */}
-                            <td className="p-3.5 text-slate-700 whitespace-nowrap">
+                            <td className="p-3.5 text-[var(--text-secondary)] whitespace-nowrap">
                               {stud.guardianName || '—'}
                             </td>
 
                             {/* Guardian Phone */}
-                            <td className="p-3.5 text-slate-500 font-mono text-[11px] whitespace-nowrap">
+                            <td className="p-3.5 text-[var(--text-muted)] font-mono text-[11px] whitespace-nowrap">
                               {stud.guardianPhone || stud.phone || '—'}
                             </td>
 
@@ -920,7 +908,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   type="button"
                                   onClick={() => setAttendanceStudent(stud)}
                                   title="View Student Attendance Log"
-                                  className="h-7 px-2.5 flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 hover:bg-teal-600 hover:text-white text-teal-700 text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
+                                  className="h-7 px-2.5 flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] hover:bg-teal-600 hover:text-white text-teal-700 text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
                                 >
                                   <CalendarCheck className="h-3.5 w-3.5" /> Attendance
                                 </button>
@@ -929,7 +917,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   type="button"
                                   onClick={() => setInspectedStudent(stud)}
                                   title="Inspect Student Profile"
-                                  className="h-7 w-7 flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 hover:bg-blue-600 hover:text-white text-blue-600 transition-all cursor-pointer shadow-2xs"
+                                  className="h-7 w-7 flex items-center justify-center rounded-md border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] hover:bg-blue-600 hover:text-white text-blue-600 transition-all cursor-pointer shadow-2xs"
                                 >
                                   <Eye className="h-3.5 w-3.5" />
                                 </button>
@@ -943,12 +931,12 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                 </table>
 
                 {/* Bottom Pagination Bar */}
-                <div className="p-3.5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+                <div className="p-3.5 border-t border-[var(--border-color)] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[var(--text-muted)]">
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                       disabled={currentPage === 1}
-                      className="h-7 w-7 flex items-center justify-center border border-slate-200 rounded-md disabled:opacity-30 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                      className="h-7 w-7 flex items-center justify-center border border-[var(--border-color)] rounded-md disabled:opacity-30 hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] cursor-pointer"
                     >
                       <ChevronLeft className="h-3.5 w-3.5" />
                     </button>
@@ -959,19 +947,19 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                           key={pageNum}
                           onClick={() => setCurrentPage(pageNum)}
                           className={`h-7 w-7 flex items-center justify-center rounded-md font-bold text-xs cursor-pointer ${currentPage === pageNum
-                              ? 'bg-blue-600 text-white shadow-xs'
-                              : 'border border-slate-200 text-slate-700 hover:bg-slate-100'
+                              ? 'bg-blue-600 text-white '
+                              : 'border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)]'
                             }`}
                         >
                           {pageNum}
                         </button>
                       );
                     })}
-                    {totalPages > 3 && <span className="px-1 text-slate-400">...</span>}
+                    {totalPages > 3 && <span className="px-1 text-[var(--text-muted)]">...</span>}
                     {totalPages > 3 && (
                       <button
                         onClick={() => setCurrentPage(totalPages)}
-                        className="h-7 w-7 flex items-center justify-center border border-slate-200 rounded-md text-slate-700 hover:bg-slate-100 cursor-pointer"
+                        className="h-7 w-7 flex items-center justify-center border border-[var(--border-color)] rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] cursor-pointer"
                       >
                         {totalPages}
                       </button>
@@ -979,7 +967,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                     <button
                       onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
                       disabled={currentPage === totalPages}
-                      className="h-7 w-7 flex items-center justify-center border border-slate-200 rounded-md disabled:opacity-30 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                      className="h-7 w-7 flex items-center justify-center border border-[var(--border-color)] rounded-md disabled:opacity-30 hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] cursor-pointer"
                     >
                       <ChevronRight className="h-3.5 w-3.5" />
                     </button>
@@ -999,27 +987,27 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
             <div className="space-y-6 animate-fade-in">
               {/* Executive Academic Metrics */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                <div className="bg-white border border-slate-200 p-4.5 rounded-xl shadow-2xs">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Enrolled</p>
-                  <h3 className="text-2xl font-extrabold text-slate-900 mt-1">{allStudentsList.length}</h3>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-color)] p-4.5 rounded-lg shadow-2xs">
+                  <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Total Enrolled</p>
+                  <h3 className="text-2xl font-extrabold text-[var(--text-primary)] mt-1">{allStudentsList.length}</h3>
                 </div>
 
-                <div className="bg-white border border-slate-200 p-4.5 rounded-xl shadow-2xs">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Active Attendance</p>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-color)] p-4.5 rounded-lg shadow-2xs">
+                  <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Active Attendance</p>
                   <h3 className="text-2xl font-extrabold text-emerald-600 mt-1">
                     {allStudentsList.filter((s) => s.status === 'Active').length}
                   </h3>
                 </div>
 
-                <div className="bg-white border border-slate-200 p-4.5 rounded-xl shadow-2xs">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">On Leave / Absent</p>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-color)] p-4.5 rounded-lg shadow-2xs">
+                  <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">On Leave / Absent</p>
                   <h3 className="text-2xl font-extrabold text-rose-600 mt-1">
                     {allStudentsList.filter((s) => s.status === 'On Leave').length}
                   </h3>
                 </div>
 
-                <div className="bg-white border border-slate-200 p-4.5 rounded-xl shadow-2xs">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Guardian Reach</p>
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-color)] p-4.5 rounded-lg shadow-2xs">
+                  <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">Guardian Reach</p>
                   <h3 className="text-2xl font-extrabold text-purple-600 mt-1">
                     {allStudentsList.length > 0
                       ? `${Math.round((allStudentsList.filter((s) => s.guardianPhone && s.guardianPhone !== '—').length / allStudentsList.length) * 100)}%`
@@ -1029,16 +1017,16 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
               </div>
 
               {/* Grade Rosters Summary Table */}
-              <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
-                <div className="p-4 border-b border-slate-100">
-                  <h3 className="text-sm font-bold text-slate-900">Grade Roster & Class Distribution</h3>
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-hidden shadow-2xs">
+                <div className="p-4 border-b border-[var(--border-color)]">
+                  <h3 className="text-sm font-bold text-[var(--text-primary)]">Grade Roster & Class Distribution</h3>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold text-[10px] uppercase">
+                    <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] border-b border-[var(--border-color)] font-bold text-[10px] uppercase">
                       <tr>
-                        <th className="p-3.5 text-slate-900 font-bold">Academic Grade</th>
+                        <th className="p-3.5 text-[var(--text-primary)] font-bold">Academic Grade</th>
                         <th className="p-3.5">Total Enrolled</th>
                         <th className="p-3.5">Active In Class</th>
                         <th className="p-3.5">On Leave</th>
@@ -1046,7 +1034,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                         <th className="p-3.5 text-right">Quick Drilldown</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                    <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
                       {uniqueGrades.map((grade) => {
                         const studentsInGrade = allStudentsList.filter(
                           (s) =>
@@ -1061,12 +1049,12 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                         const rate = studentsInGrade.length > 0 ? Math.round((activeCount / studentsInGrade.length) * 100) : 0;
 
                         return (
-                          <tr key={grade} className="hover:bg-slate-50 transition-colors">
+                          <tr key={grade} className="hover:bg-[var(--bg-surface-subtle)] transition-colors">
                             <td className="p-3.5 whitespace-nowrap">
-                              <span className="font-bold text-slate-900">{grade}</span>
+                              <span className="font-bold text-[var(--text-primary)]">{grade}</span>
                             </td>
 
-                            <td className="p-3.5 whitespace-nowrap font-mono text-slate-900 font-bold">
+                            <td className="p-3.5 whitespace-nowrap font-mono text-[var(--text-primary)] font-bold">
                               {studentsInGrade.length} students
                             </td>
 
@@ -1078,20 +1066,20 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                             </td>
 
                             <td className="p-3.5 whitespace-nowrap">
-                              <span className="text-slate-500 font-mono">
+                              <span className="text-[var(--text-muted)] font-mono">
                                 {onLeaveCount > 0 ? `${onLeaveCount} on leave` : '0 on leave'}
                               </span>
                             </td>
 
                             <td className="p-3.5 whitespace-nowrap">
                               <div className="flex items-center gap-3 w-40">
-                                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                <div className="flex-1 h-2 bg-[var(--bg-surface-subtle)] rounded-full overflow-hidden border border-[var(--border-color)]">
                                   <div
                                     className="h-full bg-blue-600 rounded-full"
                                     style={{ width: `${rate}%` }}
                                   />
                                 </div>
-                                <span className="text-xs font-bold text-slate-900 font-mono">{rate}%</span>
+                                <span className="text-xs font-bold text-[var(--text-primary)] font-mono">{rate}%</span>
                               </div>
                             </td>
 
@@ -1122,29 +1110,29 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
       {/* Slide-Over Drawer: Add New Student */}
       {showAddStudentDrawer && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-xs animate-fade-in">
-          <div className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-scale-up text-slate-900">
+          <div className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)] border-l border-[var(--border-color)] shadow-2xl flex flex-col animate-scale-up text-[var(--text-primary)]">
             {/* Header */}
-            <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 gap-3">
+            <div className="p-4 sm:p-6 sm:px-8 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0 gap-3">
               <div className="min-w-0 flex-1">
-                <h3 className="text-lg sm:text-xl font-bold text-slate-900 truncate">Enroll New Student</h3>
-                <p className="text-xs text-slate-500 mt-0.5 break-words">
+                <h3 className="text-lg sm:text-xl font-bold text-[var(--text-primary)] truncate">Enroll New Student</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5 break-words">
                   Roll Number acts as the login password for the student portal.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAddStudentDrawer(false)}
-                className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors shrink-0"
+                className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] p-2 cursor-pointer rounded-lg hover:bg-[var(--bg-surface-subtle)] transition-colors shrink-0"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             {/* Form */}
-            <form onSubmit={handleAddStudentSubmit} className="flex-1 flex flex-col justify-between overflow-hidden bg-white">
+            <form onSubmit={handleAddStudentSubmit} className="flex-1 flex flex-col justify-between overflow-hidden bg-[var(--bg-surface)]">
               <div className="p-4 sm:p-6 sm:px-8 space-y-4 overflow-y-auto custom-scrollbar text-xs">
                 {addStudentError && (
-                  <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700 flex items-center justify-between gap-2">
+                  <div className="p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700 flex items-center justify-between gap-2">
                     <span>{addStudentError}</span>
                     <button type="button" onClick={() => setAddStudentError('')} className="text-rose-500 hover:text-rose-800 cursor-pointer">
                       <X className="h-4 w-4" />
@@ -1152,7 +1140,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                   </div>
                 )}
                 <div>
-                  <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                     Student Full Name <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -1165,14 +1153,14 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                         setNewStudentEmail(`${e.target.value.trim().toLowerCase().replace(/\s+/g, '.')}@school.edu`);
                       }
                     }}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-900 placeholder-slate-400 font-medium outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-xs text-[var(--text-primary)] placeholder-slate-400 font-medium outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                     required
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       Roll Number / Password <span className="text-rose-500">*</span>
                     </label>
                     <input
@@ -1180,13 +1168,13 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                       placeholder="e.g. 10A-01"
                       value={newStudentRollNo}
                       onChange={(e) => setNewStudentRollNo(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-mono font-bold text-slate-900 placeholder-slate-400 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-xs font-mono font-bold text-[var(--text-primary)] placeholder-slate-400 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                       required
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       Student Email
                     </label>
                     <input
@@ -1194,7 +1182,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                       placeholder="student@school.edu"
                       value={newStudentEmail}
                       onChange={(e) => setNewStudentEmail(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-900 placeholder-slate-400 font-medium outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-xs text-[var(--text-primary)] placeholder-slate-400 font-medium outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                     />
                   </div>
                 </div>
@@ -1203,7 +1191,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                 {configuredBatches.length > 0 ? (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <label className="block text-xs font-bold text-slate-800">
+                      <label className="block text-xs font-bold text-[var(--text-primary)]">
                         Academic Batch <span className="text-rose-500">*</span>
                       </label>
                       <button
@@ -1216,12 +1204,12 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                     </div>
 
                     {showInlineAddBatch ? (
-                      <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 space-y-3">
+                      <div className="p-4 rounded-lg border border-blue-200 bg-blue-50/50 space-y-3">
                         <div className="text-xs font-bold text-blue-950">Add New Academic Batch</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div>
                             <div className="flex items-center justify-between mb-1">
-                              <label className="block text-[11px] font-semibold text-slate-700">Grade / Class *</label>
+                              <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Grade / Class *</label>
                               <div className="flex items-center gap-1">
                                 {['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'].map((preset) => (
                                   <button
@@ -1231,7 +1219,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                       setQuickBatchGrade(preset);
                                       if (quickBatchError) setQuickBatchError('');
                                     }}
-                                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-white border border-slate-200 hover:bg-blue-100 hover:text-blue-700 text-slate-600 cursor-pointer transition-colors"
+                                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[var(--bg-surface)] border border-[var(--border-color)] hover:bg-blue-100 hover:text-blue-700 text-[var(--text-secondary)] cursor-pointer transition-colors"
                                   >
                                     {preset.replace('Grade ', 'G')}
                                   </button>
@@ -1253,10 +1241,10 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   handleCreateQuickBatch();
                                 }
                               }}
-                              className={`w-full rounded-lg border bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none transition-all ${
+                              className={`w-full rounded-lg border bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none transition-all ${
                                 quickBatchError
                                   ? 'border-rose-400 focus:border-rose-600 ring-1 ring-rose-200'
-                                  : 'border-slate-200 focus:border-blue-600'
+                                  : 'border-[var(--border-color)] focus:border-blue-600'
                               }`}
                             />
                             {quickBatchError && (
@@ -1264,7 +1252,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                             )}
                           </div>
                           <div>
-                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">Section</label>
+                            <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Section</label>
                             <input
                               type="text"
                               placeholder="e.g. A"
@@ -1277,13 +1265,13 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   handleCreateQuickBatch();
                                 }
                               }}
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600"
+                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600"
                             />
                           </div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div>
-                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">Shift Start</label>
+                            <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Shift Start</label>
                             <input
                               type="time"
                               value={quickBatchStart}
@@ -1295,11 +1283,11 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   handleCreateQuickBatch();
                                 }
                               }}
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 transition-all cursor-pointer"
+                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 transition-all cursor-pointer"
                             />
                           </div>
                           <div>
-                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">Shift End</label>
+                            <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Shift End</label>
                             <input
                               type="time"
                               value={quickBatchEnd}
@@ -1311,7 +1299,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   handleCreateQuickBatch();
                                 }
                               }}
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 transition-all cursor-pointer"
+                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 transition-all cursor-pointer"
                             />
                           </div>
                         </div>
@@ -1322,14 +1310,14 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                               setShowInlineAddBatch(false);
                               setQuickBatchError('');
                             }}
-                            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                            className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] cursor-pointer"
                           >
                             Cancel
                           </button>
                           <button
                             type="button"
                             onClick={handleCreateQuickBatch}
-                            className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white shadow-xs cursor-pointer transition-all active:scale-98"
+                            className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white  cursor-pointer transition-all active:scale-98"
                           >
                             Create & Select Batch
                           </button>
@@ -1338,12 +1326,12 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">Grade / Class</label>
+                          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Grade / Class</label>
                           <div className="relative">
                             <select
                               value={newStudentGrade}
                               onChange={(e) => handleSelectGrade(e.target.value)}
-                              className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 pr-9 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer"
+                              className="w-full appearance-none rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 pr-9 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer"
                               required
                             >
                               <option value="">Select Grade / Class</option>
@@ -1353,18 +1341,18 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                 </option>
                               ))}
                             </select>
-                            <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+                            <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-[var(--text-muted)] pointer-events-none" />
                           </div>
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">Section</label>
+                          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Section</label>
                           <div className="relative">
                             <select
                               value={newStudentSection}
                               onChange={(e) => handleSelectSection(e.target.value)}
                               disabled={!newStudentGrade}
-                              className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 pr-9 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer disabled:bg-slate-50 disabled:text-slate-400"
+                              className="w-full appearance-none rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 pr-9 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer disabled:bg-[var(--bg-surface-subtle)] disabled:text-[var(--text-muted)]"
                             >
                               <option value="">Select Section (Optional)</option>
                               {availableSectionsForGrade.map((s) => (
@@ -1373,25 +1361,25 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                 </option>
                               ))}
                             </select>
-                            <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+                            <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-[var(--text-muted)] pointer-events-none" />
                           </div>
                         </div>
                       </div>
                     )}
 
                     {selectedBatch && (
-                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs text-slate-600">
-                        <span className="font-semibold text-slate-900">
+                      <div className="p-3 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]/80 flex items-center justify-between text-xs text-[var(--text-secondary)]">
+                        <span className="font-semibold text-[var(--text-primary)]">
                           {selectedBatch.grade}{selectedBatch.section ? ` — Section ${selectedBatch.section}` : ''}
                         </span>
-                        <span className="font-mono text-slate-500 text-[11px]">
+                        <span className="font-mono text-[var(--text-muted)] text-[11px]">
                           Shift: {formatTime12h(selectedBatch.startTime || '08:30')} — {formatTime12h(selectedBatch.endTime || '15:30')}
                         </span>
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50/70 text-slate-800 space-y-3">
+                  <div className="p-4 rounded-lg border border-amber-200 bg-amber-50/70 text-[var(--text-primary)] space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <h4 className="text-xs font-bold text-amber-900">No Academic Batches Configured</h4>
@@ -1403,7 +1391,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                         <button
                           type="button"
                           onClick={() => setShowInlineAddBatch(true)}
-                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0"
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all  cursor-pointer shrink-0"
                         >
                           + Add First Batch
                         </button>
@@ -1411,12 +1399,12 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                     </div>
 
                     {showInlineAddBatch && (
-                      <div className="p-4 rounded-xl border border-blue-200 bg-white space-y-3 mt-2">
-                        <div className="text-xs font-bold text-slate-900">Configure Academic Batch</div>
+                      <div className="p-4 rounded-lg border border-blue-200 bg-[var(--bg-surface)] space-y-3 mt-2">
+                        <div className="text-xs font-bold text-[var(--text-primary)]">Configure Academic Batch</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div>
                             <div className="flex items-center justify-between mb-1">
-                              <label className="block text-[11px] font-semibold text-slate-700">Grade / Class *</label>
+                              <label className="block text-[11px] font-semibold text-[var(--text-secondary)]">Grade / Class *</label>
                               <div className="flex items-center gap-1">
                                 {['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'].map((preset) => (
                                   <button
@@ -1426,7 +1414,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                       setQuickBatchGrade(preset);
                                       if (quickBatchError) setQuickBatchError('');
                                     }}
-                                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-600 cursor-pointer transition-colors"
+                                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[var(--bg-surface-subtle)] hover:bg-blue-50 hover:text-blue-600 text-[var(--text-secondary)] cursor-pointer transition-colors"
                                   >
                                     {preset.replace('Grade ', 'G')}
                                   </button>
@@ -1448,10 +1436,10 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   handleCreateQuickBatch();
                                 }
                               }}
-                              className={`w-full rounded-xl border bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none transition-all ${
+                              className={`w-full rounded-lg border bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none transition-all ${
                                 quickBatchError
                                   ? 'border-rose-400 focus:border-rose-600 ring-1 ring-rose-200'
-                                  : 'border-slate-200 focus:border-blue-600'
+                                  : 'border-[var(--border-color)] focus:border-blue-600'
                               }`}
                             />
                             {quickBatchError && (
@@ -1459,7 +1447,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                             )}
                           </div>
                           <div>
-                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">Section</label>
+                            <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Section</label>
                             <input
                               type="text"
                               placeholder="e.g. A"
@@ -1472,13 +1460,13 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   handleCreateQuickBatch();
                                 }
                               }}
-                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600"
+                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600"
                             />
                           </div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div>
-                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">Shift Start</label>
+                            <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Shift Start</label>
                             <input
                               type="time"
                               value={quickBatchStart}
@@ -1490,11 +1478,11 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   handleCreateQuickBatch();
                                 }
                               }}
-                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 transition-all cursor-pointer"
+                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 transition-all cursor-pointer"
                             />
                           </div>
                           <div>
-                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">Shift End</label>
+                            <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Shift End</label>
                             <input
                               type="time"
                               value={quickBatchEnd}
@@ -1506,7 +1494,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                                   handleCreateQuickBatch();
                                 }
                               }}
-                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 transition-all cursor-pointer"
+                              className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 transition-all cursor-pointer"
                             />
                           </div>
                         </div>
@@ -1517,14 +1505,14 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                               setShowInlineAddBatch(false);
                               setQuickBatchError('');
                             }}
-                            className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                            className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] cursor-pointer"
                           >
                             Cancel
                           </button>
                           <button
                             type="button"
                             onClick={handleCreateQuickBatch}
-                            className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white shadow-xs cursor-pointer transition-all active:scale-98"
+                            className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white  cursor-pointer transition-all active:scale-98"
                           >
                             Create & Select Batch
                           </button>
@@ -1536,7 +1524,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       Parent / Guardian Name
                     </label>
                     <input
@@ -1544,12 +1532,12 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                       placeholder="e.g. Rajesh Sharma"
                       value={newStudentGuardian}
                       onChange={(e) => setNewStudentGuardian(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-900 placeholder-slate-400 font-medium outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-xs text-[var(--text-primary)] placeholder-slate-400 font-medium outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       Guardian Contact Phone
                     </label>
                     <input
@@ -1558,25 +1546,25 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
                       placeholder="e.g. 9845012345 (10 Digits)"
                       value={newStudentGuardianPhone}
                       onChange={(e) => setNewStudentGuardianPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-900 placeholder-slate-400 font-mono outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-xs text-[var(--text-primary)] placeholder-slate-400 font-mono outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                     />
                   </div>
                 </div>
               </div>
 
               {/* Footer */}
-              <div className="p-4 sm:p-6 sm:px-8 border-t border-slate-100 bg-white flex items-center justify-end gap-3 shrink-0 pb-7 sm:pb-6">
+              <div className="p-4 sm:p-6 sm:px-8 border-t border-[var(--border-color)] bg-[var(--bg-surface)] flex items-center justify-end gap-3 shrink-0 pb-7 sm:pb-6">
                 <button
                   type="button"
                   onClick={() => setShowAddStudentDrawer(false)}
-                  className="flex-1 py-3 sm:py-3.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 cursor-pointer transition-colors"
+                  className="flex-1 py-3 sm:py-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-xs font-bold text-[var(--text-secondary)] cursor-pointer transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingStudent}
-                  className="flex-2 py-3 sm:py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-xs font-bold cursor-pointer shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2"
+                  className="flex-2 py-3 sm:py-3.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-xs font-bold cursor-pointer shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2"
                 >
                   <Send className="h-3.5 w-3.5" />
                   <span>{isSubmittingStudent ? 'Enrolling...' : 'Enroll Student'}</span>
@@ -1595,6 +1583,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
         attendanceRecords={state.attendance || []}
         onUpdateStudent={handleUpdateStudent}
         academicBatches={configuredBatches}
+        organization={state.organization}
       />
 
       {/* Student Attendance Log Modal */}

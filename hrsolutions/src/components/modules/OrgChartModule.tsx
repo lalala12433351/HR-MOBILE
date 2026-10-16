@@ -23,11 +23,20 @@ import {
 import { AppState } from '../../services/store';
 import { Employee } from '../../types';
 import { api } from '../../services/apiClient';
+import { mapApiEmployee } from '../../services/backendSync';
 import { EmployeeProfileCardModal } from './hrms/EmployeeProfileCardModal';
 import { isInstitutionMode } from '@/utils/organizationMode';
+import {
+  SlideOverDrawer,
+  slideOverBodyClass,
+  slideOverCancelClass,
+  slideOverFooterClass,
+  slideOverPrimaryClass,
+} from '@/components/common/SlideOverDrawer';
 
 export interface OrgNode {
   id: string;
+  kind?: 'person' | 'team' | 'unassigned';
   employeeId?: string;
   name: string;
   role: string;
@@ -41,6 +50,32 @@ export interface OrgNode {
   managerName?: string;
   level: number;
   children?: OrgNode[];
+}
+
+type TeamRecord = {
+  id: string;
+  name: string;
+  departmentId?: string;
+  departmentName?: string | null;
+  leadEmployeeId?: string | null;
+  leadName?: string | null;
+};
+
+const APEX_TITLE_RE = /\b(ceo|chief executive|founder|president|managing director)\b/i;
+
+function isLeadershipEmployee(emp: Employee): boolean {
+  if (emp.role === 'super_admin') return true;
+  return APEX_TITLE_RE.test(`${emp.designation || ''} ${emp.role || ''}`);
+}
+
+function resolveSavedManagerId(emp: Employee, roster: Employee[]): string {
+  let mgrKey = emp.managerId || '';
+  if (!mgrKey && emp.lineManager?.name) {
+    const mgr = roster.find((m) => m.name.toLowerCase() === emp.lineManager!.name.toLowerCase());
+    if (mgr) mgrKey = mgr.id;
+  }
+  if (mgrKey && mgrKey !== emp.id && roster.some((e) => e.id === mgrKey)) return mgrKey;
+  return '';
 }
 
 interface OrgChartModuleProps {
@@ -124,7 +159,12 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const employees = useMemo(() => state?.employees || [], [state?.employees]);
+  const teamRecords = useMemo<TeamRecord[]>(
+    () => ((state?.customOptions as any)?.teamRecords || []) as TeamRecord[],
+    [state?.customOptions]
+  );
   const orgName = state?.organization?.name || 'Workspace';
+  const didSyncReporting = React.useRef(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -140,19 +180,49 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
     return ['All', ...Array.from(set)];
   }, [employees]);
 
-  // Build the hierarchical tree structure with robust root detection & sorting
+  const editingEmp = useMemo(
+    () => employees.find((e) => e.id === editingEmpId) || null,
+    [employees, editingEmpId]
+  );
+
+  const designationOptions = useMemo(() => {
+    const set = new Set<string>();
+    (state?.customOptions?.designations || []).forEach((d: string) => {
+      if (d && d.trim()) set.add(d.trim());
+    });
+    if (editingEmp?.designation?.trim()) set.add(editingEmp.designation.trim());
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [state?.customOptions?.designations, editingEmp]);
+
+  const departmentOptions = useMemo(() => {
+    const set = new Set<string>();
+    (state?.customOptions?.departments || []).forEach((d: string) => {
+      if (d && d.trim()) set.add(d.trim());
+    });
+    if (editingEmp?.department?.trim()) set.add(editingEmp.department.trim());
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [state?.customOptions?.departments, editingEmp]);
+
+  // Build tree from saved reporting_manager_id, then wrap reports into team groups.
   const orgTrees = useMemo<OrgNode[]>(() => {
     if (employees.length === 0) return [];
 
-    // Helper to map Employee to OrgNode
+    const roster =
+      selectedDept === 'All' ? employees : employees.filter((e) => e.department === selectedDept);
+    if (roster.length === 0) return [];
+
+    const placeholderAvatar =
+      'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2394a3b8"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
+
     const employeeToNode = (emp: Employee, lvl: number, children?: OrgNode[]): OrgNode => ({
       id: emp.id,
+      kind: 'person',
       employeeId: emp.employeeId,
       name: emp.name,
-      role: emp.designation || 'Specialist',
+      role: emp.designation || 'Team Member',
       department: emp.department || 'General',
-      office: emp.officeName || emp.location || 'Bengaluru HQ',
-      avatar: emp.avatar || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2394a3b8"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>',
+      office: emp.officeName || emp.location || '',
+      avatar: emp.avatar || placeholderAvatar,
       email: emp.email,
       phone: emp.phone,
       status: emp.status || 'Active',
@@ -162,91 +232,143 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
       children: children && children.length > 0 ? children : undefined,
     });
 
-    // Map: managerId -> list of direct reports
     const childrenMap = new Map<string, Employee[]>();
-
-    employees.forEach((emp) => {
-      let mgrKey = emp.managerId || '';
-      if (!mgrKey && emp.lineManager?.name) {
-        const mgr = employees.find((m) => m.name.toLowerCase() === emp.lineManager?.name.toLowerCase());
-        if (mgr) mgrKey = mgr.id;
-      }
-
-      if (mgrKey && mgrKey !== emp.id && employees.some((e) => e.id === mgrKey)) {
+    roster.forEach((emp) => {
+      const mgrKey = resolveSavedManagerId(emp, roster);
+      if (mgrKey) {
         if (!childrenMap.has(mgrKey)) childrenMap.set(mgrKey, []);
         childrenMap.get(mgrKey)!.push(emp);
       }
     });
 
-    // Recursive subtree builder
     const visited = new Set<string>();
     const buildSubTree = (emp: Employee, lvl: number): OrgNode => {
       visited.add(emp.id);
-      const directReports = (childrenMap.get(emp.id) || [])
-        .filter((r) => !visited.has(r.id))
-        .sort((a, b) => getRoleRank(a) - getRoleRank(b));
+      const directReports = (childrenMap.get(emp.id) || []).filter((r) => !visited.has(r.id));
       const childNodes = directReports.map((r) => buildSubTree(r, lvl + 1));
       return employeeToNode(emp, lvl, childNodes);
     };
 
-    // Filter by department if a specific department is chosen
-    if (selectedDept !== 'All') {
-      const deptEmployees = employees.filter((e) => e.department === selectedDept);
-      const deptRoots = deptEmployees
-        .filter((e) => {
-          let mgrKey = e.managerId || '';
-          if (!mgrKey && e.lineManager?.name) {
-            const mgr = employees.find((m) => m.name.toLowerCase() === e.lineManager?.name.toLowerCase());
-            if (mgr) mgrKey = mgr.id;
-          }
-          return !mgrKey || !deptEmployees.some((de) => de.id === mgrKey);
-        })
-        .sort((a, b) => getRoleRank(a) - getRoleRank(b));
+    const teamKeyFor = (emp: Employee | undefined) => {
+      if (!emp) return '';
+      if (emp.teamId) return `id:${emp.teamId}`;
+      if (emp.team) return `name:${emp.team.trim().toLowerCase()}`;
+      return '';
+    };
 
-      return (deptRoots.length > 0 ? deptRoots : deptEmployees.slice(0, 1)).map((r) => buildSubTree(r, 1));
-    }
-
-    // Top-level roots (employees without valid manager in the system or reporting to themselves)
-    const topLevelEmployees = employees
-      .filter((emp) => {
-        let mgrKey = emp.managerId || '';
-        if (!mgrKey && emp.lineManager?.name) {
-          const mgr = employees.find((m) => m.name.toLowerCase() === emp.lineManager?.name.toLowerCase());
-          if (mgr) mgrKey = mgr.id;
+    const wrapWithTeams = (node: OrgNode): OrgNode => {
+      if (node.kind === 'team' || node.kind === 'unassigned') {
+        return { ...node, children: node.children?.map(wrapWithTeams) };
+      }
+      const wrappedKids = (node.children || []).map(wrapWithTeams);
+      const byTeam = new Map<string, OrgNode[]>();
+      const unteamed: OrgNode[] = [];
+      for (const child of wrappedKids) {
+        if (child.kind !== 'person') {
+          unteamed.push(child);
+          continue;
         }
-        return !mgrKey || mgrKey === emp.id || !employees.some((e) => e.id === mgrKey);
-      })
-      .sort((a, b) => getRoleRank(a) - getRoleRank(b));
+        const emp = roster.find((e) => e.id === child.id);
+        const key = teamKeyFor(emp);
+        if (!key) {
+          unteamed.push(child);
+          continue;
+        }
+        if (!byTeam.has(key)) byTeam.set(key, []);
+        byTeam.get(key)!.push(child);
+      }
 
-    // Sort all roots so highest executive is always the primary root
-    const roots = topLevelEmployees.length > 0 ? topLevelEmployees : [...employees].sort((a, b) => getRoleRank(a) - getRoleRank(b));
-    const primaryRoot = roots[0];
-    const secondaryRoots = roots.slice(1);
+      const usedTeamIds = new Set<string>();
+      const teamNodes: OrgNode[] = [];
+      for (const [key, members] of byTeam) {
+        const rawId = key.startsWith('id:') ? key.slice(3) : '';
+        const rawName = key.startsWith('name:') ? key.slice(5) : '';
+        const rec =
+          teamRecords.find((t) => t.id === rawId) ||
+          teamRecords.find((t) => t.name.trim().toLowerCase() === rawName);
+        if (rec?.id) usedTeamIds.add(rec.id);
+        const teamName = rec?.name || members[0]?.department || 'Team';
+        const leadId = rec?.leadEmployeeId ? String(rec.leadEmployeeId) : '';
+        members.sort((a, b) => {
+          if (leadId && a.id === leadId) return -1;
+          if (leadId && b.id === leadId) return 1;
+          return a.name.localeCompare(b.name);
+        });
+        teamNodes.push({
+          id: `team:${rec?.id || key}`,
+          kind: 'team',
+          name: teamName,
+          role: 'Team',
+          department: rec?.departmentName || members[0]?.department || node.department,
+          office: node.office,
+          avatar: '',
+          level: node.level + 1,
+          children: members,
+        });
+      }
 
-    // Build tree starting from primary executive root
-    const mainTree = buildSubTree(primaryRoot, 1);
+      for (const rec of teamRecords) {
+        if (usedTeamIds.has(rec.id)) continue;
+        if (String(rec.leadEmployeeId || '') !== String(node.id)) continue;
+        teamNodes.push({
+          id: `team:${rec.id}`,
+          kind: 'team',
+          name: rec.name,
+          role: 'Team',
+          department: rec.departmentName || node.department,
+          office: node.office,
+          avatar: '',
+          level: node.level + 1,
+          children: undefined,
+        });
+      }
 
-    // If there are other unmanaged employees, attach them under the primary root
-    secondaryRoots.forEach((secRoot) => {
-      if (!visited.has(secRoot.id)) {
-        if (!mainTree.children) mainTree.children = [];
-        mainTree.children.push(buildSubTree(secRoot, 2));
+      const nextChildren = [...teamNodes, ...unteamed];
+      return { ...node, children: nextChildren.length ? nextChildren : undefined };
+    };
+
+    const roots = roster.filter((emp) => !resolveSavedManagerId(emp, roster));
+    const leadershipRoots = roots.filter(isLeadershipEmployee);
+    const otherRoots = roots.filter((emp) => !isLeadershipEmployee(emp));
+    const orderedRoots = [...leadershipRoots, ...otherRoots.filter((e) => leadershipRoots.length === 0)];
+
+    const trees: OrgNode[] = (leadershipRoots.length > 0 ? leadershipRoots : orderedRoots).map((r) =>
+      wrapWithTeams(buildSubTree(r, 1))
+    );
+
+    const leftover =
+      leadershipRoots.length > 0
+        ? otherRoots.filter((e) => !visited.has(e.id))
+        : roster.filter((e) => !visited.has(e.id));
+    leftover.forEach((emp) => {
+      if (!visited.has(emp.id)) {
+        trees.push(wrapWithTeams(buildSubTree(emp, 1)));
       }
     });
 
-    // Handle any orphaned unvisited employees by attaching under primary root
-    const unvisitedEmps = employees.filter((e) => !visited.has(e.id));
-    if (unvisitedEmps.length > 0) {
-      unvisitedEmps.forEach((unv) => {
-        if (!visited.has(unv.id)) {
-          if (!mainTree.children) mainTree.children = [];
-          mainTree.children.push(buildSubTree(unv, 2));
-        }
+    const unassignedPeople = trees.filter((t) => t.kind !== 'team' && !isLeadershipEmployee(
+      roster.find((e) => e.id === t.id) || ({} as Employee)
+    ) && t.kind !== 'unassigned' && !t.managerId && t.kind === 'person' && !leadershipRoots.some((l) => l.id === t.id) && leadershipRoots.length > 0);
+
+    if (unassignedPeople.length > 0) {
+      const assigned = new Set(unassignedPeople.map((n) => n.id));
+      const remaining = trees.filter((t) => !assigned.has(t.id));
+      remaining.push({
+        id: 'group:unassigned',
+        kind: 'unassigned',
+        name: 'Unassigned',
+        role: 'No manager yet',
+        department: '',
+        office: '',
+        avatar: '',
+        level: 1,
+        children: unassignedPeople,
       });
+      return remaining;
     }
 
-    return [mainTree];
-  }, [employees, selectedDept]);
+    return trees.length > 0 ? trees : roster.slice(0, 1).map((r) => wrapWithTeams(buildSubTree(r, 1)));
+  }, [employees, selectedDept, teamRecords]);
 
   // Handle Changing Manager / Updating Employee Hierarchy in Store
   const handleUpdateReportingManager = async (employeeId: string, newManagerId: string) => {
@@ -423,6 +545,26 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
     setEditingEmpId(null);
   };
 
+  // Backfill reporting lines once for older workspaces with empty managerIds.
+  useEffect(() => {
+    if (!canEditOrgChart || didSyncReporting.current || !onUpdateState) return;
+    if (employees.length < 2) return;
+    const missing = employees.filter((e) => !e.managerId && !isLeadershipEmployee(e)).length;
+    if (missing / employees.length < 0.25) {
+      didSyncReporting.current = true;
+      return;
+    }
+    didSyncReporting.current = true;
+    (async () => {
+      const syncRes = await api.org.syncReporting();
+      if (!syncRes.success) return;
+      const empRes = await api.identity.getEmployees();
+      if (!empRes.success || !Array.isArray(empRes.data)) return;
+      const mapped = empRes.data.map((row: any) => mapApiEmployee(row));
+      onUpdateState((prev) => ({ ...prev, employees: mapped }));
+    })().catch(() => undefined);
+  }, [canEditOrgChart, employees, onUpdateState]);
+
   // Auto-expand nodes when searching
   useEffect(() => {
     if (searchQuery.trim()) {
@@ -461,6 +603,13 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
   const handleZoomOut = () => setZoomLevel((z) => Math.max(0.5, Number((z - 0.1).toFixed(1))));
   const handleResetZoom = () => setZoomLevel(1);
 
+  const countPeople = (node: OrgNode): number => {
+    if (node.kind === 'person') {
+      return 1 + (node.children || []).reduce((sum, child) => sum + countPeople(child), 0);
+    }
+    return (node.children || []).reduce((sum, child) => sum + countPeople(child), 0);
+  };
+
   // Render a Single Node Card in Tree View (Cleaned Up & Modernized)
   const renderCard = (node: OrgNode) => {
     const hasChildren = node.children && node.children.length > 0;
@@ -477,68 +626,87 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
       border: 'border-slate-200',
     };
 
-    const isTopLeader = node.level === 1;
+    const person = node.kind !== 'team' && node.kind !== 'unassigned'
+      ? employees.find((e) => e.id === node.id)
+      : undefined;
+    const isFounder = !!person && isLeadershipEmployee(person);
+    const isGroup = node.kind === 'team' || node.kind === 'unassigned';
+    const groupCount = isGroup ? countPeople(node) : node.children?.length || 0;
 
     return (
       <div className="flex flex-col items-center relative group z-10">
         <div
-          onClick={() => setSelectedNode(node)}
-          className={`w-52 rounded-2xl border bg-white p-4 pt-4 pb-5 flex flex-col items-center text-center shadow-xs hover:shadow-lg transition-all duration-200 cursor-pointer relative select-none ${
+          onClick={() => {
+            if (isGroup) return;
+            setSelectedNode(node);
+          }}
+          className={`w-52 rounded-2xl border bg-white p-4 pt-4 pb-5 flex flex-col items-center text-center shadow-xs transition-all duration-200 relative select-none ${
+            isGroup ? 'cursor-default' : 'cursor-pointer hover:shadow-lg'
+          } ${
             matchesSearch
               ? 'border-blue-600 ring-4 ring-blue-500/20 shadow-md scale-105'
-              : isTopLeader
+              : isFounder
                 ? 'border-slate-300 ring-2 ring-slate-900/5'
-                : 'border-slate-200 hover:border-slate-300'
+                : isGroup
+                  ? 'border-dashed border-slate-300 bg-slate-50'
+                  : 'border-slate-200 hover:border-slate-300'
           }`}
         >
-          {/* Top Level Subtle Tag */}
-          {isTopLeader && (
+          {isFounder && (
             <div className="absolute -top-2.5 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[10px] font-bold uppercase tracking-wider border border-slate-200/80 shadow-2xs">
-              Lead Executive
+              Founder / CEO
+            </div>
+          )}
+          {node.kind === 'unassigned' && (
+            <div className="absolute -top-2.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[10px] font-bold uppercase tracking-wider border border-amber-200 shadow-2xs">
+              Unassigned
             </div>
           )}
 
-          {/* Avatar with Status Indicator */}
-          <div className="relative mt-1">
-            <img
-              src={node.avatar}
-              alt={node.name}
-              className="h-14 w-14 rounded-full object-cover ring-2 ring-slate-100 shadow-2xs"
-            />
-            <span
-              className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white ${
-                node.status === 'On Leave' ? 'bg-amber-400' : 'bg-emerald-500'
-              }`}
-              title={node.status || 'Active'}
-            />
-          </div>
+          {isGroup ? (
+            <div className="h-14 w-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center">
+              <Users className="h-6 w-6 text-slate-500" />
+            </div>
+          ) : (
+            <div className="relative mt-1">
+              <img
+                src={node.avatar}
+                alt={node.name}
+                className="h-14 w-14 rounded-full object-cover ring-2 ring-slate-100 shadow-2xs"
+              />
+              <span
+                className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white ${
+                  node.status === 'On Leave' ? 'bg-amber-400' : 'bg-emerald-500'
+                }`}
+                title={node.status || 'Active'}
+              />
+            </div>
+          )}
 
-          {/* Name */}
           <h4 className="mt-2.5 text-xs font-bold text-slate-900 tracking-tight leading-tight truncate max-w-[180px]">
             {node.name}
           </h4>
 
-          {/* Role / Designation */}
           <p className="text-[11px] font-semibold text-slate-600 mt-0.5 truncate max-w-[180px]">
-            {node.role}
+            {isGroup ? `${groupCount} ${groupCount === 1 ? 'person' : 'people'}` : node.role}
           </p>
 
-          {/* Department Badge */}
-          <div className="mt-2 flex items-center gap-1.5">
-            <span
-              className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${deptTheme.bg} ${deptTheme.text} ${deptTheme.border}`}
-            >
-              {node.department}
-            </span>
-          </div>
+          {!!node.department && (
+            <div className="mt-2 flex items-center gap-1.5">
+              <span
+                className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${deptTheme.bg} ${deptTheme.text} ${deptTheme.border}`}
+              >
+                {node.department}
+              </span>
+            </div>
+          )}
 
-          {/* Direct Reports Expand Button — Clean Minimalist Circle */}
           {hasChildren && (
             <button
               type="button"
               onClick={(e) => toggleCollapse(node.id, e)}
               className="absolute -bottom-3 px-2 py-0.5 rounded-full bg-white hover:bg-slate-50 text-slate-700 hover:text-blue-600 flex items-center gap-1 text-[10px] font-bold transition-all shadow-xs cursor-pointer active:scale-95 z-20 border border-slate-200"
-              title={isCollapsed ? `Expand ${node.children?.length} direct reports` : 'Collapse direct reports'}
+              title={isCollapsed ? `Expand ${node.children?.length} items` : 'Collapse'}
             >
               <Users className="h-3 w-3 text-slate-500" />
               <span>{node.children?.length}</span>
@@ -901,26 +1069,15 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
 
       {/* Edit Hierarchy & Role Modal (Only for HR & Super Admin) */}
       {showEditModal && editingEmpId && canEditOrgChart && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="relative max-w-lg w-full bg-white rounded-3xl border border-slate-200 p-7 shadow-2xl space-y-5 animate-in zoom-in-95 duration-150 text-slate-900">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <GitFork className="h-5 w-5 text-blue-600" />
-                <h3 className="text-base font-bold text-slate-900">Edit Reporting & Hierarchy</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEditModal(false);
-                  setEditingEmpId(null);
-                }}
-                className="h-8 w-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center transition-colors cursor-pointer"
-              >
-                <X className="h-4 w-4 stroke-[2]" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveEditModal} className="space-y-4">
+        <SlideOverDrawer
+          title="Edit Reporting & Hierarchy"
+          onClose={() => {
+            setShowEditModal(false);
+            setEditingEmpId(null);
+          }}
+        >
+            <form onSubmit={handleSaveEditModal} className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className={slideOverBodyClass}>
               {/* Employee Preview Header */}
               {(() => {
                 const targetEmp = employees.find((e) => e.id === editingEmpId);
@@ -969,14 +1126,26 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
                 <label className="block text-xs font-bold text-slate-800">
                   Job Designation / Title
                 </label>
-                <input
-                  type="text"
+                <select
                   value={editDesignation}
                   onChange={(e) => setEditDesignation(e.target.value)}
-                  placeholder="e.g. Chief Executive Officer, Senior Software Engineer"
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-xs font-semibold outline-none focus:border-slate-900 bg-white"
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-xs font-semibold outline-none focus:border-slate-900 bg-white cursor-pointer"
                   required
-                />
+                >
+                  <option value="" disabled>
+                    Select a designation
+                  </option>
+                  {designationOptions.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+                {designationOptions.length === 0 && (
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    No designations configured. Add them in Settings → Job Roles & Titles.
+                  </p>
+                )}
               </div>
 
               {/* 3. Department */}
@@ -984,14 +1153,26 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
                 <label className="block text-xs font-bold text-slate-800">
                   Department
                 </label>
-                <input
-                  type="text"
+                <select
                   value={editDepartment}
                   onChange={(e) => setEditDepartment(e.target.value)}
-                  placeholder="e.g. Management, Development, HR, Design"
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-xs font-semibold outline-none focus:border-slate-900 bg-white"
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-xs font-semibold outline-none focus:border-slate-900 bg-white cursor-pointer"
                   required
-                />
+                >
+                  <option value="" disabled>
+                    Select a department
+                  </option>
+                  {departmentOptions.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+                {departmentOptions.length === 0 && (
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    No departments configured. Add them in Settings → Departments & Teams.
+                  </p>
+                )}
               </div>
 
               {/* 4. Office Location / Campus */}
@@ -1039,7 +1220,7 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
                       setEditOffice(e.target.value);
                       setEditOffices(e.target.value.trim() ? [e.target.value.trim()] : []);
                     }}
-                    placeholder="e.g. Headquarters Office, Bengaluru HQ, Campus Main Wing"
+                    placeholder="e.g. Headquarters Office, Campus Main Wing"
                     className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-xs font-semibold outline-none focus:border-slate-900 bg-white"
                     required
                   />
@@ -1062,27 +1243,24 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
                 </select>
               </div>
 
-              <div className="pt-3 flex items-center gap-3">
+              </div>
+              <div className={slideOverFooterClass}>
                 <button
                   type="button"
                   onClick={() => {
                     setShowEditModal(false);
                     setEditingEmpId(null);
                   }}
-                  className="flex-1 py-3 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-all cursor-pointer text-center"
+                  className={slideOverCancelClass}
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-xs font-bold text-white transition-all cursor-pointer shadow-md text-center"
-                >
+                <button type="submit" className={slideOverPrimaryClass}>
                   Save Changes
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </SlideOverDrawer>
       )}
     </div>
   );

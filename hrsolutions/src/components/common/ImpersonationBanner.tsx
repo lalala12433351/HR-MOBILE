@@ -5,7 +5,7 @@ import { ShieldAlert, ArrowLeft, Building2 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/services/apiClient';
 import { AuthService } from '@/services/authService';
-import { IMPERSONATION_TENANT_KEY, MASTER_ADMIN_ORIGIN } from '@/config/origins';
+import { IMPERSONATION_TENANT_KEY, masterAdminHref } from '@/config/origins';
 import type { ClientTenant } from '@/types';
 
 export const ImpersonationBanner: React.FC = () => {
@@ -42,11 +42,11 @@ export const ImpersonationBanner: React.FC = () => {
     });
     AuthService.logout();
     api.clearAuth();
-    window.location.href = `${MASTER_ADMIN_ORIGIN}/master-admin`;
+    window.location.href = masterAdminHref('/master-admin');
   };
 
   return (
-    <aside aria-label="Operator Session" className="sticky top-0 z-50 w-full bg-amber-50 border-b border-amber-200/90 text-amber-950 px-4 py-2 text-xs shadow-xs animate-in slide-in-from-top duration-200">
+    <aside aria-label="Operator Session" className="sticky top-0 z-50 w-full bg-amber-50 border-b border-amber-200/90 text-amber-950 px-4 py-2 text-xs animate-in slide-in-from-top duration-200">
       <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
           <div className="w-5 h-5 rounded-md bg-amber-500 text-white flex items-center justify-center shrink-0">
@@ -55,7 +55,7 @@ export const ImpersonationBanner: React.FC = () => {
           <div className="flex flex-wrap items-center gap-1.5 font-medium">
             <span className="font-bold text-amber-900">OPERATOR SESSION:</span>
             <span>You are viewing workspace</span>
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-amber-200 text-amber-950 font-bold">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-surface)] border border-amber-200 text-amber-950 font-bold">
               <Building2 className="w-3 h-3 text-amber-700" />
               {targetTenant.name}
             </span>

@@ -1,4 +1,4 @@
-import { UserPersona, Employee, LeaveRequest, TimesheetEntry, AttendanceRegularization, Project } from '../types';
+import { UserPersona, Employee, LeaveRequest, TimesheetEntry, AttendanceRegularization, Project, Task } from '../types';
 
 /**
  * Checks if the persona is an Admin / Super Administrator (Full access to EVERYTHING in the organization).
@@ -41,7 +41,9 @@ export const isManagerPersona = (
   if (role === 'employee' || role === 'faculty' || role === 'student') {
     // Regular employee / faculty / student is NOT a manager unless they have distinct direct reports
     const personaId = persona.id;
-    return employees.some((emp) => emp.id !== personaId && emp.managerId === personaId);
+    return employees.some(
+      (emp) => emp.id !== personaId && (emp.managerId === personaId || !!emp.managerIds?.includes(personaId))
+    );
   }
 
   return (
@@ -82,6 +84,7 @@ export const isDirectReport = (
   const cleanUsername = personaName.replace(/\s+/g, '');
 
   if (employee.managerId && employee.managerId === personaId) return true;
+  if (personaId && employee.managerIds?.includes(personaId)) return true;
   if (employee.managerName && employee.managerName.trim().toLowerCase() === personaName) return true;
 
   if (employee.lineManager) {
@@ -158,6 +161,133 @@ export const getTeamEmployees = (
   );
 };
 
+const findPersonaRecord = (persona: UserPersona, employees: Employee[]): Employee | undefined => {
+  const personaName = (persona.name || '').trim().toLowerCase();
+  const personaEmail = (persona.email || '').trim().toLowerCase();
+  return employees.find(
+    (e) =>
+      e.id === persona.id ||
+      (!!personaEmail && (e.email || '').toLowerCase() === personaEmail) ||
+      (!!personaName && (e.name || '').toLowerCase() === personaName)
+  );
+};
+
+/**
+ * IDs of everyone above the persona: their reporting chain and the lead of their team.
+ */
+const getSuperiorIds = (persona: UserPersona, employees: Employee[]): Set<string> => {
+  const superiors = new Set<string>();
+  const me = findPersonaRecord(persona, employees);
+  if (!me) return superiors;
+
+  const byId = new Map(employees.map((e) => [e.id, e]));
+  const byName = new Map(employees.map((e) => [(e.name || '').trim().toLowerCase(), e]));
+  const managerOf = (emp: Employee): Employee | undefined =>
+    (emp.managerId && byId.get(emp.managerId)) ||
+    (emp.managerName ? byName.get(emp.managerName.trim().toLowerCase()) : undefined) ||
+    (emp.lineManager?.name ? byName.get(emp.lineManager.name.trim().toLowerCase()) : undefined);
+
+  let cursor = managerOf(me);
+  while (cursor && cursor.id !== me.id && !superiors.has(cursor.id)) {
+    superiors.add(cursor.id);
+    cursor = managerOf(cursor);
+  }
+  return superiors;
+};
+
+/**
+ * Employees whose tasks/projects the persona may manage.
+ * - Admin & HR: everyone
+ * - Manager: self + their team, never anyone above them in the reporting chain
+ * - Employee: self only
+ */
+export const getManageableEmployees = (
+  persona?: UserPersona | null,
+  employees: Employee[] = []
+): Employee[] => {
+  if (!persona) return [];
+  if (isExecutiveOrAdmin(persona)) return employees;
+  const superiors = getSuperiorIds(persona, employees);
+  return getTeamEmployees(persona, employees).filter((emp) => !superiors.has(emp.id));
+};
+
+const isPersonaSelf = (persona: UserPersona, id?: string, name?: string): boolean =>
+  (!!id && id === persona.id) ||
+  (!!name && !!persona.name && name.trim().toLowerCase() === persona.name.trim().toLowerCase());
+
+const isManageablePerson = (
+  persona: UserPersona,
+  employees: Employee[],
+  id?: string,
+  name?: string
+): boolean => {
+  if (isPersonaSelf(persona, id, name)) return true;
+  const lowerName = (name || '').trim().toLowerCase();
+  return getManageableEmployees(persona, employees).some(
+    (e) => (!!id && (e.id === id || e.employeeId === id)) || (!!lowerName && (e.name || '').toLowerCase() === lowerName)
+  );
+};
+
+/**
+ * Checks if the persona can edit / move / delete a task.
+ * Unassigned tasks are manageable by anyone with a management role.
+ */
+export const taskAssigneeIds = (task?: Pick<Task, 'assigneeId' | 'assigneeIds'> | null): string[] => {
+  const ids = [...(task?.assigneeIds || [])].map(String).filter(Boolean);
+  if (task?.assigneeId && !ids.includes(task.assigneeId)) ids.unshift(task.assigneeId);
+  return Array.from(new Set(ids));
+};
+
+export const taskAssigneeNames = (task?: Pick<Task, 'assigneeName' | 'assigneeNames'> | null): string[] => {
+  const names = [...(task?.assigneeNames || [])].map((name) => String(name || '').trim()).filter(Boolean);
+  if (task?.assigneeName && !names.some((name) => name.toLowerCase() === task.assigneeName.toLowerCase())) {
+    names.unshift(task.assigneeName);
+  }
+  return Array.from(new Set(names));
+};
+
+export const isTaskAssignee = (
+  task?: Pick<Task, 'assigneeId' | 'assigneeIds' | 'assigneeName' | 'assigneeNames'> | null,
+  personaId?: string,
+  personaName?: string
+): boolean => {
+  if (!task) return false;
+  if (personaId && taskAssigneeIds(task).includes(personaId)) return true;
+  const lower = (personaName || '').trim().toLowerCase();
+  return !!lower && taskAssigneeNames(task).some((name) => name.toLowerCase() === lower);
+};
+
+export const canManageTask = (
+  persona?: UserPersona | null,
+  task?: Pick<Task, 'assigneeId' | 'assigneeName' | 'assigneeIds' | 'assigneeNames'> | null,
+  employees: Employee[] = []
+): boolean => {
+  if (!persona || !task) return false;
+  if (isExecutiveOrAdmin(persona)) return true;
+  if (isTaskAssignee(task, persona.id, persona.name)) return true;
+  const ids = taskAssigneeIds(task);
+  const names = taskAssigneeNames(task);
+  if (!ids.length && !names.length) return isManagerPersona(persona, employees);
+  return ids.some((id, index) => isManageablePerson(persona, employees, id, names[index] || names[0]));
+};
+
+/**
+ * Checks if the persona can edit a project (hours, billing, invoices).
+ * Only the project lead, someone above the lead, or Admin/HR qualifies.
+ */
+export const canManageProject = (
+  persona?: UserPersona | null,
+  project?: Pick<Project, 'managerId' | 'managerName'> | null,
+  employees: Employee[] = []
+): boolean => {
+  if (!persona || !project) return false;
+  if (isExecutiveOrAdmin(persona)) return true;
+  if (isPersonaSelf(persona, project.managerId, project.managerName)) return true;
+  if (!isManagerPersona(persona, employees)) return false;
+  if (!project.managerId && !project.managerName) return false;
+  return isManageablePerson(persona, employees, project.managerId, project.managerName);
+};
+
 /**
  * Filters attendance records strictly to the persona's accessible team / self.
  */
@@ -208,9 +338,37 @@ export const isMemberOfMyTeam = (
   return team.some((e) => e.id === employeeId || e.employeeId === employeeId);
 };
 
+const isOwnLeaveRequest = (
+  persona?: UserPersona | null,
+  leave?: LeaveRequest | null,
+  employees: Employee[] = []
+): boolean => {
+  if (!persona || !leave) return false;
+  const ids = new Set(
+    [persona.id, (persona as { employeeId?: string }).employeeId].filter(Boolean).map((id) => String(id))
+  );
+  const email = (persona.email || '').trim().toLowerCase();
+  const name = (persona.name || '').trim().toLowerCase();
+
+  if (leave.employeeId && ids.has(String(leave.employeeId))) return true;
+  if (name && leave.employeeName?.trim().toLowerCase() === name) return true;
+
+  const targetEmp = employees.find(
+    (e) =>
+      (leave.employeeId && (e.id === leave.employeeId || e.employeeId === leave.employeeId)) ||
+      (!!leave.employeeName && e.name.toLowerCase() === leave.employeeName.toLowerCase())
+  );
+  if (!targetEmp) return false;
+  if (ids.has(String(targetEmp.id)) || (targetEmp.employeeId && ids.has(String(targetEmp.employeeId)))) return true;
+  if (email && targetEmp.email?.trim().toLowerCase() === email) return true;
+  if (name && targetEmp.name.toLowerCase() === name) return true;
+  return false;
+};
+
 /**
  * Checks if the persona has permission to approve / reject a leave request.
- * - Admin & HR: Can approve leaves for anyone in the organization.
+ * Nobody can approve their own leave.
+ * - Admin & HR: Can approve leaves for anyone else in the organization.
  * - Manager: Can approve leaves ONLY for their direct reports (NEVER for CEO or peers).
  */
 export const canApproveLeave = (
@@ -219,12 +377,10 @@ export const canApproveLeave = (
   employees: Employee[] = []
 ): boolean => {
   if (!persona || !leave) return false;
-  if (isAdminPersona(persona) || isHRPersona(persona)) return true;
+  // Nobody — including managers, HR, and admins — may decide their own leave.
+  if (isOwnLeaveRequest(persona, leave, employees)) return false;
 
-  // Cannot approve own leave
-  if (leave.employeeId === persona.id || leave.employeeName?.toLowerCase() === persona.name?.toLowerCase()) {
-    return false;
-  }
+  if (isAdminPersona(persona) || isHRPersona(persona)) return true;
 
   const targetEmp = employees.find(
     (e) => e.id === leave.employeeId || e.name.toLowerCase() === (leave.employeeName || '').toLowerCase()
@@ -259,12 +415,13 @@ export const canApproveTimesheet = (
   projects: Project[] = []
 ): boolean => {
   if (!persona || !timesheet) return false;
-  if (isAdminPersona(persona) || isHRPersona(persona)) return true;
 
   // Cannot approve own timesheet
   if (timesheet.employeeId === persona.id || timesheet.employeeName?.toLowerCase() === persona.name?.toLowerCase()) {
     return false;
   }
+
+  if (isAdminPersona(persona) || isHRPersona(persona)) return true;
 
   // Check if project manager of the timesheet's project
   if (timesheet.projectId) {

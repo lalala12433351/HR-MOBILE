@@ -27,7 +27,9 @@ export async function resetDatabase(): Promise<void> {
     await client.query(`
       DROP TABLE IF EXISTS public.database_backups CASCADE;
       DROP TABLE IF EXISTS public.telemetry_snapshots CASCADE;
+      DROP TABLE IF EXISTS public.license_events CASCADE;
       DROP TABLE IF EXISTS public.tenant_subscriptions CASCADE;
+      DROP TABLE IF EXISTS public.license_plans CASCADE;
       DROP TABLE IF EXISTS public.global_auth_mapping CASCADE;
       DROP TABLE IF EXISTS public.tenants CASCADE;
     `);
@@ -58,8 +60,9 @@ export async function resetDatabase(): Promise<void> {
     demoTenantId = tenantRes.rows[0].id;
 
     await client2.query(
-      `INSERT INTO public.tenant_subscriptions (tenant_id, tier, max_employees, status, billing_cycle)
-       VALUES ($1, 'enterprise', 500, 'active', 'annual')`,
+      `INSERT INTO public.tenant_subscriptions (tenant_id, plan_id, tier, max_employees, status, billing_cycle)
+       SELECT $1, p.id, p.key, 500, 'active', 'annual'
+         FROM public.license_plans p WHERE p.key = 'enterprise'`,
       [demoTenantId]
     );
 

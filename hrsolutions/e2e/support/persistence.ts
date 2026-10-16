@@ -5,6 +5,8 @@ export const API = {
   setupOffice: /\/api\/v1\/setup\/office(?:\?.*)?$/,
   setupDepartments: /\/api\/v1\/setup\/departments(?:\?.*)?$/,
   setupRoles: /\/api\/v1\/setup\/roles(?:\?.*)?$/,
+  setupEmploymentTypes: /\/api\/v1\/setup\/employment-types(?:\?.*)?$/,
+  setupAttendance: /\/api\/v1\/setup\/attendance(?:\?.*)?$/,
   setupTeam: /\/api\/v1\/setup\/team(?:\?.*)?$/,
   orgOffices: /\/api\/v1\/org\/offices(?:\?.*)?$/,
   orgDepartments: /\/api\/v1\/org\/departments(?:\?.*)?$/,

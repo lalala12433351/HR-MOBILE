@@ -45,12 +45,14 @@ function HRMSContent() {
     }
   }, [isLoaded, uiState.isAuthenticated, router]);
 
-  // If redirected or navigated to /hr with leaves or attendance parameters, route to /attendance
+  // Keep legacy deep links working while keeping configuration in the dedicated settings workspace.
   useEffect(() => {
     if (tabParam === 'leaves' || applyParam) {
       router.replace(`/attendance?tab=leaves${applyParam ? '&apply=true' : ''}`);
     } else if (tabParam === 'attendance' || tabParam === 'attendance_leaves') {
       router.replace('/attendance');
+    } else if (tabParam === 'employee_settings' || tabParam === 'settings') {
+      router.replace('/settings?section=people');
     }
   }, [tabParam, applyParam, router]);
 
@@ -59,7 +61,7 @@ function HRMSContent() {
     (viewParam === 'org_chart' ? 'org_chart' : viewParam === 'directory' ? 'directory' : undefined);
 
   // Ensure resolvedTab is strictly one of the employee tabs
-  const validEmployeeTabs = ['employees', 'my_team', 'organization', 'directory', 'org_chart', 'employee_settings'];
+  const validEmployeeTabs = ['employees', 'my_team', 'organization', 'directory', 'org_chart'];
   const resolvedTab = rawResolved && validEmployeeTabs.includes(rawResolved) ? rawResolved : 'employees';
 
   // Prefer fetched roster; fall back to AppContext sync so empty businessData never wipes employees

@@ -2,20 +2,29 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  Check,
-} from 'lucide-react';
+import { SettingsToggle } from './settings/SettingsToggle';
+import { SettingsToast } from './settings/SettingsToast';
 import { DEFAULT_GEO_COORDINATES } from '@/config/constants';
 import { AppState } from '../../services/store';
-import { CustomProfileField, OnboardingSectionKey, Employee } from '../../types';
+import { CustomProfileField, OnboardingSectionKey, Employee, DepartmentRecord } from '../../types';
 import { initialOnboardingFields } from '../../data/initialData';
 import { AddOfficeModal, OfficeModalData } from '../common/AddOfficeModal';
 import { PayrollSettingsView } from './PayrollSettingsView';
 import { api } from '../../services/apiClient';
+import { DepartmentCodeBadge } from '../common/DepartmentTag';
+import { ManagerPicker } from '../common/ManagerPicker';
+import { DepartmentDetailView } from './DepartmentDetailView';
+import { applyDepartmentLocalUpdate, removeDepartmentLocal } from '@/utils/departmentRecords';
+import {
+  isValidDepartmentCode,
+  normalizeDepartmentCode,
+  suggestDepartmentCode,
+} from '../../utils/departmentCode';
 
 interface EmployeeSettingsViewProps {
   state: AppState;
   onUpdateState: (updater: (prev: AppState) => AppState) => void;
+  showPayrollSettings?: boolean;
 }
 
 export interface JobRoleDetail {
@@ -31,57 +40,48 @@ export interface JobRoleDetail {
   canApproveLeaves: boolean;
 }
 
-// Reusable Sleek Toggle Switch Component (Consistent with DESIGN.md)
-const ToggleSwitch: React.FC<{
-  checked: boolean;
-  onChange: (val: boolean) => void;
-  id?: string;
-}> = ({ checked, onChange, id }) => {
-  return (
-    <button
-      type="button"
-      id={id}
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-150 ease-in-out outline-none ${
-        checked ? 'bg-blue-600' : 'bg-slate-200'
-      }`}
-    >
-      <span
-        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white transition duration-150 ease-in-out mt-0.5 ${
-          checked ? 'translate-x-4.5' : 'translate-x-0.5'
-        }`}
-      />
-    </button>
-  );
+const ToggleSwitch = SettingsToggle;
+
+type OrgLeadRecord = DepartmentRecord;
+
+const uniqueNames = (names: Iterable<string | null | undefined>): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of names) {
+    const name = raw?.trim();
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    result.push(name);
+  }
+  return result;
 };
+
+const leadIdsOf = (record?: OrgLeadRecord | null): string[] =>
+  record?.leadEmployeeIds?.length
+    ? record.leadEmployeeIds
+    : record?.leadEmployeeId
+    ? [record.leadEmployeeId]
+    : [];
 
 export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
   state,
   onUpdateState,
+  showPayrollSettings = true,
 }) => {
   const router = useRouter();
   const options = state.customOptions;
 
   // Sub-Navigation Tab State
   const [subTab, setSubTab] = useState<
-    'general' | 'initial_passwords' | 'departments_teams' | 'job_posts' | 'employment_types' | 'office_locations' | 'onboarding' | 'offboarding' | 'payroll_settings'
+    'general' | 'initial_passwords' | 'departments_teams' | 'job_posts' | 'employment_types' | 'priorities' | 'office_locations' | 'onboarding' | 'offboarding' | 'payroll_settings'
   >('general');
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [selectedDepartmentName, setSelectedDepartmentName] = useState<string | null>(null);
 
-  // Initial Passwords & Non-Active Account Provisioning State
-  const [defaultInitialPassword, setDefaultInitialPassword] = useState(
-    options?.defaultInitialPassword || 'Welcome@123'
-  );
-  const [forcePasswordReset, setForcePasswordReset] = useState(
-    options?.forcePasswordReset ?? true
-  );
-  const [inlinePasswords, setInlinePasswords] = useState<{ [id: string]: string }>({});
-  const [showPasswordMap, setShowPasswordMap] = useState<{ [id: string]: boolean }>({});
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Account invites for employees who have not set up their login yet
+  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
   const [passwordSearchQuery, setPasswordSearchQuery] = useState('');
   const [accountStatusFilter, setAccountStatusFilter] = useState<'all' | 'non_active'>('non_active');
   const [isBatchApplying, setIsBatchApplying] = useState(false);
@@ -118,94 +118,69 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
     );
   }, [accountStatusFilter, nonActiveEmployees, state.employees, passwordSearchQuery]);
 
-  const handleSaveEmployeePassword = async (empId: string, pwd: string) => {
-    if (!pwd || pwd.trim().length < 4) {
-      showToast('Password must be at least 4 characters');
-      return;
-    }
-    const cleanPwd = pwd.trim();
-    const targetEmp = state.employees.find((e) => e.id === empId);
+  const markInvited = (empIds: string[], details: string) => {
+    onUpdateState((prev) => ({
+      ...prev,
+      employees: prev.employees.map((e) =>
+        empIds.includes(e.id) ? { ...e, accountStatus: 'Invited', isActivated: false } : e
+      ),
+      auditLogs: [
+        {
+          id: `log_${Date.now()}`,
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+          user: prev.currentPersona.name,
+          action: 'EMPLOYEE_INVITE_SENT',
+          entity: 'EmployeeAuth',
+          entityId: empIds.length === 1 ? empIds[0] : 'all_non_active',
+          ipAddress: '106.51.72.18',
+          details,
+        },
+        ...prev.auditLogs,
+      ],
+    }));
+  };
 
-    setIsSaving(true);
+  const handleResendInvite = async (emp: Employee) => {
+    if (resendingInviteId) return;
+    setResendingInviteId(emp.id);
     try {
-      await api.identity.updateEmployee(empId, { password: cleanPwd });
-      
-      onUpdateState((prev) => ({
-        ...prev,
-        employees: prev.employees.map((e) => (e.id === empId ? { ...e, password: cleanPwd } : e)),
-        auditLogs: [
-          {
-            id: `log_${Date.now()}`,
-            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-            user: prev.currentPersona.name,
-            action: 'EMPLOYEE_PASSWORD_UPDATED',
-            entity: 'EmployeeAuth',
-            entityId: empId,
-            ipAddress: '106.51.72.18',
-            details: `Set initial password for ${targetEmp?.name || empId}`,
-          },
-          ...prev.auditLogs,
-        ],
-      }));
-      showToast(`Initial password saved for ${targetEmp?.name || 'employee'}`);
-    } catch (err) {
-      console.error('Password save failed:', err);
-      showToast('Failed to save password. Please try again.');
+      await api.identity.resendInvite(emp.id);
+      markInvited([emp.id], `Sent account setup invite to ${emp.email}`);
+      showToast(`Invite sent to ${emp.email}`);
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to send invite. Please try again.');
     } finally {
-      setIsSaving(false);
+      setResendingInviteId(null);
     }
   };
 
-  const handleApplyDefaultPasswordToAll = async () => {
-    const pwd = defaultInitialPassword.trim();
-    if (!pwd) {
-      showToast('Please specify a valid default initial password');
-      return;
-    }
-    if (nonActiveEmployees.length === 0) {
-      showToast('No non-active accounts found');
+  const handleResendAllInvites = async () => {
+    const targets = nonActiveEmployees.filter((e) => e.role !== 'student');
+    if (targets.length === 0) {
+      showToast('No accounts are waiting for setup');
       return;
     }
 
     setIsBatchApplying(true);
-    setIsSaving(true);
-    const targetIds = nonActiveEmployees.map((e) => e.id);
-
-    try {
-      await Promise.all(
-        targetIds.map((id) => api.identity.updateEmployee(id, { password: pwd }))
-      );
-      
-      onUpdateState((prev) => ({
-        ...prev,
-        customOptions: {
-          ...prev.customOptions,
-          defaultInitialPassword: pwd,
-          forcePasswordReset: forcePasswordReset,
-        },
-        employees: prev.employees.map((e) => (targetIds.includes(e.id) ? { ...e, password: pwd } : e)),
-        auditLogs: [
-          {
-            id: `log_${Date.now()}`,
-            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-            user: prev.currentPersona.name,
-            action: 'BATCH_INITIAL_PASSWORDS_SET',
-            entity: 'EmployeeAuth',
-            entityId: 'all_non_active',
-            ipAddress: '106.51.72.18',
-            details: `Applied default initial password to ${targetIds.length} non-active accounts`,
-          },
-          ...prev.auditLogs,
-        ],
-      }));
-      showToast(`Applied default password to ${targetIds.length} non-active accounts`);
-    } catch (err) {
-      console.error('Batch password apply failed:', err);
-      showToast('Failed to apply default password to some accounts.');
-    } finally {
-      setIsBatchApplying(false);
-      setIsSaving(false);
+    const sentIds: string[] = [];
+    let failed = 0;
+    for (const emp of targets) {
+      try {
+        await api.identity.resendInvite(emp.id);
+        sentIds.push(emp.id);
+      } catch {
+        failed += 1;
+      }
     }
+    if (sentIds.length > 0) {
+      markInvited(sentIds, `Sent account setup invites to ${sentIds.length} employee(s)`);
+    }
+    showToast(
+      failed === 0
+        ? `Invites sent to ${sentIds.length} employee(s)`
+        : `Sent ${sentIds.length} invite(s); ${failed} could not be sent (recently invited or already active)`
+    );
+    setIsBatchApplying(false);
   };
 
   const handleQuickActivate = async (empId: string) => {
@@ -256,29 +231,6 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
     }
   };
 
-  const handleCopyCredentials = (emp: any) => {
-    const pwd = inlinePasswords[emp.id] || emp.password || defaultInitialPassword;
-    const loginUrl = typeof window !== 'undefined' ? `${window.location.origin}/login` : 'Portal Login';
-    const text = `HR Portal Credentials\nEmployee: ${emp.name}\nEmail: ${emp.email}\nInitial Password: ${pwd}\nLogin URL: ${loginUrl}`;
-
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(text);
-    }
-    setCopiedId(emp.id);
-    setTimeout(() => setCopiedId(null), 2500);
-    showToast(`Credentials copied for ${emp.name}`);
-  };
-
-  const handleGenerateRandomPassword = (empId: string) => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
-    let pwd = 'Arcle!';
-    for (let i = 0; i < 6; i++) {
-      pwd += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setInlinePasswords((prev) => ({ ...prev, [empId]: pwd }));
-    showToast('Generated secure temporary password');
-  };
-
   // 1. General & Profile Settings State (hydrated from persisted customOptions)
   const [empIdPrefix, setEmpIdPrefix] = useState(
     () => options?.employeeIdSettings?.prefix || 'EMP'
@@ -313,8 +265,11 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
 
   // 2. Departments & Teams & Offices State
   const [newDepartment, setNewDepartment] = useState('');
+  const [newDepartmentCode, setNewDepartmentCode] = useState('');
+  const [newDepartmentCodeEdited, setNewDepartmentCodeEdited] = useState(false);
   const [newTeam, setNewTeam] = useState('');
-  const [newTeamManagerId, setNewTeamManagerId] = useState('');
+  const [newTeamDepartment, setNewTeamDepartment] = useState('');
+  const [newTeamManagerIds, setNewTeamManagerIds] = useState<string[]>([]);
   const [showOfficeModal, setShowOfficeModal] = useState(false);
   const [editingOfficeData, setEditingOfficeData] = useState<OfficeModalData | null>(null);
 
@@ -577,6 +532,18 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
       setIsSaving(false);
     }
   };
+  const [taskPriorities, setTaskPriorities] = useState(
+    () =>
+      state.customOptions?.taskPriorities?.length
+        ? state.customOptions.taskPriorities
+        : [
+            { id: 'low', name: 'Low', badgeColor: 'slate', slaHours: 72 },
+            { id: 'medium', name: 'Medium', badgeColor: 'blue', slaHours: 48 },
+            { id: 'high', name: 'High', badgeColor: 'amber', slaHours: 24 },
+            { id: 'urgent', name: 'Urgent', badgeColor: 'rose', slaHours: 8 },
+          ]
+  );
+  const [newPriorityName, setNewPriorityName] = useState('');
   const [employmentTypes, setEmploymentTypes] = useState<
     { id: string; name: string; hasBenefits: boolean; isPermanent: boolean }[]
   >(() => {
@@ -627,8 +594,12 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
   const [newFieldPlaceholder, setNewFieldPlaceholder] = useState('');
   const [newFieldDescription, setNewFieldDescription] = useState('');
   const [newFieldOptionsStr, setNewFieldOptionsStr] = useState('');
-  const [autoSendWelcomeEmail, setAutoSendWelcomeEmail] = useState(true);
-  const [autoAssignBuddy, setAutoAssignBuddy] = useState(true);
+  const [autoSendWelcomeEmail, setAutoSendWelcomeEmail] = useState(
+    () => options?.onboardingAutomation?.autoSendWelcomeEmail ?? true
+  );
+  const [autoAssignBuddy, setAutoAssignBuddy] = useState(
+    () => options?.onboardingAutomation?.autoAssignBuddy ?? true
+  );
 
   // 7. Offboarding Policy (hydrated from persisted customOptions)
   const [reqExitInterview, setReqExitInterview] = useState(
@@ -765,26 +736,106 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
   // Robust Departments List & Handlers
   const currentDepartments = useMemo(() => {
     if (state.customOptions?.departments && state.customOptions.departments.length > 0) {
-      return state.customOptions.departments;
+      return uniqueNames(state.customOptions.departments);
     }
-    const set = new Set<string>();
-    (state.employees || []).forEach((e) => {
-      if (e.department) set.add(e.department);
-    });
-    return Array.from(set);
+    return uniqueNames((state.employees || []).map((e) => e.department));
   }, [state.customOptions?.departments, state.employees]);
 
   // Robust Teams List & Handlers
   const currentTeams = useMemo(() => {
     if (state.customOptions?.teams && state.customOptions.teams.length > 0) {
-      return state.customOptions.teams;
+      return uniqueNames(state.customOptions.teams);
     }
-    const set = new Set<string>();
-    (state.employees || []).forEach((e) => {
-      if (e.team) set.add(e.team);
-    });
-    return Array.from(set);
+    return uniqueNames((state.employees || []).map((e) => e.team));
   }, [state.customOptions?.teams, state.employees]);
+
+  const departmentRecords = ((options as any)?.departmentRecords || []) as OrgLeadRecord[];
+  const teamRecords = ((options as any)?.teamRecords || []) as OrgLeadRecord[];
+  const findRecord = (records: OrgLeadRecord[], name: string) =>
+    records.find((r) => String(r.name || '').toLowerCase() === name.toLowerCase());
+
+  const leadFieldsFor = (ids: string[]) => {
+    const names = ids.map((id) => (state.employees || []).find((e) => e.id === id)?.name || '');
+    return {
+      leadEmployeeId: ids[0] || null,
+      leadName: names[0] || null,
+      leadEmployeeIds: ids,
+      leadNames: names.filter(Boolean),
+    };
+  };
+
+  // Co-lead changes alter who manages whom server-side; pull the new manager links.
+  const refreshEmployeeManagers = async () => {
+    try {
+      const res = await api.identity.getEmployees();
+      if (!res.success || !Array.isArray(res.data)) return;
+      const byId = new Map<string, any>((res.data as any[]).map((row) => [String(row.id), row]));
+      onUpdateState((prev) => ({
+        ...prev,
+        employees: (prev.employees || []).map((emp) => {
+          const row = byId.get(emp.id);
+          if (!row) return emp;
+          return {
+            ...emp,
+            managerId: row.reporting_manager_id || emp.managerId,
+            managerIds: Array.isArray(row.co_manager_ids) ? row.co_manager_ids.map(String) : emp.managerIds,
+          };
+        }),
+      }));
+    } catch (err) {
+      console.error('Manager refresh failed', err);
+    }
+  };
+
+  const handleSaveLeads = async (kind: 'department' | 'team', name: string, ids: string[]) => {
+    const recordsKey = kind === 'department' ? 'departmentRecords' : 'teamRecords';
+    setIsSaving(true);
+    try {
+      let recordId = findRecord(kind === 'department' ? departmentRecords : teamRecords, name)?.id;
+      if (!recordId) {
+        const listRes = kind === 'department' ? await api.org.getDepartments() : await api.org.getTeams();
+        recordId = ((listRes.data || []) as any[]).find(
+          (r) => String(r.name || '').toLowerCase() === name.toLowerCase()
+        )?.id;
+      }
+      if (!recordId) throw new Error(`${kind === 'department' ? 'Department' : 'Team'} not found on server`);
+
+      const res =
+        kind === 'department'
+          ? await api.org.updateDepartment(recordId, { leadEmployeeIds: ids })
+          : await api.org.updateTeam(recordId, { leadEmployeeIds: ids });
+      if (!res.success) throw new Error(res.error?.message || 'Could not save managers');
+      const savedIds: string[] = Array.isArray((res.data as any)?.lead_employee_ids)
+        ? (res.data as any).lead_employee_ids.map(String)
+        : ids;
+
+      onUpdateState((prev) => {
+        const existing = ((prev.customOptions as any)?.[recordsKey] || []) as OrgLeadRecord[];
+        const hasRecord = existing.some((r) => r.id === recordId);
+        const nextRecord = { id: recordId, name, ...leadFieldsFor(savedIds) };
+        return {
+          ...prev,
+          customOptions: {
+            ...prev.customOptions,
+            [recordsKey]: hasRecord
+              ? existing.map((r) => (r.id === recordId ? { ...r, ...nextRecord } : r))
+              : [...existing, nextRecord],
+          } as any,
+        };
+      });
+      await refreshEmployeeManagers();
+      showToast(
+        savedIds.length
+          ? `${name}: ${savedIds.length} manager${savedIds.length === 1 ? '' : 's'} saved`
+          : `${name}: managers cleared`
+      );
+    } catch (err: any) {
+      console.error('Manager save failed', err);
+      showToast(err?.message || `Failed to update managers for "${name}".`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleAddDepartment = async (deptName: string) => {
     const trimmed = deptName.trim();
@@ -794,19 +845,32 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
       return;
     }
 
+    const shortCode = newDepartmentCode || suggestDepartmentCode(trimmed);
+    if (!isValidDepartmentCode(shortCode)) {
+      showToast('Department code must be 2–6 lowercase letters or digits and start with a letter.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const code = `${trimmed.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'DEP'}${Math.floor(10 + Math.random() * 90)}`;
-      await api.org.createDepartment({ name: trimmed, code });
+      const res = await api.org.createDepartment({ name: trimmed, code, shortCode });
+      const created = res.data as any;
       const updated = [...currentDepartments, trimmed];
       onUpdateState((prev) => ({
         ...prev,
         customOptions: {
           ...prev.customOptions,
           departments: updated,
-        },
+          departmentRecords: [
+            ...(((prev.customOptions as any)?.departmentRecords || []) as OrgLeadRecord[]),
+            { id: created?.id, name: trimmed, shortCode: created?.short_code || shortCode, description: created?.description || '' },
+          ],
+        } as any,
       }));
       setNewDepartment('');
+      setNewDepartmentCode('');
+      setNewDepartmentCodeEdited(false);
       showToast(`Department "${trimmed}" added successfully`);
     } catch (err: any) {
       console.error('Department save failed', err);
@@ -832,7 +896,10 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           departments: (prev.customOptions?.departments || []).filter(
             (d) => d.toLowerCase() !== deptName.toLowerCase()
           ),
-        },
+          departmentRecords: (((prev.customOptions as any)?.departmentRecords || []) as OrgLeadRecord[]).filter(
+            (r) => r.id !== match.id
+          ),
+        } as any,
       }));
       showToast(`Removed department "${deptName}"`);
     } catch (e: any) {
@@ -854,22 +921,23 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
     try {
       const deptsRes = await api.org.getDepartments();
       const deptRows = Array.isArray(deptsRes.data) ? deptsRes.data : [];
-      const preferredDeptName = currentDepartments[0];
-      const matchDept =
-        deptRows.find(
-          (d: any) =>
-            preferredDeptName &&
-            String(d.name || '').toLowerCase() === preferredDeptName.toLowerCase()
-        ) || deptRows[0];
-
-      if (!matchDept?.id) {
+      const preferredDeptName = newTeamDepartment.trim() || currentDepartments[0];
+      const matchDept = deptRows.find(
+        (d: any) =>
+          preferredDeptName &&
+          String(d.name || '').toLowerCase() === preferredDeptName.toLowerCase()
+      );
+      if (!preferredDeptName) {
         throw new Error('Create a department first, then add a team under it.');
+      }
+      if (!matchDept?.id) {
+        throw new Error(`Choose a department for team "${trimmed}".`);
       }
 
       const createRes = await api.org.createTeam({
         departmentId: matchDept.id,
         name: trimmed,
-        leadEmployeeId: newTeamManagerId || undefined,
+        leadEmployeeIds: newTeamManagerIds,
       });
 
       const updated = [...currentTeams, trimmed];
@@ -879,9 +947,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
             name: trimmed,
             departmentId: matchDept.id,
             departmentName: matchDept.name,
-            leadEmployeeId: newTeamManagerId || null,
-            leadName:
-              (state.employees || []).find((e) => e.id === newTeamManagerId)?.name || null,
+            ...leadFieldsFor(newTeamManagerIds),
           }
         : null;
 
@@ -896,7 +962,9 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
         } as any,
       }));
       setNewTeam('');
-      setNewTeamManagerId('');
+      setNewTeamManagerIds([]);
+      setNewTeamDepartment('');
+      if (newTeamManagerIds.length) void refreshEmployeeManagers();
       showToast(`Team "${trimmed}" added successfully`);
     } catch (err: any) {
       console.error('Team save failed', err);
@@ -1077,9 +1145,12 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
       designations: currentDesignations,
       employmentTypes: employmentTypes.map((e) => e.name),
       employmentTypeCategories: employmentTypes,
+      taskPriorities,
       onboardingFields: currentOnboardingFields,
-      defaultInitialPassword: defaultInitialPassword.trim(),
-      forcePasswordReset: forcePasswordReset,
+      onboardingAutomation: {
+        autoSendWelcomeEmail,
+        autoAssignBuddy,
+      },
       employeeIdSettings: {
         prefix: empIdPrefix.trim() || 'EMP',
         sequenceStart: empIdSeqStart.trim() || '101',
@@ -1142,67 +1213,77 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
     }
   };
 
-  return (
-    <div className="space-y-6">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-3 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200">
-          <Check className="h-4 w-4 shrink-0" />
-          <span className="text-xs font-semibold">{toastMessage}</span>
-        </div>
-      )}
+  if (selectedDepartmentName) {
+    return (
+      <DepartmentDetailView
+        departmentName={selectedDepartmentName}
+        state={state}
+        canEdit
+        onBack={() => setSelectedDepartmentName(null)}
+        backLabel="Back to Settings"
+        onSelectEmployee={(emp) => router.push(`/hr?emp=${emp.id}`)}
+        onSaved={(patch) => {
+          onUpdateState((prev) => applyDepartmentLocalUpdate(prev, patch));
+          setSelectedDepartmentName(patch.name);
+        }}
+        onDeleted={(id, name) => {
+          onUpdateState((prev) => removeDepartmentLocal(prev, id, name));
+          setSelectedDepartmentName(null);
+        }}
+      />
+    );
+  }
 
-      {/* Main Page Title Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">
-            Employee Settings
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Configure employee profiles, job roles, departments, initial passwords, locations, and lifecycle rules
-          </p>
-        </div>
+  return (
+    <div className="settings-page">
+      <SettingsToast message={toastMessage} />
+
+      <div className="settings-page__header">
+        <h2 className="settings-page__heading">
+          Employee Settings
+        </h2>
 
         <button
+          type="button"
           onClick={handleSaveAllSettings}
-          className="rounded-lg bg-blue-600 hover:bg-blue-700 px-4 py-2.5 text-xs font-semibold text-white transition-all cursor-pointer active:scale-98 w-full sm:w-auto shrink-0 shadow-xs"
+          className="settings-page__action shrink-0"
         >
           Save Changes
         </button>
       </div>
 
       {/* SubTab Navigation */}
-      <div className="flex items-center gap-1 border-b border-slate-200 pb-px overflow-x-auto no-scrollbar py-1 w-full">
+      <div className="settings-page__tabs" role="tablist" aria-label="People and organization settings categories">
         {[
           { id: 'general', label: 'General & Rules' },
-          { id: 'initial_passwords', label: 'Initial Passwords', badge: nonActiveEmployees.length },
+          { id: 'initial_passwords', label: 'Account Invites', badge: nonActiveEmployees.length },
           { id: 'job_posts', label: 'Job Roles & Titles' },
           { id: 'departments_teams', label: 'Departments & Teams' },
           { id: 'employment_types', label: 'Employment Types' },
+          { id: 'priorities', label: 'Task Priorities' },
           { id: 'office_locations', label: 'Office Locations' },
           { id: 'onboarding', label: 'Onboarding Fields' },
           { id: 'offboarding', label: 'Offboarding Policy' },
           { id: 'payroll_settings', label: 'Payroll Settings' },
-        ].map((item) => {
+        ].filter((item) => showPayrollSettings || item.id !== 'payroll_settings').map((item) => {
           const isActive = subTab === item.id;
           return (
             <button
               key={item.id}
               type="button"
               onClick={() => setSubTab(item.id as any)}
-              className={`px-3.5 py-2 text-xs transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`employee-settings-${item.id}`}
+              className={`settings-page__tab ${
                 isActive
-                  ? 'border-b-2 border-blue-600 text-blue-600 font-semibold'
-                  : 'text-slate-600 hover:text-slate-900 font-medium'
+                  ? 'settings-page__tab--active'
+                  : ''
               }`}
             >
               <span>{item.label}</span>
               {typeof item.badge === 'number' && item.badge > 0 && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  isActive ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {item.badge}
-                </span>
+                <span className="settings-page__badge">{item.badge}</span>
               )}
             </button>
           );
@@ -1210,17 +1291,17 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
       </div>
 
       {/* Main Content Area */}
-      <div className="w-full space-y-6">
+      <div className="w-full space-y-5" id={`employee-settings-${subTab}`} role="tabpanel">
           {/* ========================================================================= */}
           {/* 1. GENERAL & PROFILE RULES                                                */}
           {/* ========================================================================= */}
           {subTab === 'general' && (
-            <div className="rounded-xl border border-slate-200 bg-white p-6 sm:p-7 space-y-6">
+            <div className="settings-page__card space-y-6">
               <div>
-                <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                <h3 className="settings-page__section-heading">
                   General & Profile Rules
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                <p className="settings-page__section-description">
                   Define employee ID generation, standard probation duration, and self-service permissions.
                 </p>
               </div>
@@ -1376,15 +1457,15 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   <ToggleSwitch checked={allowCoworkerDirectoryAccess} onChange={setAllowCoworkerDirectoryAccess} />
                 </div>
 
-                {/* Account Provisioning & Initial Passwords Card */}
+                {/* Account Invites Card */}
                 <div className="pt-4 border-t border-slate-200 space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                        Non-Active Accounts & Initial Passwords
+                        Account Setup Invites
                       </h4>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        Configure default initial passwords for accounts awaiting activation and distribute login credentials.
+                        New employees receive an email to create their own password. Links expire after 72 hours and can be resent.
                       </p>
                     </div>
                     <button
@@ -1392,45 +1473,15 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                       onClick={() => setSubTab('initial_passwords')}
                       className="inline-flex items-center text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shrink-0 self-start sm:self-auto"
                     >
-                      Manage Account Passwords ({nonActiveEmployees.length})
+                      Manage Invites ({nonActiveEmployees.length})
                     </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-600">
-                        Default Initial Password Template
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={defaultInitialPassword}
-                          onChange={(e) => setDefaultInitialPassword(e.target.value)}
-                          placeholder="e.g. Welcome@123"
-                          className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 transition-all font-mono"
-                        />
-                      </div>
-                      <span className="text-[10px] text-slate-400">Used as the starting password for new non-activated staff.</span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                      <div>
-                        <span className="text-xs font-bold text-slate-900 block">
-                          Require Password Reset on First Login
-                        </span>
-                        <span className="text-[11px] text-slate-500">
-                          Employees will be prompted to choose a new password upon first sign-in.
-                        </span>
-                      </div>
-                      <ToggleSwitch checked={forcePasswordReset} onChange={setForcePasswordReset} />
-                    </div>
                   </div>
 
                   {nonActiveEmployees.length > 0 && (
                     <div className="p-3.5 rounded-lg bg-amber-50/80 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                       <div>
                         <span className="text-amber-900 font-medium">
-                          <strong>{nonActiveEmployees.length} non-activated account(s)</strong> currently require initial credentials setup.
+                          <strong>{nonActiveEmployees.length} account(s)</strong> have not finished setting up their login yet.
                         </span>
                       </div>
                       <button
@@ -1438,7 +1489,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                         onClick={() => setSubTab('initial_passwords')}
                         className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer shrink-0 shadow-xs"
                       >
-                        View & Set Passwords
+                        View pending invites
                       </button>
                     </div>
                   )}
@@ -1452,14 +1503,14 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* ========================================================================= */}
           {subTab === 'initial_passwords' && (
             <div className="space-y-6 font-sans">
-              <div className="rounded-xl border border-slate-200 bg-white p-6 sm:p-7 space-y-6">
+              <div className="settings-page__card space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h3 className="text-lg font-bold text-slate-900 tracking-tight">
-                      Initial Passwords & Account Access
+                      Account Invites & Access
                     </h3>
                     <p className="text-xs text-slate-500 mt-1 font-medium">
-                      Set initial login passwords for non-activated accounts and new hires before they log in.
+                      Employees set up their own login from the invite email. Resend it if a link expired or never arrived.
                     </p>
                   </div>
 
@@ -1473,47 +1524,25 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   </div>
                 </div>
 
-                {/* Global Default Initial Password Card */}
-                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5 space-y-4">
+                {/* Bulk Invite Card */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="space-y-0.5">
-                      <label className="text-xs font-bold text-slate-800 block">
-                        Default Initial Password Template
-                      </label>
+                      <span className="text-xs font-bold text-slate-800 block">
+                        Resend all pending invites
+                      </span>
                       <p className="text-[11px] text-slate-500 font-medium">
-                        Default password assigned when onboarding new staff or resetting passwords in bulk.
+                        Sends a fresh setup link to everyone who hasn&apos;t created their password yet. Older links stop working.
                       </p>
                     </div>
-
-                    <div className="flex items-center gap-2.5">
-                      <input
-                        type="text"
-                        value={defaultInitialPassword}
-                        onChange={(e) => setDefaultInitialPassword(e.target.value)}
-                        placeholder="Welcome@123"
-                        className="w-48 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-mono font-medium text-slate-900 outline-none focus:border-blue-600 shadow-xs"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleApplyDefaultPasswordToAll}
-                        disabled={isBatchApplying || nonActiveEmployees.length === 0}
-                        className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold transition-all shadow-xs cursor-pointer active:scale-98 shrink-0"
-                      >
-                        {isBatchApplying ? 'Applying...' : `Apply to All Non-Active (${nonActiveEmployees.length})`}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-3 border-t border-slate-200">
-                    <div>
-                      <span className="text-xs font-bold text-slate-900 block">
-                        Require Password Change on First Sign-In
-                      </span>
-                      <span className="text-[11px] text-slate-500 font-medium">
-                        Enforces security policy by prompting users to set their own permanent password.
-                      </span>
-                    </div>
-                    <ToggleSwitch checked={forcePasswordReset} onChange={setForcePasswordReset} />
+                    <button
+                      type="button"
+                      onClick={handleResendAllInvites}
+                      disabled={isBatchApplying || nonActiveEmployees.length === 0}
+                      className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold transition-all shadow-xs cursor-pointer active:scale-98 shrink-0"
+                    >
+                      {isBatchApplying ? 'Sending invites...' : `Resend to All Pending (${nonActiveEmployees.length})`}
+                    </button>
                   </div>
                 </div>
 
@@ -1565,7 +1594,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                     </h4>
                     <p className="text-xs text-slate-500 max-w-md mx-auto font-medium">
                       {accountStatusFilter === 'non_active'
-                        ? 'All employee accounts in your workspace are currently active. When you add new employees with "Not Activated" status, they will appear here to configure initial passwords.'
+                        ? 'All employee accounts in your workspace are currently active. New employees appear here until they accept their invite email.'
                         : 'No accounts match the specified search query.'}
                     </p>
                     {accountStatusFilter === 'non_active' && (
@@ -1590,12 +1619,9 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                         emp.isActivated === false ||
                         empStatus === 'Onboarding' ||
                         empStatus === 'Not Activated';
-                      const currentPwdValue =
-                        inlinePasswords[emp.id] !== undefined
-                          ? inlinePasswords[emp.id]
-                          : (emp.password || defaultInitialPassword);
-                      const isRevealed = !!showPasswordMap[emp.id];
-                      const isCopied = copiedId === emp.id;
+                      const isInvited = accStatus === 'Invited';
+                      const canInvite = isNonActive && emp.role !== 'super_admin' && emp.role !== 'student';
+                      const isResending = resendingInviteId === emp.id;
 
                       return (
                         <div
@@ -1624,76 +1650,39 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                             <div className="flex items-center gap-2 shrink-0">
                               <span
                                 className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-                                  isNonActive
-                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  !isNonActive
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : isInvited
+                                      ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                      : 'bg-amber-50 text-amber-700 border-amber-200'
                                 }`}
                               >
-                                {isNonActive ? 'Not Activated' : 'Activated'}
+                                {!isNonActive ? 'Activated' : isInvited ? 'Invite sent' : 'Not Activated'}
                               </span>
                             </div>
                           </div>
 
-                          {/* Bottom row: Initial Password Input & Actions */}
+                          {/* Bottom row: Invite status & Actions */}
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
-                            <div className="flex items-center gap-2 flex-1 max-w-md">
-                              <div className="relative flex-1">
-                                <input
-                                  type={isRevealed ? 'text' : 'password'}
-                                  value={currentPwdValue}
-                                  onChange={(e) =>
-                                    setInlinePasswords((prev) => ({
-                                      ...prev,
-                                      [emp.id]: e.target.value,
-                                    }))
-                                  }
-                                  placeholder="Initial Password"
-                                  className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-mono font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 pr-14 shadow-xs"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setShowPasswordMap((prev) => ({
-                                      ...prev,
-                                      [emp.id]: !prev[emp.id],
-                                    }))
-                                  }
-                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-500 hover:text-slate-800 cursor-pointer select-none"
-                                >
-                                  {isRevealed ? 'Hide' : 'Show'}
-                                </button>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => handleGenerateRandomPassword(emp.id)}
-                                className="px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium transition-colors cursor-pointer shrink-0 shadow-xs"
-                                title="Generate Random Secure Password"
-                              >
-                                Random
-                              </button>
-                            </div>
+                            <p className="text-xs text-slate-500 font-medium">
+                              {!isNonActive
+                                ? 'Signed in with their own password.'
+                                : isInvited
+                                  ? 'Waiting for them to accept the invite email and create a password.'
+                                  : 'No invite has been sent yet.'}
+                            </p>
 
                             <div className="flex items-center gap-2 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => handleSaveEmployeePassword(emp.id, currentPwdValue)}
-                                className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer active:scale-98"
-                              >
-                                Set Password
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handleCopyCredentials(emp)}
-                                className={`px-3.5 py-2 rounded-lg border text-xs font-semibold transition-all shadow-xs cursor-pointer active:scale-98 ${
-                                  isCopied
-                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                                    : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
-                                }`}
-                              >
-                                {isCopied ? 'Copied!' : 'Copy Credentials'}
-                              </button>
+                              {canInvite && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResendInvite(emp)}
+                                  disabled={isResending || isBatchApplying}
+                                  className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-semibold transition-all shadow-xs cursor-pointer active:scale-98"
+                                >
+                                  {isResending ? 'Sending...' : isInvited ? 'Resend invite' : 'Send invite'}
+                                </button>
+                              )}
 
                               {isNonActive && (
                                 <button
@@ -1720,7 +1709,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* 2. JOB ROLES & TITLES (With Right-Side Slide-Over Drawer Modal)             */}
           {/* ========================================================================= */}
           {subTab === 'job_posts' && (
-            <div className="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+            <div className="settings-page__card space-y-5">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <div>
                   <h3 className="text-base font-bold text-slate-900">
@@ -1799,7 +1788,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* 3. DEPARTMENTS & TEAMS                                                    */}
           {/* ========================================================================= */}
           {subTab === 'departments_teams' && (
-            <div className="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+            <div className="settings-page__card space-y-5">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <h3 className="text-base font-bold text-slate-900">
                   Departments & Teams
@@ -1823,9 +1812,32 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                     <input
                       type="text"
                       value={newDepartment}
-                      onChange={(e) => setNewDepartment(e.target.value)}
+                      onChange={(e) => {
+                        setNewDepartment(e.target.value);
+                        if (!newDepartmentCodeEdited) setNewDepartmentCode(suggestDepartmentCode(e.target.value));
+                      }}
                       placeholder="Add new department..."
-                      className="flex-1 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs outline-none focus:border-blue-600 font-medium text-slate-900"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs outline-none focus:border-blue-600 font-medium text-slate-900"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddDepartment(newDepartment);
+                        }
+                      }}
+                    />
+                    <input
+                      type="text"
+                      value={newDepartmentCode}
+                      onChange={(e) => {
+                        const next = normalizeDepartmentCode(e.target.value);
+                        setNewDepartmentCode(next);
+                        setNewDepartmentCodeEdited(next !== '');
+                      }}
+                      placeholder="code"
+                      aria-label="Department code"
+                      title="Short code shown next to the department name (2–6 lowercase letters or digits)"
+                      maxLength={6}
+                      className="w-20 rounded-lg border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs lowercase outline-none focus:border-blue-600 font-medium text-slate-900"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
@@ -1851,20 +1863,32 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                       return (
                         <div
                           key={dept}
-                          className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-colors text-xs"
+                          className="p-3 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-colors text-xs space-y-2"
                         >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-semibold text-slate-900 truncate text-xs">{dept}</span>
-                            <span className="text-[11px] text-slate-500 font-medium">
-                              · {memberCount} {memberCount === 1 ? 'member' : 'members'}
-                            </span>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-semibold text-slate-900 truncate text-xs">{dept}</span>
+                              <DepartmentCodeBadge code={findRecord(departmentRecords, dept)?.shortCode} />
+                              <span className="text-[11px] text-slate-500 font-medium">
+                                · {memberCount} {memberCount === 1 ? 'member' : 'members'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedDepartmentName(dept)}
+                                className="text-[#17324e] hover:underline font-semibold text-xs cursor-pointer px-2 py-0.5"
+                              >
+                                Open
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDepartment(dept)}
+                                className="text-slate-400 hover:text-rose-600 font-semibold text-xs cursor-pointer px-2 py-0.5 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </div>
-                          <button
-                            onClick={() => handleDeleteDepartment(dept)}
-                            className="text-slate-400 hover:text-rose-600 font-semibold text-xs cursor-pointer px-2 py-0.5 transition-colors"
-                          >
-                            Delete
-                          </button>
                         </div>
                       );
                     })}
@@ -1884,7 +1908,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
 
                   {/* Inline Add Team Input */}
                   <div className="flex flex-col gap-2">
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <input
                         type="text"
                         value={newTeam}
@@ -1898,6 +1922,17 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                           }
                         }}
                       />
+                      <select
+                        value={newTeamDepartment || currentDepartments[0] || ''}
+                        onChange={(e) => setNewTeamDepartment(e.target.value)}
+                        aria-label="Department for new team"
+                        className="sm:w-44 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs outline-none focus:border-blue-600 font-medium text-slate-900"
+                      >
+                        {!currentDepartments.length && <option value="">No department yet</option>}
+                        {currentDepartments.map((dept) => (
+                          <option key={dept} value={dept}>{dept}</option>
+                        ))}
+                      </select>
                       <button
                         type="button"
                         onClick={() => handleAddTeam(newTeam)}
@@ -1906,53 +1941,61 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                         Add
                       </button>
                     </div>
-                    <select
-                      value={newTeamManagerId}
-                      onChange={(e) => setNewTeamManagerId(e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium text-slate-900"
-                    >
-                      <option value="">Manager (optional)</option>
-                      {(state.employees || []).map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="space-y-1">
+                      <span className="block text-[11px] font-medium text-slate-500">
+                        Managers (optional, any of them can approve)
+                      </span>
+                      <ManagerPicker
+                        label="the new team"
+                        selectedIds={newTeamManagerIds}
+                        employees={state.employees || []}
+                        onChange={setNewTeamManagerIds}
+                      />
+                    </div>
                   </div>
 
                   <div className="space-y-2 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
                     {currentTeams.map((team) => {
-                      const teamRecords = ((state.customOptions as any)?.teamRecords || []) as Array<{
-                        id?: string;
-                        name?: string;
-                        leadName?: string | null;
-                      }>;
-                      const record = teamRecords.find(
-                        (t) => String(t.name || '').toLowerCase() === team.toLowerCase()
-                      );
+                      const record = findRecord(teamRecords, team);
                       const memberCount = (state.employees || []).filter((e) => {
                         if (record?.id && e.teamId && e.teamId === record.id) return true;
                         return e.team?.toLowerCase() === team.toLowerCase();
                       }).length;
+                      const leadNames = record?.leadNames?.length
+                        ? record.leadNames
+                        : record?.leadName
+                        ? [record.leadName]
+                        : [];
 
                       return (
                         <div
                           key={team}
-                          className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-colors text-xs"
+                          className="p-3 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-colors text-xs space-y-2"
                         >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-semibold text-slate-900 truncate text-xs">{team}</span>
-                            <span className="text-[11px] text-slate-500 font-medium">
-                              · {memberCount} {memberCount === 1 ? 'member' : 'members'}
-                              {record?.leadName ? ` · Manager: ${record.leadName}` : ''}
-                            </span>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-semibold text-slate-900 truncate text-xs">{team}</span>
+                              <span className="text-[11px] text-slate-500 font-medium truncate">
+                                · {memberCount} {memberCount === 1 ? 'member' : 'members'}
+                                {leadNames.length
+                                  ? ` · ${leadNames.length === 1 ? 'Manager' : 'Managers'}: ${leadNames.join(', ')}`
+                                  : ''}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteTeam(team)}
+                              className="text-slate-400 hover:text-rose-600 font-semibold text-xs cursor-pointer px-2 py-0.5 transition-colors"
+                            >
+                              Delete
+                            </button>
                           </div>
-                          <button
-                            onClick={() => handleDeleteTeam(team)}
-                            className="text-slate-400 hover:text-rose-600 font-semibold text-xs cursor-pointer px-2 py-0.5 transition-colors"
-                          >
-                            Delete
-                          </button>
+                          <ManagerPicker
+                            label={team}
+                            selectedIds={leadIdsOf(record)}
+                            employees={state.employees || []}
+                            disabled={isSaving}
+                            onChange={(ids) => handleSaveLeads('team', team, ids)}
+                          />
                         </div>
                       );
                     })}
@@ -1965,8 +2008,75 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* ========================================================================= */}
           {/* 5. EMPLOYMENT TYPES                                                       */}
           {/* ========================================================================= */}
+          {subTab === 'priorities' && (
+            <div className="settings-page__card space-y-5">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Priority custom options</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  These labels appear on project tasks. Keep at least two options.
+                </p>
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const name = newPriorityName.trim();
+                  if (!name) return;
+                  if (taskPriorities.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
+                    showToast('That priority already exists.');
+                    return;
+                  }
+                  setTaskPriorities((prev) => [
+                    ...prev,
+                    {
+                      id: `prio_${Date.now()}`,
+                      name,
+                      badgeColor: 'slate',
+                      slaHours: 48,
+                    },
+                  ]);
+                  setNewPriorityName('');
+                }}
+                className="flex flex-col sm:flex-row items-center gap-3"
+              >
+                <input
+                  type="text"
+                  required
+                  value={newPriorityName}
+                  onChange={(e) => setNewPriorityName(e.target.value)}
+                  placeholder="New priority (e.g. Blocker)"
+                  className="flex-1 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs text-slate-900 outline-none focus:border-blue-600 font-medium"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors cursor-pointer shrink-0 shadow-xs"
+                >
+                  Add priority
+                </button>
+              </form>
+              <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 bg-white overflow-hidden">
+                {taskPriorities.map((priority) => (
+                  <div key={priority.id} className="p-3.5 flex items-center justify-between gap-4 text-xs">
+                    <span className="font-semibold text-slate-900">{priority.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (taskPriorities.length <= 2) {
+                          showToast('Keep at least two priorities.');
+                          return;
+                        }
+                        setTaskPriorities((prev) => prev.filter((p) => p.id !== priority.id));
+                      }}
+                      className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {subTab === 'employment_types' && (
-            <div className="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+            <div className="settings-page__card space-y-5">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
                   Employment Types
@@ -2081,7 +2191,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* 5. OFFICE LOCATIONS & SITES                                               */}
           {/* ========================================================================= */}
           {subTab === 'office_locations' && (
-            <div className="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+            <div className="settings-page__card space-y-4">
               <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-200">
                 <h3 className="text-base font-bold text-slate-900">
                   Company Office Locations
@@ -2201,7 +2311,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* 6. PROFILE FIELDS & ONBOARDING CONFIGURATION                              */}
           {/* ========================================================================= */}
           {subTab === 'onboarding' && (
-            <div className="rounded-xl border border-slate-200 bg-white p-6 sm:p-7 space-y-6">
+            <div className="settings-page__card space-y-6">
               {/* Header & Add Custom Field Action */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
@@ -2383,7 +2493,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* 7. OFFBOARDING & EXIT POLICY                                              */}
           {/* ========================================================================= */}
           {subTab === 'offboarding' && (
-            <div className="rounded-xl border border-slate-200 bg-white p-6 sm:p-7 space-y-6">
+            <div className="settings-page__card space-y-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900 tracking-tight">
                   Offboarding & Exit Management
@@ -2467,7 +2577,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* ========================================================================= */}
           {/* 8. PAYROLL SETTINGS & SALARY GROUPS                                      */}
           {/* ========================================================================= */}
-          {subTab === 'payroll_settings' && (
+          {showPayrollSettings && subTab === 'payroll_settings' && (
             <PayrollSettingsView
               state={state}
               onUpdateState={onUpdateState}

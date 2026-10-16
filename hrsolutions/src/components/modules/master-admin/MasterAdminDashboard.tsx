@@ -18,7 +18,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   X,
-  CreditCard,
   KeyRound,
   FileCode,
   Megaphone,
@@ -39,17 +38,24 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
-import { ClientTenant, SchemaInspectorItem, MasterAuditLogItem } from '@/types';
+import { ClientTenant, SchemaInspectorItem, MasterAuditLogItem, LicensePlan, LicenseEvent, LicenseStatus } from '@/types';
 import { api } from '@/services/apiClient';
+import { CustomSubscriptionPlan, LicenseManagerTab, mapApiPlan } from './LicenseManagerTab';
+import type { SupportMessage, SupportThread } from '@/services/supportTypes';
 import { AuthService } from '@/services/authService';
-import { APP_ORIGIN } from '@/config/origins';
+import { APP_ORIGIN, isAppHost, isLoopbackHost } from '@/config/origins';
 import { AdminPageSkeleton } from '@/components/skeletons';
 
 function mapApiTenant(row: any): ClientTenant {
   const slug = row.slug || row.schema_name?.replace(/^tenant_/, '') || 'unknown';
   const statusRaw = String(row.status || 'active').toLowerCase();
+  const licenseStatus = String(row.license_status || row.licenseStatus || '').toLowerCase() as LicenseStatus;
   const status: ClientTenant['status'] =
-    statusRaw === 'suspended' ? 'suspended' : statusRaw === 'trialing' || statusRaw === 'trial' ? 'trial' : 'active';
+    statusRaw === 'suspended'
+      ? 'suspended'
+      : licenseStatus === 'trialing' || statusRaw === 'trialing' || statusRaw === 'trial'
+        ? 'trial'
+        : 'active';
   return {
     id: row.id,
     slug,
@@ -57,7 +63,15 @@ function mapApiTenant(row: any): ClientTenant {
     domain: row.domain || `${slug}.app`,
     industry: row.industry || 'Office',
     schemaName: row.schema_name || row.schemaName || `tenant_${slug}`,
-    plan: (row.plan || row.tier || 'professional') as ClientTenant['plan'],
+    plan: String(row.plan || row.tier || row.plan_key || 'professional'),
+    planId: row.plan_id || row.planId || null,
+    planName: row.plan_name || row.planName || row.plan || row.tier,
+    licenseStatus: (licenseStatus || 'active') as LicenseStatus,
+    periodStart: row.current_period_start || row.periodStart || null,
+    periodEnd: row.current_period_end || row.periodEnd || null,
+    trialEndsAt: row.trial_ends_at || row.trialEndsAt || null,
+    daysRemaining: Number(row.days_remaining ?? row.daysRemaining ?? 0) || 0,
+    billingCycle: row.billing_cycle === 'annual' ? 'annual' : 'monthly',
     maxSeats: Number(row.max_employees ?? row.maxSeats ?? 50) || 50,
     activeUsersCount: Number(row.active_users_count ?? row.activeUsersCount ?? 0) || 0,
     adminName: row.admin_name || row.adminName || 'Admin',
@@ -87,17 +101,7 @@ function mapSchemaName(name: string, tenants: ClientTenant[]): SchemaInspectorIt
   };
 }
 
-export interface CustomSubscriptionPlan {
-  id: string;
-  key: string;
-  name: string;
-  price: number;
-  maxSeats: number;
-  storageGB: number;
-  aiQueries: number;
-  features: string[];
-  activeClientsCount: number;
-}
+export type { CustomSubscriptionPlan };
 
 export interface SupportPlan {
   id: string;
@@ -115,16 +119,74 @@ export interface SupportTicket {
   ticketNumber: string;
   tenantName: string;
   tenantSlug: string;
+  tenantSchema: string;
   requesterName: string;
   requesterEmail: string;
   subject: string;
   description: string;
   category: 'Attendance & Timings' | 'Billing & Subscription' | 'Database & Storage' | 'Authentication' | 'Other';
   priority: 'urgent' | 'high' | 'normal' | 'low';
-  status: 'open' | 'in_progress' | 'waiting_client' | 'resolved';
+  status: 'open' | 'in_progress' | 'waiting_client' | 'resolved' | 'closed';
   slaDue: string;
   createdAt: string;
   assignedTo: string;
+}
+
+function workspaceNameMatches(typed: string, tenant: ClientTenant): boolean {
+  const value = typed.trim().toLowerCase();
+  return value.length > 0 && value === tenant.name.trim().toLowerCase();
+}
+
+function impersonationAcceptUrl(token: string, backendAcceptUrl?: string): string {
+  const path = `/impersonate?token=${encodeURIComponent(token)}`;
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    if (isLoopbackHost(hostname)) {
+      return `${window.location.origin}${path}`;
+    }
+    if (isAppHost(hostname)) {
+      return `${window.location.origin}${path}`;
+    }
+  }
+  if (
+    backendAcceptUrl?.startsWith('http') &&
+    !/https?:\/\/(localhost|127\.0\.0\.1|\[::1\])\b/i.test(backendAcceptUrl)
+  ) {
+    return backendAcceptUrl;
+  }
+  if (typeof window !== 'undefined' && isLoopbackHost(new URL(APP_ORIGIN).hostname)) {
+    const host = window.location.hostname.replace(/^(masteradmin|masteadmin)\./i, 'app.');
+    return `${window.location.protocol}//${host}${path}`;
+  }
+  return `${APP_ORIGIN}${path}`;
+}
+
+function formatTicketTime(value?: string | null): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function mapSupportThread(row: SupportThread): SupportTicket {
+  const created = row.createdAt ? new Date(row.createdAt) : null;
+  return {
+    id: row.id,
+    ticketNumber: row.ticketNumber,
+    tenantName: row.tenantName || 'Workspace',
+    tenantSlug: row.tenantSlug || '',
+    tenantSchema: row.tenantSchema || '',
+    requesterName: row.requesterName,
+    requesterEmail: row.requesterEmail,
+    subject: row.subject,
+    description: row.preview || '',
+    category: 'Other',
+    priority: 'normal',
+    status: row.status,
+    slaDue: created && !Number.isNaN(created.getTime()) ? created.toLocaleString() : '—',
+    createdAt: row.createdAt,
+    assignedTo: 'Pixbe Support',
+  };
 }
 
 export interface PlatformBroadcast {
@@ -136,41 +198,7 @@ export interface PlatformBroadcast {
   isActive: boolean;
 }
 
-const INITIAL_PLANS: CustomSubscriptionPlan[] = [
-  {
-    id: 'plan_starter',
-    key: 'starter',
-    name: 'Starter',
-    price: 49,
-    maxSeats: 25,
-    storageGB: 10,
-    aiQueries: 500,
-    activeClientsCount: 0,
-    features: ['Up to 25 Users', 'Standard Shifts', 'Leave & Attendance', '10 GB Storage'],
-  },
-  {
-    id: 'plan_pro',
-    key: 'professional',
-    name: 'Professional',
-    price: 199,
-    maxSeats: 500,
-    storageGB: 100,
-    aiQueries: 10000,
-    activeClientsCount: 0,
-    features: ['Up to 500 Users', 'Multi-Batch Bell Timings', 'GPS Geofencing', 'Payroll & Tax Engine', '10k AI Tokens'],
-  },
-  {
-    id: 'plan_enterprise',
-    key: 'enterprise',
-    name: 'Enterprise',
-    price: 599,
-    maxSeats: 2500,
-    storageGB: 1000,
-    aiQueries: 50000,
-    activeClientsCount: 0,
-    features: ['2,500+ Users', 'Dedicated DB Schema', 'Unlimited AI Queries', 'Custom Domain', '24/7 SLA Support'],
-  },
-];
+const INITIAL_PLANS: CustomSubscriptionPlan[] = [];
 
 const INITIAL_SUPPORT_PLANS: SupportPlan[] = [
   {
@@ -215,7 +243,7 @@ export const MasterAdminDashboard: React.FC = () => {
   const [isSubmittingLogin, setIsSubmittingLogin] = useState(false);
 
   const [activeTab, setActiveTab] = useState<
-    'tenants' | 'database' | 'users' | 'telemetry' | 'audit'
+    'tenants' | 'licenses' | 'support' | 'database' | 'users' | 'telemetry' | 'audit'
   >('tenants');
 
   const [tenants, setTenants] = useState<ClientTenant[]>([]);
@@ -228,6 +256,7 @@ export const MasterAdminDashboard: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<MasterAuditLogItem[]>([]);
 
   const [plans, setPlans] = useState<CustomSubscriptionPlan[]>(INITIAL_PLANS);
+  const [plansLoadError, setPlansLoadError] = useState('');
   const [supportPlans, setSupportPlans] = useState<SupportPlan[]>(INITIAL_SUPPORT_PLANS);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [ticketSearch, setTicketSearch] = useState('');
@@ -236,12 +265,14 @@ export const MasterAdminDashboard: React.FC = () => {
   const fetchPlatformData = useCallback(async () => {
     setIsLoadingData(true);
     try {
-      const [tenantsRes, schemasRes, usersRes, telemetryRes, auditRes] = await Promise.allSettled([
+      const [tenantsRes, schemasRes, usersRes, telemetryRes, auditRes, ticketsRes, plansRes] = await Promise.allSettled([
         api.controlPlane.listTenants(),
         api.controlPlane.listDatabaseSchemas(),
         api.controlPlane.searchGlobalUsers(''),
         api.controlPlane.getAWSTelemetry(),
         api.controlPlane.listAuditLogs(100),
+        api.controlPlane.listSupportTickets(),
+        api.controlPlane.listLicensePlans(),
       ]);
 
       let mappedTenants: ClientTenant[] = [];
@@ -272,6 +303,20 @@ export const MasterAdminDashboard: React.FC = () => {
 
       if (telemetryRes.status === 'fulfilled' && telemetryRes.value.success && telemetryRes.value.data) {
         setTelemetry(telemetryRes.value.data);
+      }
+
+      if (ticketsRes.status === 'fulfilled' && ticketsRes.value.success && ticketsRes.value.data) {
+        const rawTickets = Array.isArray(ticketsRes.value.data) ? ticketsRes.value.data : [];
+        setTickets(rawTickets.map(mapSupportThread));
+      }
+
+      if (plansRes.status === 'fulfilled' && plansRes.value.success && Array.isArray(plansRes.value.data)) {
+        setPlans((plansRes.value.data as LicensePlan[]).map(mapApiPlan));
+        setPlansLoadError('');
+      } else if (plansRes.status === 'rejected') {
+        setPlansLoadError(plansRes.reason?.message || 'License catalog could not be loaded.');
+      } else {
+        setPlansLoadError('License catalog could not be loaded.');
       }
 
       if (auditRes.status === 'fulfilled' && auditRes.value.success && auditRes.value.data) {
@@ -350,30 +395,29 @@ export const MasterAdminDashboard: React.FC = () => {
   // Modals & Drawers
   const [showProvisionModal, setShowProvisionModal] = useState(false);
   const [showPlanModal, setShowPlanModal] = useState(false);
-  const [showCreatePlanModal, setShowCreatePlanModal] = useState(false);
   const [selectedTenantForPlan, setSelectedTenantForPlan] = useState<ClientTenant | null>(null);
 
   // Ticket Response Drawer State
   const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
   const [ticketReplyText, setTicketReplyText] = useState('');
+  const [ticketMessages, setTicketMessages] = useState<SupportMessage[]>([]);
+  const [ticketBusy, setTicketBusy] = useState(false);
 
-  // New Plan State
-  const [newPlanName, setNewPlanName] = useState('');
-  const [newPlanPrice, setNewPlanPrice] = useState(249);
-  const [newPlanSeats, setNewPlanSeats] = useState(300);
-  const [newPlanStorage, setNewPlanStorage] = useState(150);
-  const [newPlanAI, setNewPlanAI] = useState(15000);
-  const [newPlanFeatures, setNewPlanFeatures] = useState('Multi-Batch Shifts, Payroll Engine, Geofence');
+  const [licenseEvents, setLicenseEvents] = useState<LicenseEvent[]>([]);
+  const [editExtendDays, setEditExtendDays] = useState(0);
+  const [editRevoke, setEditRevoke] = useState(false);
 
   // New Tenant State
   const [newTenantName, setNewTenantName] = useState('');
   const [newTenantSlug, setNewTenantSlug] = useState('');
-  const [newTenantDomain, setNewTenantDomain] = useState('');
-  const [newTenantIndustry, setNewTenantIndustry] = useState('School');
+  const [newTenantIndustry, setNewTenantIndustry] = useState('Office');
   const [newTenantPlan, setNewTenantPlan] = useState<string>('professional');
   const [newTenantSeats, setNewTenantSeats] = useState(100);
+  const [newTenantBillingCycle, setNewTenantBillingCycle] = useState<'monthly' | 'annual'>('monthly');
   const [newTenantAdminName, setNewTenantAdminName] = useState('');
   const [newTenantAdminEmail, setNewTenantAdminEmail] = useState('');
+  const [newTenantPhone, setNewTenantPhone] = useState('');
+  const [isProvisioning, setIsProvisioning] = useState(false);
 
   // Tenant Plan Edit State
   const [editPlanTier, setEditPlanTier] = useState<string>('professional');
@@ -387,6 +431,14 @@ export const MasterAdminDashboard: React.FC = () => {
   const [broadcastSeverity, setBroadcastSeverity] = useState<'info' | 'warning' | 'urgent'>('info');
 
   const [userSearchQuery, setUserSearchQuery] = useState('');
+
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: 'tenant'; tenant: ClientTenant; action: 'suspend' | 'delete' }
+    | { kind: 'user'; id: string; email: string; tenant: string; role: string }
+    | null
+  >(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handleMasterLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -470,6 +522,9 @@ export const MasterAdminDashboard: React.FC = () => {
         !q ||
         t.subject.toLowerCase().includes(q) ||
         t.tenantName.toLowerCase().includes(q) ||
+        t.tenantSlug.toLowerCase().includes(q) ||
+        t.tenantSchema.toLowerCase().includes(q) ||
+        t.requesterName.toLowerCase().includes(q) ||
         t.requesterEmail.toLowerCase().includes(q) ||
         t.ticketNumber.toLowerCase().includes(q);
 
@@ -494,24 +549,27 @@ export const MasterAdminDashboard: React.FC = () => {
   }, [allTenants, tickets]);
 
   const handleImpersonateTenant = async (tenant: ClientTenant) => {
+    if (tenant.status === 'suspended') {
+      triggerToast({
+        title: 'Jump in blocked',
+        message: `${tenant.name} is suspended. Reactivate it before opening an operator session.`,
+        type: 'system',
+      });
+      return;
+    }
     try {
       const res = await api.controlPlane.startImpersonation(tenant.id);
       if (!res.success || !res.data?.token) {
         throw new Error((res as any)?.error?.message || 'Impersonation failed');
       }
 
-      const acceptUrl =
-        res.data.acceptUrl?.startsWith('http')
-          ? res.data.acceptUrl
-          : `${APP_ORIGIN}${res.data.acceptUrl || `/impersonate?token=${encodeURIComponent(res.data.token)}`}`;
-
       triggerToast({
         title: `Jumping into ${tenant.name}`,
-        message: 'Opening operator session on the app host…',
+        message: 'Opening operator session…',
         type: 'system',
       });
 
-      window.location.href = acceptUrl;
+      window.location.href = impersonationAcceptUrl(res.data.token, res.data.acceptUrl);
     } catch (err: any) {
       triggerToast({
         title: 'Jump in failed',
@@ -521,101 +579,149 @@ export const MasterAdminDashboard: React.FC = () => {
     }
   };
 
-  const handleToggleSuspendTenant = async (tenantId: string) => {
-    const target = tenants.find((t) => t.id === tenantId);
-    if (!target) return;
-    const newStatus = target.status === 'suspended' ? 'active' : 'suspended';
+  const appendTenantAudit = (tenant: ClientTenant, action: 'TENANT_SUSPENDED' | 'TENANT_ACTIVATED') => {
+    const log: MasterAuditLogItem = {
+      id: `aud_${Date.now()}`,
+      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      operator: 'Master Admin',
+      action,
+      targetTenant: tenant.name,
+      targetEntity: 'Tenant',
+      details: action === 'TENANT_SUSPENDED' ? 'Status changed to suspended.' : 'Status changed to active.',
+      status: action === 'TENANT_SUSPENDED' ? 'warning' : 'success',
+    };
+    setAuditLogs((prev) => [log, ...prev]);
+  };
 
-    // Optimistic local update
-    setTenants((prev) => prev.map((t) => (t.id === tenantId ? { ...t, status: newStatus } : t)));
-
+  const handleReactivateTenant = async (tenant: ClientTenant) => {
+    if (isDeleting) return;
+    setIsDeleting(true);
     try {
-      await api.controlPlane.toggleTenantStatus(tenantId, newStatus);
-      const log: MasterAuditLogItem = {
-        id: `aud_${Date.now()}`,
-        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16),
-        operator: 'Master Admin',
-        action: newStatus === 'suspended' ? 'TENANT_SUSPENDED' : 'TENANT_ACTIVATED',
-        targetTenant: target.name,
-        targetEntity: 'Tenant',
-        details: `Status changed to ${newStatus}.`,
-        status: newStatus === 'suspended' ? 'warning' : 'success',
-      };
-      setAuditLogs((prev) => [log, ...prev]);
-    } catch {
-      // Backend not reachable — local change already applied
+      await api.controlPlane.toggleTenantStatus(tenant.id, 'active');
+      setTenants((prev) => prev.map((t) => (t.id === tenant.id ? { ...t, status: 'active' } : t)));
+      appendTenantAudit(tenant, 'TENANT_ACTIVATED');
+      triggerToast({
+        title: 'Workspace reactivated',
+        message: `${tenant.name} can sign in again, and Jump in is available.`,
+        type: 'system',
+      });
+      void fetchPlatformData();
+    } catch (err: any) {
+      triggerToast({
+        title: 'Reactivate failed',
+        message: err?.message || 'The server rejected the status change.',
+        type: 'system',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const closeDeleteModal = () => {
+    if (isDeleting) return;
+    setDeleteTarget(null);
+    setDeleteConfirmText('');
+  };
+
+  const handleConfirmWorkspaceAction = async () => {
+    if (!deleteTarget) return;
+    if (deleteTarget.kind === 'tenant' && !workspaceNameMatches(deleteConfirmText, deleteTarget.tenant)) return;
+
+    setIsDeleting(true);
+    try {
+      if (deleteTarget.kind === 'tenant' && deleteTarget.action === 'suspend') {
+        const { tenant } = deleteTarget;
+        await api.controlPlane.toggleTenantStatus(tenant.id, 'suspended');
+        setTenants((prev) => prev.map((t) => (t.id === tenant.id ? { ...t, status: 'suspended' } : t)));
+        appendTenantAudit(tenant, 'TENANT_SUSPENDED');
+        triggerToast({
+          title: 'Workspace suspended',
+          message: `${tenant.name} is locked. Users cannot sign in until it is reactivated. Delete is now available.`,
+          type: 'system',
+        });
+      } else if (deleteTarget.kind === 'tenant') {
+        const { tenant } = deleteTarget;
+        const deleted = await api.controlPlane.deleteTenant(tenant.id, deleteConfirmText.trim());
+        setTenants((prev) => prev.filter((t) => t.id !== tenant.id));
+        setSchemas((prev) => prev.filter((s) => s.schemaName !== tenant.schemaName));
+        setGlobalUsers((prev) =>
+          prev.filter((u) => u.tenant_slug !== tenant.slug && u.tenant_id !== tenant.id)
+        );
+        const usersRemoved = Number((deleted as any)?.data?.usersRemoved || 0);
+        triggerToast({
+          title: 'Workspace Deleted',
+          message:
+            usersRemoved > 0
+              ? `${tenant.name} was removed along with ${usersRemoved} user${usersRemoved === 1 ? '' : 's'}.`
+              : `${tenant.name} and schema "${tenant.schemaName}" were permanently removed.`,
+          type: 'system',
+        });
+      } else {
+        await api.controlPlane.deleteGlobalUser(deleteTarget.id);
+        setGlobalUsers((prev) => prev.filter((u) => u.id !== deleteTarget.id));
+        triggerToast({
+          title: 'User Deleted',
+          message: `${deleteTarget.email} was removed from ${deleteTarget.tenant}.`,
+          type: 'system',
+        });
+      }
+      setDeleteTarget(null);
+      setDeleteConfirmText('');
+      void fetchPlatformData();
+    } catch (err: any) {
+      triggerToast({
+        title: deleteTarget.kind === 'tenant' && deleteTarget.action === 'suspend' ? 'Suspend failed' : 'Delete Failed',
+        message: err?.message || 'The server rejected the request.',
+        type: 'system',
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
   const handleProvisionTenantSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTenantName.trim() || !newTenantAdminEmail.trim()) return;
+    if (!newTenantName.trim() || !newTenantAdminEmail.trim() || isProvisioning) return;
 
-    const generatedSlug = newTenantSlug.trim() || newTenantName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const newTenant: ClientTenant = {
-      id: `t_${Date.now()}`,
-      name: newTenantName.trim(),
-      slug: generatedSlug,
-      domain: newTenantDomain.trim() || `${generatedSlug}.local`,
-      industry: newTenantIndustry,
-      schemaName: `tenant_${generatedSlug}`,
-      plan: newTenantPlan as any,
-      maxSeats: Number(newTenantSeats) || 50,
-      activeUsersCount: 1,
-      adminName: newTenantAdminName.trim() || 'Admin',
-      adminEmail: newTenantAdminEmail.trim(),
-      status: 'active',
-      createdAt: new Date().toISOString().substring(0, 10),
-      lastActivityAt: 'Just now',
-      dbSizeBytes: 12000000,
-      totalPunchesRecorded: 0,
-    };
-
-    setTenants([newTenant, ...tenants]);
-    setShowProvisionModal(false);
-    setNewTenantName('');
-    setNewTenantSlug('');
-    setNewTenantDomain('');
-    setNewTenantAdminName('');
-    setNewTenantAdminEmail('');
-
+    const generatedSlug = (newTenantSlug.trim() || newTenantName).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const selected = plans.find((p) => p.key === newTenantPlan || p.id === newTenantPlan);
+    setIsProvisioning(true);
     try {
       const res = await api.controlPlane.registerTenant({
         slug: generatedSlug,
-        name: newTenant.name,
-        adminEmail: newTenant.adminEmail,
-        adminName: newTenant.adminName,
-        plan: newTenantPlan,
-        maxEmployees: newTenant.maxSeats,
+        name: newTenantName.trim(),
+        adminEmail: newTenantAdminEmail.trim(),
+        adminName: newTenantAdminName.trim() || 'Administrator',
+        planId: selected?.id || newTenantPlan,
+        plan: selected?.key || newTenantPlan,
+        maxEmployees: Number(newTenantSeats) || selected?.maxSeats || 25,
+        billingCycle: newTenantBillingCycle,
         industry: newTenantIndustry,
+        contactPhone: newTenantPhone.trim() || undefined,
       });
-      // Replace our temp ID with the real server ID if returned
-      if (res.data?.id) {
-        setTenants((prev) => prev.map((t) => (t.id === newTenant.id ? { ...t, id: res.data.id, schemaName: res.data.schema_name || t.schemaName } : t)));
-      }
-      const log: MasterAuditLogItem = {
-        id: `aud_${Date.now()}`,
-        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16),
-        operator: 'Master Admin',
-        action: 'TENANT_PROVISIONED',
-        targetTenant: newTenant.name,
-        targetEntity: 'Tenant',
-        details: `Workspace provisioned in PostgreSQL with schema "${res.data?.schema_name || newTenant.schemaName}".`,
-        status: 'success',
-      };
-      setAuditLogs((prev) => [log, ...prev]);
-
+      setShowProvisionModal(false);
+      setNewTenantName('');
+      setNewTenantSlug('');
+      setNewTenantAdminName('');
+      setNewTenantAdminEmail('');
+      setNewTenantPhone('');
+      setNewTenantBillingCycle('monthly');
+      await fetchPlatformData();
+      const schema = res.data?.schema_name || res.data?.schemaName;
+      const invite = res.data?.admin_invite_sent ? ` Invite sent to ${newTenantAdminEmail.trim()}.` : '';
       triggerToast({
-        title: 'Workspace Created',
-        message: `${newTenant.name} is ready in PostgreSQL (Schema: ${res.data?.schema_name || newTenant.schemaName}).`,
+        title: 'Workspace created',
+        message: `${newTenantName.trim()} is ready${schema ? ` (${schema})` : ''}.${invite}`,
         type: 'system',
       });
     } catch (err: any) {
       triggerToast({
-        title: 'Workspace Created (Local)',
-        message: `${newTenant.name} registered locally. ${err.message || 'Could not connect to PostgreSQL backend.'}`,
+        title: 'Workspace could not be created',
+        message: err?.message || 'The server rejected the workspace.',
         type: 'system',
       });
+    } finally {
+      setIsProvisioning(false);
     }
   };
 
@@ -624,7 +730,7 @@ export const MasterAdminDashboard: React.FC = () => {
     if (!selectedTenantForPlan) return;
 
     setTenants((prev) =>
-      prev.map((t) => (t.id === selectedTenantForPlan.id ? { ...t, plan: editPlanTier as any, maxSeats: Number(editPlanSeats) } : t))
+      prev.map((t) => (t.id === selectedTenantForPlan.id ? { ...t, plan: editPlanTier, maxSeats: Number(editPlanSeats) } : t))
     );
 
     setShowPlanModal(false);
@@ -634,6 +740,8 @@ export const MasterAdminDashboard: React.FC = () => {
       await api.controlPlane.updateTenantPlan(selectedTenantForPlan.id, {
         plan: editPlanTier,
         maxSeats: Number(editPlanSeats),
+        extendDays: editRevoke || !Number(editExtendDays) ? undefined : Number(editExtendDays),
+        revoke: editRevoke || undefined,
       });
       const log: MasterAuditLogItem = {
         id: `aud_${Date.now()}`,
@@ -646,58 +754,83 @@ export const MasterAdminDashboard: React.FC = () => {
         status: 'success',
       };
       setAuditLogs((prev) => [log, ...prev]);
-    } catch {
-      // Backend not reachable
+      void fetchPlatformData();
+      triggerToast({
+        title: 'License updated',
+        message: 'Changes applied successfully.',
+        type: 'system',
+      });
+    } catch (err: any) {
+      triggerToast({
+        title: 'License update failed',
+        message: err?.message || 'The server rejected the change.',
+        type: 'system',
+      });
     }
-
-    triggerToast({
-      title: 'Plan Updated',
-      message: 'Changes applied successfully.',
-      type: 'system',
-    });
   };
 
-  const handleCreateNewPlanSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPlanName.trim()) return;
-
-    const planKey = newPlanName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const featArray = newPlanFeatures.split(',').map((f) => f.trim()).filter(Boolean);
-
-    const newPlan: CustomSubscriptionPlan = {
-      id: `plan_${Date.now()}`,
-      key: planKey,
-      name: newPlanName.trim(),
-      price: Number(newPlanPrice) || 99,
-      maxSeats: Number(newPlanSeats) || 100,
-      storageGB: Number(newPlanStorage) || 50,
-      aiQueries: Number(newPlanAI) || 5000,
-      activeClientsCount: 0,
-      features: featArray.length > 0 ? featArray : ['Attendance', 'Payroll', 'Shifts'],
-    };
-
-    setPlans([...plans, newPlan]);
-    setShowCreatePlanModal(false);
-    setNewPlanName('');
-
-    triggerToast({
-      title: 'Plan Created',
-      message: `Plan ${newPlan.name} is now available.`,
-      type: 'system',
-    });
-  };
-
-  const handleResolveTicket = (ticketId: string) => {
-    setTickets((prev) =>
-      prev.map((t) => (t.id === ticketId ? { ...t, status: 'resolved', slaDue: 'Resolved' } : t))
-    );
-    setSelectedTicket(null);
+  const openSupportTicket = async (ticket: SupportTicket) => {
+    setSelectedTicket(ticket);
     setTicketReplyText('');
-    triggerToast({
-      title: 'Ticket Resolved',
-      message: 'Client has been notified via email.',
-      type: 'system',
-    });
+    setTicketMessages([]);
+    try {
+      const res = await api.controlPlane.getSupportTicket(ticket.id);
+      if (res.data) {
+        setSelectedTicket(mapSupportThread(res.data));
+        setTicketMessages(res.data.messages || []);
+      }
+    } catch (err: any) {
+      triggerToast({ title: 'Support', message: err?.message || 'Could not load ticket.', type: 'system' });
+    }
+  };
+
+  const applyTicketUpdate = (thread: SupportThread) => {
+    const mapped = mapSupportThread(thread);
+    setSelectedTicket(mapped);
+    setTicketMessages(thread.messages || []);
+    setTickets((prev) => prev.map((t) => (t.id === thread.id ? mapped : t)));
+    return mapped;
+  };
+
+  const handleReplyTicket = async (ticketId: string) => {
+    const reply = ticketReplyText.trim();
+    if (!reply) {
+      triggerToast({ title: 'Support', message: 'Write a reply before sending.', type: 'system' });
+      return;
+    }
+    setTicketBusy(true);
+    try {
+      const updated = await api.controlPlane.replySupportTicket(ticketId, reply);
+      if (updated.data) applyTicketUpdate(updated.data);
+      setTicketReplyText('');
+      triggerToast({
+        title: 'Reply sent',
+        message: 'The requester was emailed. This ticket stays in progress until you resolve or close it.',
+        type: 'system',
+      });
+    } catch (err: any) {
+      triggerToast({ title: 'Support', message: err?.message || 'Could not send the reply.', type: 'system' });
+    } finally {
+      setTicketBusy(false);
+    }
+  };
+
+  const handleUpdateTicketStatus = async (ticketId: string, status: SupportTicket['status']) => {
+    if (status === 'waiting_client') return;
+    setTicketBusy(true);
+    try {
+      const updated = await api.controlPlane.updateSupportTicket(ticketId, { status });
+      if (updated.data) applyTicketUpdate(updated.data);
+      triggerToast({
+        title: 'Ticket updated',
+        message: `Status is now ${status.replace('_', ' ')}.`,
+        type: 'system',
+      });
+    } catch (err: any) {
+      triggerToast({ title: 'Support', message: err?.message || 'Could not update the ticket.', type: 'system' });
+    } finally {
+      setTicketBusy(false);
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -709,44 +842,44 @@ export const MasterAdminDashboard: React.FC = () => {
 
   if (!isMasterAuthenticated) {
     return (
-      <div className="min-h-full w-full bg-[#f8fafc] flex flex-col items-center justify-center p-4 py-12 font-sans text-slate-900">
-        <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 shadow-sm p-7 space-y-5">
+      <div className="min-h-full w-full bg-[#f8fafc] flex flex-col items-center justify-center p-4 py-12 font-sans text-[var(--text-primary)]">
+        <div className="w-full max-w-sm bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] shadow-sm p-7 space-y-5">
           <div className="text-center space-y-1">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-2">
+            <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-2">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <h1 className="text-lg font-bold text-slate-900">Platform Control</h1>
-            <p className="text-xs text-slate-500">Sign in with a platform_admin control-plane account</p>
+            <h1 className="text-lg font-bold text-[var(--text-primary)]">Platform Control</h1>
+            <p className="text-xs text-[var(--text-muted)]">Sign in with a platform_admin control-plane account</p>
           </div>
 
           {loginError && (
-            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+            <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
               {loginError}
             </div>
           )}
 
           <form onSubmit={handleMasterLogin} className="space-y-3.5">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Email</label>
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Email</label>
               <input
                 type="email"
                 required
                 value={masterEmail}
                 onChange={(e) => setMasterEmail(e.target.value)}
                 placeholder="admin@your-org.com"
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:border-blue-600 focus:bg-white"
+                className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 px-3 py-2 text-xs outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Password</label>
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Password</label>
               <input
                 type="password"
                 required
                 value={masterPassword}
                 onChange={(e) => setMasterPassword(e.target.value)}
                 placeholder="Your account password"
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs outline-none focus:border-blue-600 focus:bg-white"
+                className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 px-3 py-2 text-xs outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)]"
               />
             </div>
 
@@ -765,7 +898,7 @@ export const MasterAdminDashboard: React.FC = () => {
               onClick={() => {
                 window.location.href = `${APP_ORIGIN}/login`;
               }}
-              className="text-xs text-slate-400 hover:text-slate-700 cursor-pointer"
+              className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] cursor-pointer"
             >
               Back to Client Login
             </button>
@@ -779,16 +912,16 @@ export const MasterAdminDashboard: React.FC = () => {
   // 2. MAIN MASTER DASHBOARD
   // ---------------------------------------------------------------------------
   return (
-    <div className="min-h-full w-full bg-[#f8fafc] font-sans text-slate-900 flex flex-col pb-16">
+    <div className="min-h-full w-full bg-[#f8fafc] font-sans text-[var(--text-primary)] flex flex-col pb-16">
       {/* Top Navbar */}
-      <header className="sticky top-0 z-40 w-full bg-white border-b border-slate-200/90 px-6 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-40 w-full bg-[var(--bg-surface)] border-b border-[var(--border-color)]/90 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
             <ShieldCheck className="w-4 h-4" />
           </div>
           <div>
-            <span className="font-bold text-slate-900 text-sm">Platform Control</span>
-            <span className="text-xs text-slate-400 ml-2">AWS ap-south-1</span>
+            <span className="font-bold text-[var(--text-primary)] text-sm">Platform Control</span>
+            <span className="text-xs text-[var(--text-muted)] ml-2">AWS ap-south-1</span>
           </div>
         </div>
 
@@ -797,18 +930,18 @@ export const MasterAdminDashboard: React.FC = () => {
             type="button"
             onClick={fetchPlatformData}
             disabled={isLoadingData}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-secondary)] text-xs font-semibold hover:bg-[var(--bg-surface-subtle)] transition-colors cursor-pointer"
             title="Sync live platform data"
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${isLoadingData ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 text-[var(--text-muted)] ${isLoadingData ? 'animate-spin' : ''}`} />
             <span>{isLoadingData ? 'Syncing...' : 'Sync Live Data'}</span>
           </button>
           <button
             type="button"
             onClick={handleMasterLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-color)] text-[var(--text-secondary)] text-xs font-semibold hover:bg-[var(--bg-surface-subtle)] transition-colors cursor-pointer"
           >
-            <LogOut className="w-3.5 h-3.5 text-slate-400" />
+            <LogOut className="w-3.5 h-3.5 text-[var(--text-muted)]" />
             <span>Sign Out</span>
           </button>
         </div>
@@ -818,40 +951,40 @@ export const MasterAdminDashboard: React.FC = () => {
       <main className="flex-1 max-w-6xl w-full mx-auto p-5 sm:p-6 space-y-6">
         {/* KPI Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-white rounded-xl border border-slate-200/80 p-3.5 flex items-center justify-between">
+          <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)]/80 p-3.5 flex items-center justify-between">
             <div>
-              <span className="text-xs text-slate-500 font-medium">Workspaces</span>
-              <div className="text-xl font-bold text-slate-900 mt-0.5">{stats.totalTenantsCount}</div>
+              <span className="text-xs text-[var(--text-muted)] font-medium">Workspaces</span>
+              <div className="text-xl font-bold text-[var(--text-primary)] mt-0.5">{stats.totalTenantsCount}</div>
             </div>
             <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
               <Building2 className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-slate-200/80 p-3.5 flex items-center justify-between">
+          <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)]/80 p-3.5 flex items-center justify-between">
             <div>
-              <span className="text-xs text-slate-500 font-medium">Total Users</span>
-              <div className="text-xl font-bold text-slate-900 mt-0.5">{stats.totalUsersCount.toLocaleString()}</div>
+              <span className="text-xs text-[var(--text-muted)] font-medium">Total Users</span>
+              <div className="text-xl font-bold text-[var(--text-primary)] mt-0.5">{stats.totalUsersCount.toLocaleString()}</div>
             </div>
             <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
               <Users className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-slate-200/80 p-3.5 flex items-center justify-between">
+          <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)]/80 p-3.5 flex items-center justify-between">
             <div>
-              <span className="text-xs text-slate-500 font-medium">Support Tickets</span>
-              <div className="text-xl font-bold text-slate-900 mt-0.5">{stats.openTicketsCount} Open</div>
+              <span className="text-xs text-[var(--text-muted)] font-medium">Support Tickets</span>
+              <div className="text-xl font-bold text-[var(--text-primary)] mt-0.5">{stats.openTicketsCount} Open</div>
             </div>
             <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
               <LifeBuoy className="w-4 h-4" />
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-slate-200/80 p-3.5 flex items-center justify-between">
+          <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)]/80 p-3.5 flex items-center justify-between">
             <div>
-              <span className="text-xs text-slate-500 font-medium">Punches Logged</span>
-              <div className="text-xl font-bold text-slate-900 mt-0.5">{stats.totalPunchesCount.toLocaleString()}</div>
+              <span className="text-xs text-[var(--text-muted)] font-medium">Punches Logged</span>
+              <div className="text-xl font-bold text-[var(--text-primary)] mt-0.5">{stats.totalPunchesCount.toLocaleString()}</div>
             </div>
             <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
               <CalendarCheck className="w-4 h-4" />
@@ -860,9 +993,11 @@ export const MasterAdminDashboard: React.FC = () => {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/70 overflow-x-auto custom-scrollbar">
+        <div className="flex items-center gap-1 bg-[var(--bg-surface-subtle)] p-1 rounded-lg border border-[var(--border-color)]/70 overflow-x-auto custom-scrollbar">
           {[
             { id: 'tenants', label: 'Workspaces', icon: Building2 },
+            { id: 'licenses', label: 'Licenses', icon: KeyRound },
+            { id: 'support', label: 'Support', icon: LifeBuoy },
             { id: 'database', label: 'Databases', icon: Database },
             { id: 'users', label: 'Users', icon: Users },
             { id: 'telemetry', label: 'AWS & Telemetry', icon: Activity },
@@ -875,7 +1010,7 @@ export const MasterAdminDashboard: React.FC = () => {
                 type="button"
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                  isSel ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  isSel ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] ' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 <span>{tab.label}</span>
@@ -890,14 +1025,14 @@ export const MasterAdminDashboard: React.FC = () => {
         {activeTab === 'tenants' && (
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5 text-xs">
+              <div className="flex items-center gap-1 bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg p-0.5 text-xs">
                 {['all', 'active', 'trial', 'suspended'].map((st) => (
                   <button
                     key={st}
                     type="button"
                     onClick={() => setStatusFilter(st)}
                     className={`px-2.5 py-1 rounded-md font-medium capitalize cursor-pointer transition-colors ${
-                      statusFilter === st ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
+                      statusFilter === st ? 'bg-[var(--bg-surface-subtle)] text-[var(--text-primary)] font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     {st}
@@ -907,13 +1042,13 @@ export const MasterAdminDashboard: React.FC = () => {
 
               <div className="flex items-center gap-2">
                 <div className="relative w-full sm:w-56">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={tenantSearch}
                     onChange={(e) => setTenantSearch(e.target.value)}
                     placeholder="Search workspaces..."
-                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-600 font-medium"
+                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg outline-none focus:border-blue-600 font-medium"
                   />
                 </div>
 
@@ -928,45 +1063,54 @@ export const MasterAdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs">
+            <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] overflow-hidden text-xs">
               <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-50 text-slate-500 font-semibold text-[11px] border-b border-slate-200">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-semibold text-[11px] border-b border-[var(--border-color)]">
                   <tr>
                     <th className="p-3 pl-4">Workspace</th>
                     <th className="p-3">Schema</th>
                     <th className="p-3">Plan</th>
+                    <th className="p-3">License</th>
                     <th className="p-3">Admin</th>
                     <th className="p-3">Status</th>
                     <th className="p-3 text-right pr-4">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] text-[var(--text-secondary)]">
                   {filteredTenants.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-slate-400 text-xs">
+                      <td colSpan={7} className="p-8 text-center text-[var(--text-muted)] text-xs">
                         No workspaces found. Click &quot;Add Workspace&quot; to provision a new client workspace.
                       </td>
                     </tr>
                   ) : (
                     filteredTenants.map((tenant) => (
-                      <tr key={tenant.id} className="hover:bg-slate-50/60">
+                      <tr key={tenant.id} className="hover:bg-[var(--bg-surface-subtle)]/60">
                         <td className="p-3 pl-4">
-                          <div className="font-semibold text-slate-900">{tenant.name}</div>
-                          <div className="text-[11px] text-slate-400">{tenant.domain || tenant.slug}</div>
+                          <div className="font-semibold text-[var(--text-primary)]">{tenant.name}</div>
+                          <div className="text-[11px] text-[var(--text-muted)]">{tenant.domain || tenant.slug}</div>
                         </td>
 
-                        <td className="p-3 font-mono text-slate-600 text-[11px]">{tenant.schemaName}</td>
+                        <td className="p-3 font-mono text-[var(--text-secondary)] text-[11px]">{tenant.schemaName}</td>
 
                         <td className="p-3">
-                          <span className="font-semibold uppercase text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">
-                            {tenant.plan}
+                          <span className="font-semibold uppercase text-[10px] bg-[var(--bg-surface-subtle)] px-1.5 py-0.5 rounded text-[var(--text-secondary)]">
+                            {tenant.planName || tenant.plan}
                           </span>
-                          <span className="text-[11px] text-slate-400 ml-1.5">({tenant.maxSeats} seats)</span>
+                          <span className="text-[11px] text-[var(--text-muted)] ml-1.5">({tenant.maxSeats} seats)</span>
+                        </td>
+
+                        <td className="p-3">
+                          <div className="font-semibold capitalize">{tenant.licenseStatus || 'active'}</div>
+                          <div className="text-[11px] text-[var(--text-muted)]">
+                            {tenant.daysRemaining != null ? `${tenant.daysRemaining}d left` : '—'}
+                            {tenant.periodEnd ? ` · ${String(tenant.periodEnd).substring(0, 10)}` : ''}
+                          </div>
                         </td>
 
                         <td className="p-3">
                           <div>{tenant.adminName}</div>
-                          <div className="text-[11px] text-slate-400">{tenant.adminEmail}</div>
+                          <div className="text-[11px] text-[var(--text-muted)]">{tenant.adminEmail}</div>
                         </td>
 
                         <td className="p-3">
@@ -988,7 +1132,13 @@ export const MasterAdminDashboard: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleImpersonateTenant(tenant)}
-                              className="px-2.5 py-1 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-[11px] cursor-pointer"
+                              disabled={tenant.status === 'suspended'}
+                              title={
+                                tenant.status === 'suspended'
+                                  ? 'Reactivate this workspace before jumping in'
+                                  : `Open ${tenant.name} as operator`
+                              }
+                              className="px-2.5 py-1 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-[11px] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-50"
                             >
                               Jump in
                             </button>
@@ -997,26 +1147,62 @@ export const MasterAdminDashboard: React.FC = () => {
                               type="button"
                               onClick={() => {
                                 setSelectedTenantForPlan(tenant);
-                                setEditPlanTier(tenant.plan);
+                                setEditPlanTier(tenant.planId || tenant.plan);
                                 setEditPlanSeats(tenant.maxSeats);
+                                setEditExtendDays(0);
+                                setEditRevoke(false);
+                                setLicenseEvents([]);
                                 setShowPlanModal(true);
+                                void api.controlPlane.getTenantDetails(tenant.id).then((res) => {
+                                  const events = (res.data as any)?.events;
+                                  if (Array.isArray(events)) setLicenseEvents(events);
+                                }).catch(() => {});
                               }}
-                              className="px-2 py-1 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-600 text-[11px] font-medium cursor-pointer"
+                              className="px-2 py-1 rounded-md border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] text-[11px] font-medium cursor-pointer"
                             >
                               Edit
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={() => handleToggleSuspendTenant(tenant.id)}
-                              className={`p-1 rounded-md border text-[11px] cursor-pointer ${
-                                tenant.status === 'suspended'
-                                  ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
-                                  : 'border-rose-200 text-rose-600 hover:bg-rose-50'
-                              }`}
-                            >
-                              {tenant.status === 'suspended' ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-                            </button>
+                            {tenant.status === 'suspended' ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleReactivateTenant(tenant)}
+                                  disabled={isDeleting}
+                                  title="Reactivate workspace"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-[11px] font-medium cursor-pointer disabled:opacity-50"
+                                >
+                                  <Unlock className="w-3.5 h-3.5" />
+                                  Reactivate
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Delete suspended workspace"
+                                  aria-label={`Delete ${tenant.name}`}
+                                  onClick={() => {
+                                    setDeleteConfirmText('');
+                                    setDeleteTarget({ kind: 'tenant', tenant, action: 'delete' });
+                                  }}
+                                  className="p-1 rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px] cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDeleteConfirmText('');
+                                  setDeleteTarget({ kind: 'tenant', tenant, action: 'suspend' });
+                                }}
+                                title="Suspend workspace"
+                                aria-label={`Suspend ${tenant.name}`}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px] font-medium cursor-pointer"
+                              >
+                                <Lock className="w-3.5 h-3.5" />
+                                Suspend
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1028,84 +1214,36 @@ export const MasterAdminDashboard: React.FC = () => {
           </div>
         )}
 
+        {activeTab === 'licenses' && (
+          <LicenseManagerTab
+            plans={plans}
+            tenants={tenants}
+            isLoading={isLoadingData}
+            loadError={plansLoadError}
+            onPlansChange={setPlans}
+            onToast={triggerToast}
+          />
+        )}
+
         {/* ----------------------------------------------------------------- */}
-        {/* TAB 2: PLANS & SUPPORT SLAS */}
+        {/* TAB 3: DEDICATED SUPPORT HELPDESK PAGE */}
         {/* ----------------------------------------------------------------- */}
-        {false && (activeTab as string) === 'plans' && (
-          <div className="space-y-6">
-            {/* Subscription Plans */}
+        {activeTab === 'support' && (
+          <div className="space-y-4">
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-bold text-slate-900 text-sm">Subscription Plans</h3>
-                  <p className="text-xs text-slate-500">Default feature packaging & seat capacities</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowCreatePlanModal(true)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Create Plan</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-                {plans.map((p) => (
-                  <div key={p.id} className="bg-white rounded-xl border border-slate-200 p-4 space-y-3 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-900 text-sm">{p.name}</span>
-                        <span className="text-xs font-semibold text-blue-600">${p.price}/mo</span>
-                      </div>
-                      <div className="text-xs text-slate-400 mt-0.5">{p.maxSeats} Seats Capacity</div>
-
-                      <div className="mt-3 space-y-1.5 text-xs text-slate-600">
-                        {p.features.map((f, i) => (
-                          <div key={i} className="flex items-center gap-1.5">
-                            <Check className="w-3 h-3 text-emerald-600" />
-                            <span>{f}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-                      <span>{p.activeClientsCount} Enrolled</span>
-                      {p.id.startsWith('plan_') && !['plan_starter', 'plan_pro', 'plan_enterprise'].includes(p.id) && (
-                        <button
-                          type="button"
-                          onClick={() => setPlans(plans.filter((x) => x.id !== p.id))}
-                          className="text-rose-500 hover:text-rose-700 cursor-pointer"
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Support Plans & SLAs */}
-            <div className="space-y-3 pt-4 border-t border-slate-200">
-              <div>
-                <h3 className="font-bold text-slate-900 text-sm">Support & SLA Packages</h3>
-                <p className="text-xs text-slate-500">Service level agreements and support channels for clients</p>
-              </div>
-
+              <h3 className="font-bold text-[var(--text-primary)] text-sm">Support & SLA Packages</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                 {supportPlans.map((sp) => (
                   <div
                     key={sp.id}
-                    className={`bg-white rounded-xl p-4 space-y-3 flex flex-col justify-between border ${
-                      sp.isPopular ? 'border-blue-500' : 'border-slate-200'
+                    className={`bg-[var(--bg-surface)] rounded-lg p-4 space-y-3 flex flex-col justify-between border ${
+                      sp.isPopular ? 'border-blue-500' : 'border-[var(--border-color)]'
                     }`}
                   >
                     <div>
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-900 text-sm">{sp.name}</span>
-                        <span className="text-xs font-semibold text-slate-900">
+                        <span className="font-bold text-[var(--text-primary)] text-sm">{sp.name}</span>
+                        <span className="text-xs font-semibold text-[var(--text-primary)]">
                           {sp.price === 0 ? 'Free' : `$${sp.price}/mo`}
                         </span>
                       </div>
@@ -1113,9 +1251,8 @@ export const MasterAdminDashboard: React.FC = () => {
                         <Clock className="w-3 h-3" />
                         <span>SLA: {sp.slaResponseTime}</span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-2 leading-relaxed">{sp.description}</p>
-
-                      <div className="mt-3 space-y-1 text-xs text-slate-600">
+                      <p className="text-xs text-[var(--text-muted)] mt-2 leading-relaxed">{sp.description}</p>
+                      <div className="mt-3 space-y-1 text-xs text-[var(--text-secondary)]">
                         {sp.channels.map((ch, i) => (
                           <div key={i} className="flex items-center gap-1.5">
                             <Check className="w-3 h-3 text-emerald-600" />
@@ -1128,23 +1265,15 @@ export const MasterAdminDashboard: React.FC = () => {
                 ))}
               </div>
             </div>
-          </div>
-        )}
-
-        {/* ----------------------------------------------------------------- */}
-        {/* TAB 3: DEDICATED SUPPORT HELPDESK PAGE */}
-        {/* ----------------------------------------------------------------- */}
-        {false && (activeTab as string) === 'support' && (
-          <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5 text-xs">
-                {['all', 'open', 'in_progress', 'resolved', 'urgent'].map((f) => (
+              <div className="flex items-center gap-1 bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg p-0.5 text-xs">
+                {['all', 'open', 'in_progress', 'resolved', 'closed'].map((f) => (
                   <button
                     key={f}
                     type="button"
                     onClick={() => setTicketFilter(f)}
                     className={`px-2.5 py-1 rounded-md font-medium capitalize cursor-pointer transition-colors ${
-                      ticketFilter === f ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-900'
+                      ticketFilter === f ? 'bg-[var(--bg-surface-subtle)] text-[var(--text-primary)] font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     {f.replace('_', ' ')}
@@ -1153,49 +1282,64 @@ export const MasterAdminDashboard: React.FC = () => {
               </div>
 
               <div className="relative w-full sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={ticketSearch}
                   onChange={(e) => setTicketSearch(e.target.value)}
-                  placeholder="Search tickets or tenant..."
-                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-600"
+                  placeholder="Search tickets, client, or tenant..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg outline-none focus:border-blue-600"
                 />
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs">
+            <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] overflow-hidden text-xs">
               <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-50 text-slate-500 font-semibold text-[11px] border-b border-slate-200">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-semibold text-[11px] border-b border-[var(--border-color)]">
                   <tr>
                     <th className="p-3 pl-4">Ticket & Subject</th>
-                    <th className="p-3">Workspace</th>
-                    <th className="p-3">Category</th>
-                    <th className="p-3">SLA Due</th>
+                    <th className="p-3">Client name</th>
+                    <th className="p-3">Client tenant</th>
+                    <th className="p-3">Requester</th>
+                    <th className="p-3">Opened</th>
                     <th className="p-3">Status</th>
                     <th className="p-3 text-right pr-4">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] text-[var(--text-secondary)]">
                   {filteredTickets.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-slate-400 text-xs">
-                        No support tickets found. Client inquiries will appear here automatically.
+                      <td colSpan={7} className="p-8 text-center text-[var(--text-muted)] text-xs">
+                        No support tickets found. Help & support tickets from client workspaces appear here.
                       </td>
                     </tr>
                   ) : (
                     filteredTickets.map((ticket) => (
-                      <tr key={ticket.id} className="hover:bg-slate-50/60">
+                      <tr key={ticket.id} className="hover:bg-[var(--bg-surface-subtle)]/60">
                         <td className="p-3 pl-4">
-                          <div className="font-semibold text-slate-900">{ticket.subject}</div>
-                          <div className="text-[11px] text-slate-400">
+                          <div className="font-semibold text-[var(--text-primary)]">{ticket.subject}</div>
+                          <div className="text-[11px] text-[var(--text-muted)]">
                             {ticket.ticketNumber} • {ticket.requesterName} ({ticket.requesterEmail})
                           </div>
                         </td>
 
-                        <td className="p-3 font-medium text-slate-800">{ticket.tenantName}</td>
+                        <td className="p-3">
+                          <div className="font-medium text-[var(--text-primary)]">{ticket.tenantName}</div>
+                        </td>
 
-                        <td className="p-3 text-slate-500">{ticket.category}</td>
+                        <td className="p-3">
+                          <div className="font-mono text-[11px] font-semibold text-[var(--text-primary)]">
+                            {ticket.tenantSlug || '—'}
+                          </div>
+                          {ticket.tenantSchema ? (
+                            <div className="text-[10px] text-[var(--text-muted)]">{ticket.tenantSchema}</div>
+                          ) : null}
+                        </td>
+
+                        <td className="p-3 text-[var(--text-muted)]">
+                          <div className="text-[var(--text-secondary)]">{ticket.requesterName}</div>
+                          <div className="text-[11px]">{ticket.requesterEmail}</div>
+                        </td>
 
                         <td className="p-3 font-mono text-[11px] text-blue-600 font-medium">{ticket.slaDue}</td>
 
@@ -1206,6 +1350,8 @@ export const MasterAdminDashboard: React.FC = () => {
                                 ? 'bg-amber-50 text-amber-700'
                                 : ticket.status === 'in_progress'
                                 ? 'bg-blue-50 text-blue-700'
+                                : ticket.status === 'closed'
+                                ? 'bg-slate-100 text-slate-600'
                                 : 'bg-emerald-50 text-emerald-700'
                             }`}
                           >
@@ -1217,8 +1363,7 @@ export const MasterAdminDashboard: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => {
-                              setSelectedTicket(ticket);
-                              setTicketReplyText('');
+                              void openSupportTicket(ticket);
                             }}
                             className="px-2.5 py-1 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs cursor-pointer"
                           >
@@ -1240,11 +1385,11 @@ export const MasterAdminDashboard: React.FC = () => {
         {activeTab === 'database' && (
           <div className="space-y-4">
             {/* PostgreSQL Cluster Info Card */}
-            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+            <div className="p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] space-y-3">
+              <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-2.5">
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-blue-600" />
-                  <h4 className="font-bold text-slate-900 text-xs">AWS RDS PostgreSQL Cluster Status</h4>
+                  <h4 className="font-bold text-[var(--text-primary)] text-xs">AWS RDS PostgreSQL Cluster Status</h4>
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
                   Connected & Multi-AZ Synchronized
@@ -1252,24 +1397,24 @@ export const MasterAdminDashboard: React.FC = () => {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Database Endpoint</span>
-                  <span className="font-mono font-semibold text-slate-800 truncate block">rds-multi-tenant-cluster.ap-south-1.rds.amazonaws.com:5432</span>
+                  <span className="text-[var(--text-muted)] block text-[11px]">Database Endpoint</span>
+                  <span className="font-mono font-semibold text-[var(--text-primary)] truncate block">rds-multi-tenant-cluster.ap-south-1.rds.amazonaws.com:5432</span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Primary Workspace Schema</span>
+                  <span className="text-[var(--text-muted)] block text-[11px]">Primary Workspace Schema</span>
                   <span className="font-mono font-semibold text-blue-600">tenant_{(state.organization?.name || 'primary').toLowerCase().replace(/[^a-z0-9]/g, '_')}</span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[11px]">Encryption & Engine</span>
-                  <span className="font-semibold text-slate-800">TLSv1.3 Encrypted • PostgreSQL 16.2</span>
+                  <span className="text-[var(--text-muted)] block text-[11px]">Encryption & Engine</span>
+                  <span className="font-semibold text-[var(--text-primary)]">TLSv1.3 Encrypted • PostgreSQL 16.2</span>
                 </div>
               </div>
             </div>
 
             <div className="flex items-center justify-between pt-1">
               <div>
-                <h3 className="font-bold text-slate-900 text-sm">PostgreSQL Schemas & Table Inspector</h3>
-                <p className="text-xs text-slate-500">Live schema row counts and storage utilization across workspace tables</p>
+                <h3 className="font-bold text-[var(--text-primary)] text-sm">PostgreSQL Schemas & Table Inspector</h3>
+                <p className="text-xs text-[var(--text-muted)]">Live schema row counts and storage utilization across workspace tables</p>
               </div>
               <button
                 type="button"
@@ -1299,9 +1444,9 @@ export const MasterAdminDashboard: React.FC = () => {
               </button>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs">
+            <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] overflow-hidden text-xs">
               <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-50 text-slate-500 font-semibold text-[11px] border-b border-slate-200">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-semibold text-[11px] border-b border-[var(--border-color)]">
                   <tr>
                     <th className="p-3 pl-4">Schema & Table Name</th>
                     <th className="p-3">Workspace</th>
@@ -1311,7 +1456,7 @@ export const MasterAdminDashboard: React.FC = () => {
                     <th className="p-3 text-right pr-4">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] text-[var(--text-secondary)]">
                   {(() => {
                     const liveSchemasList =
                       schemas.length > 0
@@ -1321,7 +1466,7 @@ export const MasterAdminDashboard: React.FC = () => {
                     if (liveSchemasList.length === 0) {
                       return (
                         <tr>
-                          <td colSpan={6} className="p-8 text-center text-slate-400 text-xs">
+                          <td colSpan={6} className="p-8 text-center text-[var(--text-muted)] text-xs">
                             No schemas returned from the control plane yet.
                           </td>
                         </tr>
@@ -1329,10 +1474,10 @@ export const MasterAdminDashboard: React.FC = () => {
                     }
 
                     return liveSchemasList.map((sch) => (
-                      <tr key={sch.schemaName} className="hover:bg-slate-50/60">
-                        <td className="p-3 pl-4 font-mono font-semibold text-slate-900">{sch.schemaName}</td>
-                        <td className="p-3 font-medium text-slate-800">{sch.tenantName}</td>
-                        <td className="p-3 text-slate-500 font-mono text-[11px]">{sch.migrationVersion}</td>
+                      <tr key={sch.schemaName} className="hover:bg-[var(--bg-surface-subtle)]/60">
+                        <td className="p-3 pl-4 font-mono font-semibold text-[var(--text-primary)]">{sch.schemaName}</td>
+                        <td className="p-3 font-medium text-[var(--text-primary)]">{sch.tenantName}</td>
+                        <td className="p-3 text-[var(--text-muted)] font-mono text-[11px]">{sch.migrationVersion}</td>
                         <td className="p-3 font-medium font-mono text-blue-600">{(sch.totalRows || 0).toLocaleString()}</td>
                         <td className="p-3 font-mono">{sch.sizeMB || 0} MB</td>
                         <td className="p-3 text-right pr-4">
@@ -1354,25 +1499,25 @@ export const MasterAdminDashboard: React.FC = () => {
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <div>
-                <h3 className="font-bold text-slate-900 text-sm">Global User Directory & Access Control</h3>
-                <p className="text-xs text-slate-500">Manage user accounts, toggle activation, reset passwords, or delete accounts across workspaces</p>
+                <h3 className="font-bold text-[var(--text-primary)] text-sm">Global User Directory & Access Control</h3>
+                <p className="text-xs text-[var(--text-muted)]">Manage user accounts, toggle activation, reset passwords, or delete accounts across workspaces</p>
               </div>
 
               <div className="relative w-full sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={userSearchQuery}
                   onChange={(e) => setUserSearchQuery(e.target.value)}
                   placeholder="Search by email or name..."
-                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-blue-600"
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg outline-none focus:border-blue-600"
                 />
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs">
+            <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] overflow-hidden text-xs">
               <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-50 text-slate-500 font-semibold text-[11px] border-b border-slate-200">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-semibold text-[11px] border-b border-[var(--border-color)]">
                   <tr>
                     <th className="p-3 pl-4">User</th>
                     <th className="p-3">Workspace</th>
@@ -1381,11 +1526,12 @@ export const MasterAdminDashboard: React.FC = () => {
                     <th className="p-3 text-right pr-4">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] text-[var(--text-secondary)]">
                   {(() => {
                     const q = userSearchQuery.toLowerCase().trim();
                     const dynamicUsers = globalUsers
                       .map((u) => ({
+                        id: String(u.id || ''),
                         name: (u.email || '').split('@')[0],
                         email: u.email,
                         tenant: u.tenant_name || u.tenant_slug || '—',
@@ -1403,7 +1549,7 @@ export const MasterAdminDashboard: React.FC = () => {
                     if (dynamicUsers.length === 0) {
                       return (
                         <tr>
-                          <td colSpan={5} className="p-8 text-center text-slate-400 text-xs">
+                          <td colSpan={5} className="p-8 text-center text-[var(--text-muted)] text-xs">
                             No registered users found across workspaces.
                           </td>
                         </tr>
@@ -1411,14 +1557,14 @@ export const MasterAdminDashboard: React.FC = () => {
                     }
 
                     return dynamicUsers.map((u, i) => (
-                      <tr key={`${u.email}-${i}`} className="hover:bg-slate-50/60">
+                      <tr key={`${u.email}-${i}`} className="hover:bg-[var(--bg-surface-subtle)]/60">
                         <td className="p-3 pl-4">
-                          <div className="font-semibold text-slate-900">{u.name}</div>
-                          <div className="text-[11px] text-slate-400 font-mono">{u.email}</div>
+                          <div className="font-semibold text-[var(--text-primary)]">{u.name}</div>
+                          <div className="text-[11px] text-[var(--text-muted)] font-mono">{u.email}</div>
                         </td>
-                        <td className="p-3 font-medium text-slate-800">{u.tenant}</td>
+                        <td className="p-3 font-medium text-[var(--text-primary)]">{u.tenant}</td>
                         <td className="p-3">
-                          <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold text-[11px]">
+                          <span className="px-2 py-0.5 rounded bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-semibold text-[11px]">
                             {u.role}
                           </span>
                         </td>
@@ -1433,7 +1579,23 @@ export const MasterAdminDashboard: React.FC = () => {
                             {u.status}
                           </span>
                         </td>
-                        <td className="p-3 text-right pr-4 text-slate-400 text-[11px]">—</td>
+                        <td className="p-3 text-right pr-4 text-[var(--text-muted)] text-[11px]">
+                          {u.id && u.role !== 'platform_admin' ? (
+                            <button
+                              type="button"
+                              title="Delete user"
+                              aria-label={`Delete ${u.email}`}
+                              onClick={() =>
+                                setDeleteTarget({ kind: 'user', id: u.id, email: u.email, tenant: u.tenant, role: u.role })
+                              }
+                              className="p-1 rounded-md border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
                       </tr>
                     ));
                   })()}
@@ -1450,8 +1612,8 @@ export const MasterAdminDashboard: React.FC = () => {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-bold text-slate-900 text-sm">System Broadcasts</h3>
-                <p className="text-xs text-slate-500">Notices displayed on all client dashboards</p>
+                <h3 className="font-bold text-[var(--text-primary)] text-sm">System Broadcasts</h3>
+                <p className="text-xs text-[var(--text-muted)]">Notices displayed on all client dashboards</p>
               </div>
               <button
                 type="button"
@@ -1465,17 +1627,17 @@ export const MasterAdminDashboard: React.FC = () => {
 
             <div className="space-y-2.5">
               {broadcasts.length === 0 ? (
-                <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-xs">
+                <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] p-8 text-center text-[var(--text-muted)] text-xs">
                   No system broadcasts published. Click &quot;New Notice&quot; to broadcast an announcement.
                 </div>
               ) : (
                 broadcasts.map((bc) => (
-                  <div key={bc.id} className="bg-white rounded-xl border border-slate-200 p-4 space-y-1.5 text-xs">
+                  <div key={bc.id} className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] p-4 space-y-1.5 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-900 text-sm">{bc.title}</span>
-                      <span className="text-[11px] text-slate-400">{bc.createdAt}</span>
+                      <span className="font-bold text-[var(--text-primary)] text-sm">{bc.title}</span>
+                      <span className="text-[11px] text-[var(--text-muted)]">{bc.createdAt}</span>
                     </div>
-                    <p className="text-slate-600 leading-relaxed">{bc.message}</p>
+                    <p className="text-[var(--text-secondary)] leading-relaxed">{bc.message}</p>
                   </div>
                 ))
               )}
@@ -1490,13 +1652,13 @@ export const MasterAdminDashboard: React.FC = () => {
           <div className="space-y-6">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <h3 className="font-bold text-slate-900 text-sm">AWS Cloud Infrastructure & Telemetry</h3>
-                <p className="text-xs text-slate-500">Operational status from control-plane telemetry API</p>
+                <h3 className="font-bold text-[var(--text-primary)] text-sm">AWS Cloud Infrastructure & Telemetry</h3>
+                <p className="text-xs text-[var(--text-muted)]">Operational status from control-plane telemetry API</p>
               </div>
               <button
                 type="button"
                 onClick={() => fetchPlatformData()}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-semibold text-xs cursor-pointer hover:bg-slate-50"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] font-semibold text-xs cursor-pointer hover:bg-[var(--bg-surface-subtle)]"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoadingData ? 'animate-spin' : ''}`} />
                 Refresh
@@ -1504,71 +1666,71 @@ export const MasterAdminDashboard: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-              <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+              <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Server className="w-4 h-4 text-blue-600" />
-                    <span className="font-bold text-slate-900 text-xs">AWS ECS Fargate</span>
+                    <span className="font-bold text-[var(--text-primary)] text-xs">AWS ECS Fargate</span>
                   </div>
                   <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
                     {telemetry?.ecsFargate?.runningTasks ?? '—'} Tasks
                   </span>
                 </div>
-                <div className="space-y-1 text-xs text-slate-600">
+                <div className="space-y-1 text-xs text-[var(--text-secondary)]">
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Cluster:</span>
+                    <span className="text-[var(--text-muted)]">Cluster:</span>
                     <span className="font-mono font-medium">{telemetry?.ecsFargate?.clusterName || '—'}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">CPU Utilization:</span>
-                    <span className="font-medium text-slate-900">{telemetry?.ecsFargate?.cpuUtilizationPercent ?? '—'}%</span>
+                    <span className="text-[var(--text-muted)]">CPU Utilization:</span>
+                    <span className="font-medium text-[var(--text-primary)]">{telemetry?.ecsFargate?.cpuUtilizationPercent ?? '—'}%</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Memory:</span>
-                    <span className="font-medium text-slate-900">{telemetry?.ecsFargate?.memoryUtilizationPercent ?? '—'}%</span>
+                    <span className="text-[var(--text-muted)]">Memory:</span>
+                    <span className="font-medium text-[var(--text-primary)]">{telemetry?.ecsFargate?.memoryUtilizationPercent ?? '—'}%</span>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+              <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Database className="w-4 h-4 text-purple-600" />
-                    <span className="font-bold text-slate-900 text-xs">Aurora / RDS</span>
+                    <span className="font-bold text-[var(--text-primary)] text-xs">Aurora / RDS</span>
                   </div>
                   <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
                     {telemetry?.auroraServerless?.currentACU ?? '—'} ACU
                   </span>
                 </div>
-                <div className="space-y-1 text-xs text-slate-600">
+                <div className="space-y-1 text-xs text-[var(--text-secondary)]">
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Connections:</span>
-                    <span className="font-medium text-slate-900">{telemetry?.auroraServerless?.activeConnections ?? '—'}</span>
+                    <span className="text-[var(--text-muted)]">Connections:</span>
+                    <span className="font-medium text-[var(--text-primary)]">{telemetry?.auroraServerless?.activeConnections ?? '—'}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">CPU:</span>
-                    <span className="font-medium text-slate-900">{telemetry?.auroraServerless?.cpuUtilizationPercent ?? '—'}%</span>
+                    <span className="text-[var(--text-muted)]">CPU:</span>
+                    <span className="font-medium text-[var(--text-primary)]">{telemetry?.auroraServerless?.cpuUtilizationPercent ?? '—'}%</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Buffer cache hit:</span>
-                    <span className="font-mono font-medium text-slate-900">{telemetry?.auroraServerless?.bufferCacheHitRatioPercent ?? '—'}%</span>
+                    <span className="text-[var(--text-muted)]">Buffer cache hit:</span>
+                    <span className="font-mono font-medium text-[var(--text-primary)]">{telemetry?.auroraServerless?.bufferCacheHitRatioPercent ?? '—'}%</span>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+              <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    <span className="font-bold text-slate-900 text-xs">AWS Cognito Auth</span>
+                    <span className="font-bold text-[var(--text-primary)] text-xs">AWS Cognito Auth</span>
                   </div>
                   <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
                     {telemetry?.cognito?.status || '—'}
                   </span>
                 </div>
-                <div className="space-y-1 text-xs text-slate-600">
+                <div className="space-y-1 text-xs text-[var(--text-secondary)]">
                   <div className="flex justify-between">
-                    <span className="text-slate-400">User Pool ID:</span>
+                    <span className="text-[var(--text-muted)]">User Pool ID:</span>
                     <span className="font-mono text-[11px]">{telemetry?.cognito?.userPoolId || '—'}</span>
                   </div>
                 </div>
@@ -1583,25 +1745,25 @@ export const MasterAdminDashboard: React.FC = () => {
         {activeTab === 'audit' && (
           <div className="space-y-3">
             <div>
-              <h3 className="font-bold text-slate-900 text-sm">Operator Audit Trail</h3>
-              <p className="text-xs text-slate-500">Recent actions performed by platform operators</p>
+              <h3 className="font-bold text-[var(--text-primary)] text-sm">Operator Audit Trail</h3>
+              <p className="text-xs text-[var(--text-muted)]">Recent actions performed by platform operators</p>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100 text-xs">
+            <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] overflow-hidden divide-y divide-[var(--border-color)] text-xs">
               {auditLogs.length === 0 ? (
-                <div className="p-8 text-center text-slate-400 text-xs">
+                <div className="p-8 text-center text-[var(--text-muted)] text-xs">
                   No operator actions recorded yet. Operator activity will stream here in real-time.
                 </div>
               ) : (
                 auditLogs.map((log) => (
                   <div key={log.id} className="p-3.5 flex items-center justify-between gap-3">
                     <div>
-                      <div className="font-semibold text-slate-900">
+                      <div className="font-semibold text-[var(--text-primary)]">
                         {log.action} • <span className="text-blue-600">{log.targetTenant || log.targetEntity}</span>
                       </div>
-                      <div className="text-slate-500 text-[11px] mt-0.5">{log.details}</div>
+                      <div className="text-[var(--text-muted)] text-[11px] mt-0.5">{log.details}</div>
                     </div>
-                    <span className="text-slate-400 font-mono text-[11px] shrink-0">{log.timestamp}</span>
+                    <span className="text-[var(--text-muted)] font-mono text-[11px] shrink-0">{log.timestamp}</span>
                   </div>
                 ))
               )}
@@ -1619,58 +1781,142 @@ export const MasterAdminDashboard: React.FC = () => {
           onClick={() => setSelectedTicket(null)}
         >
           <div
-            className="relative max-w-lg w-full bg-white rounded-2xl border border-slate-200 shadow-xl p-6 space-y-4 text-slate-900 cursor-default max-h-[90vh] overflow-y-auto custom-scrollbar"
+            className="relative max-w-lg w-full bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] shadow-lg p-6 space-y-4 text-[var(--text-primary)] cursor-default max-h-[90vh] overflow-y-auto custom-scrollbar"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-start justify-between pb-3 border-b border-[var(--border-color)]">
               <div>
-                <span className="text-xs font-mono font-semibold text-blue-600">{selectedTicket.ticketNumber}</span>
-                <h3 className="font-bold text-slate-900 text-base">{selectedTicket.subject}</h3>
-                <p className="text-xs text-slate-500">
-                  {selectedTicket.tenantName} • {selectedTicket.requesterName} ({selectedTicket.requesterEmail})
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono font-semibold text-blue-600">{selectedTicket.ticketNumber}</span>
+                  <span
+                    className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                      selectedTicket.status === 'open'
+                        ? 'bg-amber-50 text-amber-700'
+                        : selectedTicket.status === 'in_progress'
+                        ? 'bg-blue-50 text-blue-700'
+                        : selectedTicket.status === 'closed'
+                        ? 'bg-slate-100 text-slate-600'
+                        : 'bg-emerald-50 text-emerald-700'
+                    }`}
+                  >
+                    {selectedTicket.status.replace('_', ' ')}
+                  </span>
+                </div>
+                <h3 className="font-bold text-[var(--text-primary)] text-base">{selectedTicket.subject}</h3>
+                <p className="text-xs text-[var(--text-muted)]">
+                  Client {selectedTicket.tenantName}
+                  {selectedTicket.tenantSlug ? ` · tenant ${selectedTicket.tenantSlug}` : ''}
+                  {selectedTicket.tenantSchema ? ` (${selectedTicket.tenantSchema})` : ''}
+                </p>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {selectedTicket.requesterName} ({selectedTicket.requesterEmail})
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedTicket(null)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
+                className="w-7 h-7 rounded-full bg-[var(--bg-surface-subtle)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] flex items-center justify-center cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/70 text-xs space-y-1.5">
-              <span className="font-semibold text-slate-700 block">Client Message:</span>
-              <p className="text-slate-600 leading-relaxed">{selectedTicket.description}</p>
+            <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar">
+              {ticketMessages.length === 0 ? (
+                <div className="p-3.5 bg-[var(--bg-surface-subtle)] rounded-lg border border-[var(--border-color)]/70 text-xs space-y-1.5">
+                  <span className="font-semibold text-[var(--text-secondary)] block">Client message</span>
+                  <p className="text-[var(--text-secondary)] leading-relaxed">{selectedTicket.description}</p>
+                </div>
+              ) : (
+                ticketMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`p-3 rounded-lg border text-xs space-y-1 ${
+                      message.authorKind === 'support'
+                        ? 'bg-[#17324e] border-[#17324e] text-white'
+                        : 'bg-[var(--bg-surface-subtle)] border-[var(--border-color)]/70'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`font-semibold ${message.authorKind === 'support' ? 'text-white' : 'text-[var(--text-secondary)]'}`}>
+                        {message.authorKind === 'support' ? message.authorName || 'Pixbe Support' : selectedTicket.requesterName}
+                      </span>
+                      <span className={`text-[10px] ${message.authorKind === 'support' ? 'text-white/70' : 'text-[var(--text-muted)]'}`}>
+                        {formatTicketTime(message.createdAt)}
+                      </span>
+                    </div>
+                    <p className={`leading-relaxed whitespace-pre-wrap ${message.authorKind === 'support' ? 'text-white' : 'text-[var(--text-secondary)]'}`}>
+                      {message.body}
+                    </p>
+                  </div>
+                ))
+              )}
             </div>
 
-            <div className="space-y-2 text-xs">
-              <label className="block font-semibold text-slate-700">Official Support Response</label>
-              <textarea
-                rows={4}
-                value={ticketReplyText}
-                onChange={(e) => setTicketReplyText(e.target.value)}
-                placeholder="Type response to client administrator..."
-                className="w-full rounded-xl border border-slate-200 p-3 text-xs outline-none focus:border-blue-600 font-medium"
-              />
-            </div>
+            {selectedTicket.status !== 'closed' ? (
+              <div className="space-y-2 text-xs">
+                <label className="block font-semibold text-[var(--text-secondary)]">Reply to requester</label>
+                <textarea
+                  rows={4}
+                  value={ticketReplyText}
+                  onChange={(e) => setTicketReplyText(e.target.value)}
+                  placeholder="Type a reply. The requester gets this by email and in Help & support."
+                  className="w-full rounded-lg border border-[var(--border-color)] p-3 text-xs outline-none focus:border-blue-600 font-medium"
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--text-muted)]">This ticket is closed. Reopen it to send another reply.</p>
+            )}
 
-            <div className="flex gap-2 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-[var(--border-color)]">
               <button
                 type="button"
                 onClick={() => setSelectedTicket(null)}
-                className="flex-1 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 font-medium text-xs text-slate-700 cursor-pointer"
+                className="py-2 px-3 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-medium text-xs text-[var(--text-secondary)] cursor-pointer"
               >
-                Cancel
+                Close panel
               </button>
-              <button
-                type="button"
-                onClick={() => handleResolveTicket(selectedTicket.id)}
-                className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Send Reply & Mark Resolved</span>
-              </button>
+              {selectedTicket.status !== 'closed' && (
+                <button
+                  type="button"
+                  onClick={() => void handleReplyTicket(selectedTicket.id)}
+                  disabled={ticketBusy}
+                  className="flex-1 min-w-[9rem] py-2 rounded-lg bg-[#17324e] hover:bg-[#285275] text-white font-semibold text-xs cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{ticketBusy ? 'Sending…' : 'Send reply'}</span>
+                </button>
+              )}
+              {selectedTicket.status !== 'resolved' && selectedTicket.status !== 'closed' && (
+                <button
+                  type="button"
+                  onClick={() => void handleUpdateTicketStatus(selectedTicket.id, 'resolved')}
+                  disabled={ticketBusy}
+                  className="py-2 px-3 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-semibold text-xs text-[var(--text-primary)] cursor-pointer disabled:opacity-50"
+                >
+                  Mark resolved
+                </button>
+              )}
+              {(selectedTicket.status === 'resolved' || selectedTicket.status === 'closed') && (
+                <button
+                  type="button"
+                  onClick={() => void handleUpdateTicketStatus(selectedTicket.id, 'open')}
+                  disabled={ticketBusy}
+                  className="py-2 px-3 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-semibold text-xs text-[var(--text-primary)] cursor-pointer disabled:opacity-50"
+                >
+                  Reopen
+                </button>
+              )}
+              {selectedTicket.status !== 'closed' && (
+                <button
+                  type="button"
+                  onClick={() => void handleUpdateTicketStatus(selectedTicket.id, 'closed')}
+                  disabled={ticketBusy}
+                  className="py-2 px-3 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-semibold text-xs text-[#8b3133] cursor-pointer disabled:opacity-50"
+                >
+                  Close ticket
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1685,15 +1931,15 @@ export const MasterAdminDashboard: React.FC = () => {
           onClick={() => setShowProvisionModal(false)}
         >
           <div
-            className="relative max-w-md w-full bg-white rounded-2xl border border-slate-200 shadow-xl p-6 space-y-4 text-slate-900 cursor-default"
+            className="relative max-w-md w-full bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] shadow-lg p-6 space-y-4 text-[var(--text-primary)] cursor-default"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-base">New Workspace</h3>
+            <div className="flex items-center justify-between pb-2 border-b border-[var(--border-color)]">
+              <h3 className="font-bold text-[var(--text-primary)] text-base">New Workspace</h3>
               <button
                 type="button"
                 onClick={() => setShowProvisionModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
+                className="w-7 h-7 rounded-full bg-[var(--bg-surface-subtle)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] flex items-center justify-center cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -1701,70 +1947,116 @@ export const MasterAdminDashboard: React.FC = () => {
 
             <form onSubmit={handleProvisionTenantSubmit} className="space-y-3 text-xs">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Organization Name *</label>
+                <label className="block font-semibold text-[var(--text-secondary)] mb-1">Organization name</label>
                 <input
                   type="text"
                   required
                   value={newTenantName}
                   onChange={(e) => {
                     setNewTenantName(e.target.value);
-                    if (!newTenantSlug) setNewTenantSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '_'));
+                    setNewTenantSlug((current) => current || e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
                   }}
-                  placeholder="e.g. Oakridge Academy"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                  placeholder="e.g. Northwind"
+                  className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">Slug</label>
+                  <input
+                    type="text"
+                    required
+                    value={newTenantSlug}
+                    onChange={(e) => setNewTenantSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">Industry</label>
+                  <select
+                    value={newTenantIndustry}
+                    onChange={(e) => setNewTenantIndustry(e.target.value)}
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 bg-[var(--bg-surface)] font-medium"
+                  >
+                    <option value="Office">Company</option>
+                    <option value="Institute">Institute</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Plan</label>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">License</label>
                   <select
                     value={newTenantPlan}
-                    onChange={(e) => setNewTenantPlan(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 bg-white font-medium"
+                    onChange={(e) => {
+                      setNewTenantPlan(e.target.value);
+                      const match = plans.find((p) => p.key === e.target.value);
+                      if (match) setNewTenantSeats(match.maxSeats);
+                    }}
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 bg-[var(--bg-surface)] font-medium"
                   >
-                    {plans.map((p) => (
+                    {plans.filter((p) => p.isActive !== false).map((p) => (
                       <option key={p.key} value={p.key}>
                         {p.name} (${p.price}/mo)
                       </option>
                     ))}
                   </select>
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Max Seats</label>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">Billing</label>
+                  <select
+                    value={newTenantBillingCycle}
+                    onChange={(e) => setNewTenantBillingCycle(e.target.value as 'monthly' | 'annual')}
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 bg-[var(--bg-surface)] font-medium"
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="annual">Annual</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">Seats</label>
                   <input
                     type="number"
                     min={1}
                     value={newTenantSeats}
                     onChange={(e) => setNewTenantSeats(Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">Phone</label>
+                  <input
+                    type="tel"
+                    value={newTenantPhone}
+                    onChange={(e) => setNewTenantPhone(e.target.value)}
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 pt-1">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Admin Name</label>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">Admin name</label>
                   <input
                     type="text"
                     required
                     value={newTenantAdminName}
                     onChange={(e) => setNewTenantAdminName(e.target.value)}
-                    placeholder="Principal Davis"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                    placeholder="Workspace owner"
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
                   />
                 </div>
-
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Admin Email *</label>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">Admin email</label>
                   <input
                     type="email"
                     required
                     value={newTenantAdminEmail}
                     onChange={(e) => setNewTenantAdminEmail(e.target.value)}
-                    placeholder="admin@school.edu"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                    placeholder="owner@company.com"
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
                   />
                 </div>
               </div>
@@ -1773,18 +2065,147 @@ export const MasterAdminDashboard: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowProvisionModal(false)}
-                  className="flex-1 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 font-medium text-xs text-slate-700 cursor-pointer"
+                  disabled={isProvisioning}
+                  className="flex-1 py-2 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-medium text-xs text-[var(--text-secondary)] cursor-pointer disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs cursor-pointer"
+                  disabled={isProvisioning || plans.filter((p) => p.isActive !== false).length === 0}
+                  className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs cursor-pointer disabled:opacity-50"
                 >
-                  Create Workspace
+                  {isProvisioning ? 'Creating…' : 'Create workspace'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------- */}
+      {/* SUSPEND / DELETE WORKSPACE / USER MODAL */}
+      {/* ------------------------------------------------------------------- */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-2xs cursor-pointer"
+          onClick={closeDeleteModal}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            className="relative max-w-sm w-full bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] shadow-lg p-5 space-y-4 text-[var(--text-primary)] cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-[var(--border-color)]">
+              <h3 className="font-bold text-rose-600 text-sm flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4" />
+                {deleteTarget.kind === 'user'
+                  ? 'Delete user'
+                  : deleteTarget.action === 'suspend'
+                    ? 'Suspend workspace'
+                    : 'Delete workspace'}
+              </h3>
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                className="w-7 h-7 rounded-full bg-[var(--bg-surface-subtle)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {deleteTarget.kind === 'tenant' && deleteTarget.action === 'suspend' ? (
+              <div className="space-y-3 text-xs text-[var(--text-secondary)]">
+                <p>
+                  Suspend <span className="font-semibold text-[var(--text-primary)]">{deleteTarget.tenant.name}</span>? Users will
+                  not be able to sign in, and Jump in will be blocked. All workspace data is kept so you can reactivate later.
+                </p>
+                <p>Permanent delete is only offered after the workspace is suspended.</p>
+                <div>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">
+                    Type <span className="font-semibold text-[var(--text-primary)]">{deleteTarget.tenant.name}</span> to confirm
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleConfirmWorkspaceAction();
+                    }}
+                    disabled={isDeleting}
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-rose-500 bg-[var(--bg-surface)]"
+                  />
+                </div>
+              </div>
+            ) : deleteTarget.kind === 'tenant' ? (
+              <div className="space-y-3 text-xs text-[var(--text-secondary)]">
+                <p>
+                  This permanently deletes <span className="font-semibold text-[var(--text-primary)]">{deleteTarget.tenant.name}</span>,
+                  drops the <span className="font-mono">{deleteTarget.tenant.schemaName}</span> schema with all of its data, and removes
+                  every user mapped to it. Login accounts that don&apos;t belong to another workspace are deleted from Cognito.
+                </p>
+                <p className="font-semibold text-rose-600">This cannot be undone.</p>
+                <div>
+                  <label className="block font-semibold text-[var(--text-secondary)] mb-1">
+                    Type <span className="font-semibold text-[var(--text-primary)]">{deleteTarget.tenant.name}</span> to confirm
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleConfirmWorkspaceAction();
+                    }}
+                    disabled={isDeleting}
+                    className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-rose-500 bg-[var(--bg-surface)]"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 text-xs text-[var(--text-secondary)]">
+                <p>
+                  Remove <span className="font-semibold text-[var(--text-primary)]">{deleteTarget.email}</span> ({deleteTarget.role}) from{' '}
+                  <span className="font-semibold text-[var(--text-primary)]">{deleteTarget.tenant}</span>? Their employee record and its
+                  attendance, leave, payroll and document history in that workspace are deleted. If they don&apos;t belong to any other
+                  workspace, their Cognito login is deleted too.
+                </p>
+                <p className="font-semibold text-rose-600">This cannot be undone.</p>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={isDeleting}
+                className="flex-1 py-2 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-medium text-xs text-[var(--text-secondary)] cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmWorkspaceAction()}
+                disabled={
+                  isDeleting ||
+                  (deleteTarget.kind === 'tenant' &&
+                    !workspaceNameMatches(deleteConfirmText, deleteTarget.tenant))
+                }
+                className="flex-1 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isDeleting
+                  ? deleteTarget.kind === 'tenant' && deleteTarget.action === 'suspend'
+                    ? 'Suspending…'
+                    : 'Deleting…'
+                  : deleteTarget.kind === 'user'
+                    ? 'Delete user'
+                    : deleteTarget.action === 'suspend'
+                      ? 'Suspend workspace'
+                      : 'Delete workspace'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1798,30 +2219,50 @@ export const MasterAdminDashboard: React.FC = () => {
           onClick={() => setShowPlanModal(false)}
         >
           <div
-            className="relative max-w-sm w-full bg-white rounded-2xl border border-slate-200 shadow-xl p-5 space-y-4 text-slate-900 cursor-default"
+            className="relative max-w-sm w-full bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] shadow-lg p-5 space-y-4 text-[var(--text-primary)] cursor-default"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-sm">Edit Plan: {selectedTenantForPlan.name}</h3>
+            <div className="flex items-center justify-between pb-2 border-b border-[var(--border-color)]">
+              <h3 className="font-bold text-[var(--text-primary)] text-sm">Workspace license: {selectedTenantForPlan.name}</h3>
               <button
                 type="button"
                 onClick={() => setShowPlanModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
+                className="w-7 h-7 rounded-full bg-[var(--bg-surface-subtle)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] flex items-center justify-center cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
 
             <form onSubmit={handleSavePlanUpdate} className="space-y-3 text-xs">
+              <div className="rounded-lg border border-[var(--border-color)] p-3 space-y-1 bg-[var(--bg-surface-subtle)]">
+                <div className="font-semibold capitalize">{selectedTenantForPlan.licenseStatus || 'active'}</div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  {selectedTenantForPlan.periodStart ? String(selectedTenantForPlan.periodStart).substring(0, 10) : '—'}
+                  {' → '}
+                  {selectedTenantForPlan.periodEnd ? String(selectedTenantForPlan.periodEnd).substring(0, 10) : '—'}
+                  {selectedTenantForPlan.daysRemaining != null ? ` · ${selectedTenantForPlan.daysRemaining} days left` : ''}
+                </div>
+                {licenseEvents.length > 0 && (
+                  <ol className="mt-2 space-y-1 max-h-28 overflow-y-auto">
+                    {licenseEvents.map((event) => (
+                      <li key={event.id} className="text-[11px] text-[var(--text-secondary)]">
+                        <span className="font-semibold">{event.action}</span>
+                        {event.toPlan ? ` · ${event.toPlan}` : ''}
+                        {event.createdAt ? ` · ${String(event.createdAt).replace('T', ' ').substring(0, 16)}` : ''}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Plan Tier</label>
+                <label className="block font-semibold text-[var(--text-secondary)] mb-1">Plan Tier</label>
                 <select
                   value={editPlanTier}
                   onChange={(e) => setEditPlanTier(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 bg-white font-medium"
+                  className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 bg-[var(--bg-surface)] font-medium"
                 >
-                  {plans.map((p) => (
-                    <option key={p.key} value={p.key}>
+                  {plans.filter((p) => p.isActive !== false).map((p) => (
+                    <option key={p.id} value={p.key}>
                       {p.name} (${p.price}/mo)
                     </option>
                   ))}
@@ -1829,21 +2270,37 @@ export const MasterAdminDashboard: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Seat Limit</label>
+                <label className="block font-semibold text-[var(--text-secondary)] mb-1">Seat Limit</label>
                 <input
                   type="number"
                   min={1}
                   value={editPlanSeats}
                   onChange={(e) => setEditPlanSeats(Number(e.target.value))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                  className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
                 />
               </div>
+
+              <div>
+                <label className="block font-semibold text-[var(--text-secondary)] mb-1">Extend by days</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={editExtendDays}
+                  onChange={(e) => setEditExtendDays(Number(e.target.value))}
+                  className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-[var(--text-secondary)]">
+                <input type="checkbox" checked={editRevoke} onChange={(e) => setEditRevoke(e.target.checked)} />
+                Revoke this license
+              </label>
 
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowPlanModal(false)}
-                  className="flex-1 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 font-medium text-xs text-slate-700 cursor-pointer"
+                  className="flex-1 py-2 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-medium text-xs text-[var(--text-secondary)] cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1860,97 +2317,6 @@ export const MasterAdminDashboard: React.FC = () => {
       )}
 
       {/* ------------------------------------------------------------------- */}
-      {/* CREATE CUSTOM PLAN MODAL */}
-      {/* ------------------------------------------------------------------- */}
-      {showCreatePlanModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-2xs cursor-pointer"
-          onClick={() => setShowCreatePlanModal(false)}
-        >
-          <div
-            className="relative max-w-sm w-full bg-white rounded-2xl border border-slate-200 shadow-xl p-5 space-y-4 text-slate-900 cursor-default"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-sm">New Custom Plan</h3>
-              <button
-                type="button"
-                onClick={() => setShowCreatePlanModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateNewPlanSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Plan Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={newPlanName}
-                  onChange={(e) => setNewPlanName(e.target.value)}
-                  placeholder="e.g. Campus Pro"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Price ($/mo)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={newPlanPrice}
-                    onChange={(e) => setNewPlanPrice(Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Seat Limit</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={newPlanSeats}
-                    onChange={(e) => setNewPlanSeats(Number(e.target.value))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Features (comma separated)</label>
-                <input
-                  type="text"
-                  value={newPlanFeatures}
-                  onChange={(e) => setNewPlanFeatures(e.target.value)}
-                  placeholder="Shifts, Payroll, Geofencing"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreatePlanModal(false)}
-                  className="flex-1 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 font-medium text-xs text-slate-700 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs cursor-pointer"
-                >
-                  Create Plan
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ------------------------------------------------------------------- */}
       {/* BROADCAST MODAL */}
       {/* ------------------------------------------------------------------- */}
       {showBroadcastModal && (
@@ -1959,15 +2325,15 @@ export const MasterAdminDashboard: React.FC = () => {
           onClick={() => setShowBroadcastModal(false)}
         >
           <div
-            className="relative max-w-sm w-full bg-white rounded-2xl border border-slate-200 shadow-xl p-5 space-y-4 text-slate-900 cursor-default"
+            className="relative max-w-sm w-full bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] shadow-lg p-5 space-y-4 text-[var(--text-primary)] cursor-default"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-sm">Create Broadcast</h3>
+            <div className="flex items-center justify-between pb-2 border-b border-[var(--border-color)]">
+              <h3 className="font-bold text-[var(--text-primary)] text-sm">Create Broadcast</h3>
               <button
                 type="button"
                 onClick={() => setShowBroadcastModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
+                className="w-7 h-7 rounded-full bg-[var(--bg-surface-subtle)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] flex items-center justify-center cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -1996,26 +2362,26 @@ export const MasterAdminDashboard: React.FC = () => {
               className="space-y-3 text-xs"
             >
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Title</label>
+                <label className="block font-semibold text-[var(--text-secondary)] mb-1">Title</label>
                 <input
                   type="text"
                   required
                   value={broadcastTitle}
                   onChange={(e) => setBroadcastTitle(e.target.value)}
                   placeholder="Maintenance Notice"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                  className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
                 />
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Message</label>
+                <label className="block font-semibold text-[var(--text-secondary)] mb-1">Message</label>
                 <textarea
                   required
                   rows={3}
                   value={broadcastMessage}
                   onChange={(e) => setBroadcastMessage(e.target.value)}
                   placeholder="Enter broadcast message..."
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
+                  className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 font-medium"
                 />
               </div>
 
@@ -2023,7 +2389,7 @@ export const MasterAdminDashboard: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowBroadcastModal(false)}
-                  className="flex-1 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 font-medium text-xs text-slate-700 cursor-pointer"
+                  className="flex-1 py-2 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-medium text-xs text-[var(--text-secondary)] cursor-pointer"
                 >
                   Cancel
                 </button>

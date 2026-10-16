@@ -110,5 +110,5 @@ export function useDashboardData() {
     };
   }, []);
 
-  return { employees, students, attendance, leaves, projects, tasks, timesheets, auditLogs, loading };
+  return { employees, students, attendance, setAttendance, leaves, projects, tasks, timesheets, auditLogs, loading };
 }

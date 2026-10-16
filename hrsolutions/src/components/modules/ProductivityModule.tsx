@@ -47,7 +47,7 @@ export const ProductivityModule: React.FC<ProductivityModuleProps> = ({ state })
             Boost uninterrupted engineering & deep thought productivity through structured time blocks
           </p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#161d2e] border border-[#232d44] text-xs">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#161d2e] border border-[#232d44] text-xs">
           <Flame className="h-4 w-4 text-[#fb923c]" />
           <span className="text-[#8e9eb5]">Current Streak:</span>
           <span className="font-bold text-white">{streakDays} Day{streakDays > 1 ? 's' : ''}</span>
@@ -57,7 +57,7 @@ export const ProductivityModule: React.FC<ProductivityModuleProps> = ({ state })
       {/* Main Focus Console */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Timer Card */}
-        <div className="lg:col-span-2 p-8 rounded-3xl bg-[#161d2e] border border-[#232d44] shadow-xl text-center space-y-6 flex flex-col justify-center items-center">
+        <div className="lg:col-span-2 p-8 rounded-3xl bg-[#161d2e] border border-[#232d44] shadow-lg text-center space-y-6 flex flex-col justify-center items-center">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#7c5cfc]/20 border border-[#7c5cfc]/30 text-[#c4b5fd] text-xs font-bold uppercase tracking-wider">
             <Sparkles className="h-3.5 w-3.5 text-[#a78bfa]" />
             {timerActive ? 'Active Focus Session' : 'Ready to Focus'}
@@ -71,7 +71,7 @@ export const ProductivityModule: React.FC<ProductivityModuleProps> = ({ state })
           <div className="flex items-center justify-center gap-4">
             <button
               onClick={toggleTimer}
-              className={`flex items-center gap-2 px-8 py-3.5 rounded-2xl text-sm font-bold text-white shadow-xl transition-all active:scale-95 ${
+              className={`flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold text-white shadow-lg transition-all active:scale-95 ${
                 timerActive
                   ? 'bg-[#fb923c] hover:bg-[#ea580c] shadow-[#fb923c]/30'
                   : 'bg-[#7c5cfc] hover:bg-[#6b47fc] shadow-[#7c5cfc]/30'
@@ -90,7 +90,7 @@ export const ProductivityModule: React.FC<ProductivityModuleProps> = ({ state })
 
             <button
               onClick={resetTimer}
-              className="flex items-center gap-2 px-5 py-3.5 rounded-2xl text-sm font-bold text-[#8e9eb5] hover:text-white bg-[#131929] hover:bg-[#1f2940] border border-[#232d44] transition-all"
+              className="flex items-center gap-2 px-5 py-3.5 rounded-xl text-sm font-bold text-[#8e9eb5] hover:text-white bg-[#131929] hover:bg-[#1f2940] border border-[#232d44] transition-all"
               title="Reset Timer"
             >
               <RotateCcw className="h-4 w-4" /> Reset
@@ -129,7 +129,7 @@ export const ProductivityModule: React.FC<ProductivityModuleProps> = ({ state })
         {/* Goals & Ambient Sounds */}
         <div className="space-y-6">
           {/* Daily Goal Card */}
-          <div className="p-6 rounded-2xl bg-[#161d2e] border border-[#232d44] shadow-sm space-y-4">
+          <div className="p-6 rounded-xl bg-[#161d2e] border border-[#232d44] shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-[#2dd4bf]" /> Daily Target
@@ -152,7 +152,7 @@ export const ProductivityModule: React.FC<ProductivityModuleProps> = ({ state })
           </div>
 
           {/* Ambient Sound Mode */}
-          <div className="p-6 rounded-2xl bg-[#161d2e] border border-[#232d44] shadow-sm space-y-4">
+          <div className="p-6 rounded-xl bg-[#161d2e] border border-[#232d44] shadow-sm space-y-4">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Volume2 className="h-4 w-4 text-[#7c5cfc]" /> Ambient Background
             </h3>
@@ -162,7 +162,7 @@ export const ProductivityModule: React.FC<ProductivityModuleProps> = ({ state })
                 <button
                   key={sound}
                   onClick={() => setAmbientSound(sound)}
-                  className={`w-full p-2.5 rounded-xl text-left text-xs font-semibold flex items-center justify-between transition-all ${
+                  className={`w-full p-2.5 rounded-lg text-left text-xs font-semibold flex items-center justify-between transition-all ${
                     ambientSound === sound
                       ? 'bg-[#7c5cfc]/20 border border-[#7c5cfc] text-white'
                       : 'bg-[#131929] border border-[#232d44] text-[#8e9eb5] hover:text-white'

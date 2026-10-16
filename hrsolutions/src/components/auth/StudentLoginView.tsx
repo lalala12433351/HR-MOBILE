@@ -103,18 +103,13 @@ export const StudentLoginView: React.FC = () => {
 
   return (
     <AuthSplitLayout contentKey="student-login">
-      <div className="space-y-2">
-        <h2 className="text-[1.75rem] sm:text-[1.9rem] font-extrabold tracking-[-0.035em] text-[var(--auth-ink)]">
-          Student portal
-        </h2>
-        <p className="text-sm text-[var(--auth-muted)] font-medium leading-relaxed">
-          Sign in to view attendance and your academic workspace.
-        </p>
+      <div className="pixbe-setup__heading">
+        <h2>Sign in as a student.</h2>
       </div>
 
       <form onSubmit={handleStudentLogin} className="space-y-3.5">
         <div className="space-y-1.5">
-          <label className="block text-[12px] font-semibold text-slate-700">
+          <label className="block text-[12px] font-semibold text-[var(--text-secondary)]">
             Email or roll number
           </label>
           <input
@@ -131,7 +126,7 @@ export const StudentLoginView: React.FC = () => {
         </div>
 
         <div className="space-y-1.5">
-          <label className="block text-[12px] font-semibold text-slate-700">
+          <label className="block text-[12px] font-semibold text-[var(--text-secondary)]">
             Password
           </label>
           <div className="relative">
@@ -149,7 +144,7 @@ export const StudentLoginView: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-400 transition-colors duration-150 cursor-pointer hover:text-slate-600"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-[var(--text-muted)] transition-colors duration-150 cursor-pointer hover:text-[var(--text-secondary)]"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -163,9 +158,9 @@ export const StudentLoginView: React.FC = () => {
               type="checkbox"
               checked={rememberMe}
               onChange={(e) => setRememberMe(e.target.checked)}
-              className="w-4 h-4 rounded border-slate-300 text-[var(--auth-accent)] focus:ring-[var(--auth-accent)] cursor-pointer"
+              className="w-4 h-4 rounded border-[var(--border-strong)] text-[var(--auth-accent)] focus:ring-[var(--auth-accent)] cursor-pointer"
             />
-            <span className="text-sm font-medium text-slate-600">Remember me</span>
+            <span className="text-sm font-medium text-[var(--text-secondary)]">Remember me</span>
           </label>
           <button
             type="button"
@@ -197,7 +192,7 @@ export const StudentLoginView: React.FC = () => {
         </button>
       </form>
 
-      <p className="text-sm text-slate-500 font-medium">
+      <p className="text-sm text-[var(--text-muted)] font-medium">
         Staff member?{' '}
         <button
           type="button"

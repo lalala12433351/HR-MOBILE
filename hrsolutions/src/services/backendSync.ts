@@ -6,13 +6,16 @@ import { initialOrganization } from '../data/initialData';
 
 function personaFromUser(meUser: any) {
   if (!meUser) return null;
+  const rawName = String(meUser.name || '').trim();
+  // Strip historical setup-wizard placeholder last name from JWT /me payloads
+  const cleanedName = rawName.replace(/\s+User$/i, '').trim();
   return {
     id: meUser.employeeId || meUser.id || meUser.sub || 'user',
-    name: meUser.name || meUser.email || 'Administrator',
+    name: cleanedName || meUser.email || 'Administrator',
     email: meUser.email || '',
     role: (meUser.role || 'super_admin') as Role,
     designation: meUser.designation || 'Administrator',
-    department: meUser.department || 'Operations',
+    department: meUser.department || 'Management',
     avatar: meUser.avatar || '',
   };
 }
@@ -20,13 +23,15 @@ function personaFromUser(meUser: any) {
 function personaFromSession() {
   const session = AuthService.getSession();
   if (!session) return null;
+  const rawName = String(session.name || '').trim();
+  const cleanedName = rawName.replace(/\s+User$/i, '').trim();
   return {
     id: session.sub,
-    name: session.name || session.email || 'User',
+    name: cleanedName || session.email || 'User',
     email: session.email || '',
     role: (session.role || 'employee') as Role,
     designation: session.role === 'super_admin' ? 'Founder & CEO' : 'Team Member',
-    department: 'Operations',
+    department: 'Management',
     avatar: '',
   };
 }
@@ -73,6 +78,30 @@ function normalizeDateValue(value: unknown): string | undefined {
   return raw;
 }
 
+/** Org department/team row → primary + co-lead fields (primary lead first). */
+function leadFieldsFromRow(row: any): {
+  leadEmployeeId: string | null;
+  leadName: string | null;
+  leadEmployeeIds: string[];
+  leadNames: string[];
+} {
+  const leads: Array<{ id: string; name: string }> = Array.isArray(row?.leads)
+    ? row.leads
+        .filter((l: any) => l && l.id)
+        .map((l: any) => ({ id: String(l.id), name: String(l.name || '').trim() }))
+    : [];
+  const legacyId = row?.lead_employee_id || row?.leadEmployeeId || row?.lead_id || null;
+  if (!leads.length && legacyId) {
+    leads.push({ id: String(legacyId), name: String(row?.lead_name || '').trim() });
+  }
+  return {
+    leadEmployeeId: leads[0]?.id || null,
+    leadName: leads[0]?.name || null,
+    leadEmployeeIds: leads.map((l) => l.id),
+    leadNames: leads.map((l) => l.name).filter(Boolean),
+  };
+}
+
 /** Normalize identity API employee rows (snake_case or camelCase) into app Employee shape. */
 export function mapApiEmployee(emp: any): Employee {
   const first = emp.firstName || emp.first_name || '';
@@ -93,7 +122,7 @@ export function mapApiEmployee(emp: any): Employee {
       ? Boolean(emp.isActivated)
       : emp.is_activated !== undefined
         ? Boolean(emp.is_activated)
-        : accountStatus !== 'Not Activated' && !isDeactivated;
+        : accountStatus !== 'Not Activated' && accountStatus !== 'Invited' && !isDeactivated;
 
   const emergencyRaw = parseJsonField<any>(emp.emergencyContact ?? emp.emergency_contact, null);
   const emergencyContact = {
@@ -142,7 +171,7 @@ export function mapApiEmployee(emp: any): Employee {
     name,
     email: emp.email || '',
     phone: emp.phone || '',
-    department: emp.departmentName || emp.department_name || emp.department || 'Operations',
+    department: emp.departmentName || emp.department_name || emp.department || 'Management',
     designation: emp.jobTitle || emp.job_title || emp.designation || 'Team Member',
     location: emp.officeName || emp.office_name || emp.location || '',
     officeName: emp.officeName || emp.office_name || emp.location || '',
@@ -166,6 +195,9 @@ export function mapApiEmployee(emp: any): Employee {
     team: emp.teamName || emp.team_name || emp.team || '',
     teamId: emp.teamId || emp.team_id || undefined,
     managerId: emp.reportingManagerId || emp.reporting_manager_id || emp.managerId || undefined,
+    managerIds: Array.isArray(emp.co_manager_ids || emp.managerIds)
+      ? (emp.co_manager_ids || emp.managerIds).map((id: any) => String(id)).filter(Boolean)
+      : undefined,
     managerName: (() => {
       const raw =
         emp.reportingManagerName ||
@@ -189,7 +221,7 @@ export function mapApiEmployee(emp: any): Employee {
       };
     })(),
     role: (emp.role || 'employee') as Role,
-    status: emp.status || (accountStatus === 'Not Activated' ? 'Onboarding' : 'Active'),
+    status: emp.status || (accountStatus === 'Not Activated' || accountStatus === 'Invited' ? 'Onboarding' : 'Active'),
     accountStatus: accountStatus as any,
     isActivated,
     isDeactivated,
@@ -206,6 +238,7 @@ export function mapApiEmployee(emp: any): Employee {
           ? Number(emp.onboarding_progress)
           : undefined,
     joiningDate: emp.dateOfJoining || emp.date_of_joining || emp.joiningDate || '',
+    employmentType: (pickString(emp.employmentType, emp.employment_type) || 'Full-time') as Employee['employmentType'],
     avatar: emp.avatar || emp.avatar_url || '',
     // Profile / onboarding fields persisted by PUT /identity/employees/:id
     dateOfBirth: normalizeDateValue(emp.dateOfBirth ?? emp.date_of_birth),
@@ -229,17 +262,35 @@ export function mapApiEmployee(emp: any): Employee {
 
 /** Normalize project_tasks API rows into app Task shape (snake_case or camelCase). */
 export function mapApiTask(t: any): Task {
-  const assigneeId = String(
-    t.assignedToEmployeeId ||
-      t.assigned_to_employee_id ||
-      t.assigneeId ||
-      t.assignee_id ||
-      ''
+  const assigneeIds = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(t.assignedToEmployeeIds) ? t.assignedToEmployeeIds : []),
+        ...(Array.isArray(t.assigned_to_employee_ids) ? t.assigned_to_employee_ids : []),
+        ...(Array.isArray(t.assigneeIds) ? t.assigneeIds : []),
+        t.assignedToEmployeeId,
+        t.assigned_to_employee_id,
+        t.assigneeId,
+        t.assignee_id,
+      ]
+        .map((id) => String(id || '').trim())
+        .filter(Boolean)
+    )
   );
-  const rawName = String(t.assignedToName || t.assigned_to_name || t.assigneeName || t.assignee_name || '').trim();
-  // Ignore Postgres NULL concat artifacts like " " / "null null"
-  const assigneeName =
-    rawName && rawName.toLowerCase() !== 'null null' ? rawName.replace(/\s+/g, ' ').trim() : '';
+  const assigneeId = assigneeIds[0] || '';
+  const rawNames = [
+    ...(Array.isArray(t.assignedToNames) ? t.assignedToNames : []),
+    ...(Array.isArray(t.assigned_to_names) ? t.assigned_to_names : []),
+    ...(Array.isArray(t.assigneeNames) ? t.assigneeNames : []),
+    t.assignedToName,
+    t.assigned_to_name,
+    t.assigneeName,
+    t.assignee_name,
+  ]
+    .map((name) => String(name || '').replace(/\s+/g, ' ').trim())
+    .filter((name) => name && name.toLowerCase() !== 'null null');
+  const assigneeNames = Array.from(new Set(rawNames));
+  const assigneeName = assigneeNames[0] || '';
 
   let subtasks: Task['subtasks'] = [];
   const descRaw = t.description;
@@ -279,6 +330,8 @@ export function mapApiTask(t: any): Task {
     description,
     assigneeId,
     assigneeName: assigneeName || (assigneeId ? 'Team Member' : 'Unassigned'),
+    assigneeIds,
+    assigneeNames: assigneeNames.length ? assigneeNames : (assigneeName || assigneeId ? [assigneeName || 'Team Member'] : []),
     assigneeAvatar: t.assigneeAvatar || t.assignee_avatar || '',
     reporterName: t.reporterName || t.reporter_name || undefined,
     priority: normalizeTaskPriority(t.priority),
@@ -288,15 +341,63 @@ export function mapApiTask(t: any): Task {
     estimatedHours: t.estimatedHours != null ? Number(t.estimatedHours) : t.estimated_hours != null ? Number(t.estimated_hours) : undefined,
     actualHours: Number(t.actualHours ?? t.actual_hours ?? 0) || 0,
     timeSpentSeconds: Number(t.timeSpentSeconds ?? t.time_spent_seconds ?? 0) || 0,
-    isTimerRunning: Boolean(t.isTimerRunning ?? t.is_timer_running),
+    timerStartedAt: t.timerStartedAt
+      ? Number(t.timerStartedAt)
+      : t.timer_started_at
+        ? new Date(t.timer_started_at).getTime()
+        : undefined,
+    isTimerRunning: Boolean(t.timer_started_at || t.timerStartedAt || t.isTimerRunning || t.is_timer_running),
     tags: Array.isArray(t.tags) ? t.tags : [],
     subtasks,
     commentsCount: Number(t.commentsCount ?? t.comments_count ?? 0) || 0,
-    attachedDocIds: Array.isArray(t.attachedDocIds)
-      ? t.attachedDocIds
-      : Array.isArray(t.attached_doc_ids)
-        ? t.attached_doc_ids
-        : [],
+    attachedDocIds: parseAttachedDocIds(t),
+    attachedDocs: parseAttachedDocs(t),
+    billable: t.billable === undefined ? true : Boolean(t.billable),
+    billingType: String(t.billingType || t.billing_type || 'deliverable').toLowerCase() === 'hourly' ? 'hourly' : 'deliverable',
+    unitPrice: Number(t.unitPrice ?? t.unit_price ?? 0) || 0,
+    clientId: t.clientId || t.client_id || undefined,
+    invoiceId: t.invoiceId || t.invoice_id || undefined,
+    isRecurrenceTemplate: Boolean(t.isRecurrenceTemplate ?? t.is_recurrence_template),
+    recurrenceSeriesId: t.recurrenceSeriesId || t.recurrence_series_id || undefined,
+    recurrenceRule: parseTaskRecurrence(t.recurrenceRule ?? t.recurrence_rule),
+    recurrenceEnd: t.recurrenceEnd || t.recurrence_end ? String(t.recurrenceEnd || t.recurrence_end).slice(0, 10) : undefined,
+    occurrenceDate: t.occurrenceDate || t.occurrence_date ? String(t.occurrenceDate || t.occurrence_date).slice(0, 10) : undefined,
+    parentTaskId: t.parentTaskId || t.parent_task_id || undefined,
+  };
+}
+
+function parseAttachedDocs(t: any): NonNullable<Task['attachedDocs']> {
+  const raw = t.attachedDocs ?? t.attached_docs;
+  const parsed = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return []; } })() : raw;
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((doc: any) => doc && (doc.id || doc.name))
+    .map((doc: any) => ({
+      id: String(doc.id || ''),
+      name: String(doc.name || 'Untitled'),
+      size: doc.size ? String(doc.size) : undefined,
+      type: doc.type ? String(doc.type) : undefined,
+      s3Key: doc.s3Key || doc.s3_key || undefined,
+      owner: doc.owner ? String(doc.owner) : undefined,
+    }));
+}
+
+function parseAttachedDocIds(t: any): string[] {
+  const fromDocs = parseAttachedDocs(t).map((doc) => doc.id).filter(Boolean);
+  const raw = Array.isArray(t.attachedDocIds) ? t.attachedDocIds : Array.isArray(t.attached_doc_ids) ? t.attached_doc_ids : [];
+  return Array.from(new Set([...fromDocs, ...raw.map((id: any) => String(id)).filter(Boolean)]));
+}
+
+function parseTaskRecurrence(raw: unknown): Task['recurrenceRule'] {
+  if (!raw) return null;
+  const rule = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw;
+  if (!rule || typeof rule !== 'object') return null;
+  const frequency = String((rule as any).frequency || '').toLowerCase();
+  if (!['daily', 'weekly', 'biweekly', 'monthly'].includes(frequency)) return null;
+  return {
+    frequency: frequency as NonNullable<Task['recurrenceRule']>['frequency'],
+    weekday: (rule as any).weekday != null ? Number((rule as any).weekday) : undefined,
+    count: (rule as any).count != null ? Number((rule as any).count) : undefined,
   };
 }
 
@@ -335,7 +436,7 @@ export function mapApiTimesheet(ts: any): TimesheetEntry {
     category,
     description: String(ts.description || ''),
     status: mapTimesheetStatus(ts.status),
-    approvedBy: ts.approver_id || ts.approvedBy || undefined,
+    approvedBy: ts.approver_name || ts.approvedBy || undefined,
     entryType,
     meetingLink: ts.meeting_link || ts.meetingLink || undefined,
   };
@@ -461,6 +562,13 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
       }
       if (deptsRes.success && Array.isArray(deptsRes.data)) {
         updates.customOptions!.departments = deptsRes.data.map((d: any) => d.name).filter(Boolean);
+        (updates.customOptions as any).departmentRecords = deptsRes.data.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          shortCode: d.short_code || undefined,
+          description: d.description || '',
+          ...leadFieldsFromRow(d),
+        }));
       }
       if (rolesRes.success && Array.isArray(rolesRes.data)) {
         updates.customOptions!.designations = rolesRes.data.map((r: any) => r.title).filter(Boolean);
@@ -473,8 +581,7 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
           name: t.name,
           departmentId: t.department_id || t.departmentId,
           departmentName: t.department_name || t.departmentName,
-          leadEmployeeId: t.lead_employee_id || t.leadEmployeeId || t.lead_id || null,
-          leadName: String(t.lead_name || '').trim() || null,
+          ...leadFieldsFromRow(t),
         }));
       }
 
@@ -498,11 +605,13 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
         'employmentTypeCategories',
         'employmentTypes',
         'onboardingFields',
+        'onboardingAutomation',
         'employeeIdSettings',
         'profileSelfServiceSettings',
         'noticePeriodSettings',
         'offboardingSettings',
         'probationSettings',
+        'taskPriorities',
       ] as const) {
         if (general[key] !== undefined) (updates.customOptions as any)[key] = general[key];
       }
@@ -550,6 +659,8 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
             radiusMeters:
               Number(match.radiusMeters) > 0 ? Number(match.radiusMeters) : rec.radiusMeters,
             address: match.address || rec.address,
+            qrCodeEnabled: match.qrCodeEnabled !== false,
+            clockingDevices: match.clockingDevices || rec.clockingDevices,
           };
         });
       }
@@ -659,6 +770,7 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
         'OFFICE_SETUP',
         'DEPARTMENTS_SETUP',
         'ROLES_SETUP',
+        'WORK_PATTERNS_SETUP',
         'TEAM_SETUP',
         'COMPLETED',
       ];
@@ -676,20 +788,38 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
     const meUser = (meRes as any)?.data?.user;
     const meTenant = (meRes as any)?.data?.tenant;
     // Keep workspace name consistent for every account — hydrate from live tenant record.
-    if (meTenant && (meTenant.name || meTenant.slug || meTenant.industry)) {
+    if (meTenant && (meTenant.name || meTenant.slug || meTenant.industry || meTenant.address)) {
       const baseOrg = currentState.organization || initialOrganization;
+      const streetAddress = String(meTenant.address || '').trim();
+      const city = String(meTenant.city || '').trim();
+      const stateProvince = String(meTenant.stateProvince || meTenant.state_province || '').trim();
+      const postalCode = String(meTenant.postalCode || meTenant.postal_code || '').trim();
+      const country = String(meTenant.country || '').trim();
+      const formattedAddress = [streetAddress, city, stateProvince, postalCode, country].filter(Boolean).join(', ');
       updates.organization = {
         ...baseOrg,
         ...(meTenant.name ? { name: String(meTenant.name) } : {}),
         ...(meTenant.slug ? { domain: String(meTenant.slug) } : {}),
         ...(meTenant.industry ? { industry: String(meTenant.industry) } : {}),
-        ...(syncedOfficeLocation ? { officeLocation: syncedOfficeLocation } : {}),
+        ...(streetAddress ? { streetAddress } : {}),
+        ...(city ? { city } : {}),
+        ...(stateProvince ? { stateProvince } : {}),
+        ...(postalCode ? { postalCode } : {}),
+        ...(country ? { country } : {}),
+        ...(syncedOfficeLocation
+          ? { officeLocation: syncedOfficeLocation }
+          : formattedAddress
+            ? { officeLocation: { ...baseOrg.officeLocation, address: formattedAddress } }
+            : {}),
       };
     } else if (syncedOfficeLocation) {
       updates.organization = {
         ...(currentState.organization || initialOrganization),
         officeLocation: syncedOfficeLocation,
       };
+    }
+    if (meTenant?.license) {
+      (updates as any).license = meTenant.license;
     }
     const fromMe = personaFromUser(meUser);
     const fromSession = personaFromSession();
@@ -702,22 +832,26 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
         (meEmail && emp.email?.toLowerCase() === meEmail)
     );
     const rosterAvatar = rosterMatch?.avatar || '';
+    const rosterName = rosterMatch?.name || '';
     if (fromMe) {
       updates.currentPersona = {
         ...(currentState.currentPersona || {}),
         ...fromMe,
-        name: fromMe.name || currentState.currentPersona?.name || fromSession?.name || '',
+        // Prefer roster display name (strips placeholder last name "User") over JWT /me name
+        name: rosterName || fromMe.name || currentState.currentPersona?.name || fromSession?.name || '',
         avatar: fromMe.avatar || rosterAvatar || currentState.currentPersona?.avatar || '',
       };
     } else if (!currentState.currentPersona && fromSession) {
       updates.currentPersona = {
         ...fromSession,
+        name: rosterName || fromSession.name,
         avatar: rosterAvatar || fromSession.avatar || '',
       };
-    } else if (currentState.currentPersona && rosterAvatar && !currentState.currentPersona.avatar) {
+    } else if (currentState.currentPersona && (rosterAvatar || rosterName)) {
       updates.currentPersona = {
         ...currentState.currentPersona,
-        avatar: rosterAvatar,
+        ...(rosterName ? { name: rosterName } : {}),
+        ...(rosterAvatar && !currentState.currentPersona.avatar ? { avatar: rosterAvatar } : {}),
       };
     }
 
@@ -745,7 +879,8 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
           hasCompletedProfile: true,
           onboardingProgress: 100,
           isActivated: true,
-          accountStatus: emp.accountStatus === 'Not Activated' ? 'Active' : emp.accountStatus,
+          accountStatus:
+            emp.accountStatus === 'Not Activated' || emp.accountStatus === 'Invited' ? 'Active' : emp.accountStatus,
           status: emp.status === 'Onboarding' ? 'Active' : emp.status,
         };
       });

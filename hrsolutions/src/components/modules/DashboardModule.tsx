@@ -11,11 +11,13 @@ import { CalendarWidget } from './dashboard/CalendarWidget';
 import { SchedulesCard } from './dashboard/SchedulesCard';
 import { TasksCard } from './dashboard/TasksCard';
 import { AttendanceHeatmap } from './dashboard/AttendanceHeatmap';
-import { EmploymentStatusBar } from './dashboard/EmploymentStatusBar';
 import { RecentActivitiesCard } from './dashboard/RecentActivitiesCard';
 import { EmployeeAttendanceTable } from './dashboard/EmployeeAttendanceTable';
 import { SetupPromptModal } from './dashboard/SetupPromptModal';
 import { UserDashboardView } from './dashboard/UserDashboardView';
+import { HrDashboardView } from './dashboard/HrDashboardView';
+import { OnLeaveTodayCard } from './dashboard/OnLeaveTodayCard';
+import { UpcomingHolidaysCard } from './dashboard/UpcomingHolidaysCard';
 
 function AdminDashboardContent() {
   const { loading } = useDashboardContext();
@@ -25,29 +27,21 @@ function AdminDashboardContent() {
   }
 
   return (
-    <div className="space-y-5 sm:space-y-6 pb-12">
+    <div className="dash-page">
       <DashboardHeader />
       <SetupPromptModal />
       <MetricCards />
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6">
-        <section className="lg:col-span-4 space-y-4 sm:space-y-5 lg:space-y-6">
-          <CalendarWidget />
-          <SchedulesCard />
-        </section>
-
-        <section className="lg:col-span-4 space-y-4 sm:space-y-5 lg:space-y-6">
-          <AttendanceHeatmap />
-        </section>
-
-        <section className="lg:col-span-4 space-y-4 sm:space-y-5 lg:space-y-6">
-          <EmploymentStatusBar />
-          <TasksCard />
-          <RecentActivitiesCard />
-        </section>
+      <div className="dash-board">
+        <AttendanceHeatmap className="dash-span-8" />
+        <CalendarWidget className="dash-span-4" />
+        <OnLeaveTodayCard className="dash-span-6" scope="org" limit={6} />
+        <UpcomingHolidaysCard className="dash-span-6" manageHref />
+        <SchedulesCard className="dash-span-5" />
+        <TasksCard className="dash-span-7" />
+        <RecentActivitiesCard className="dash-span-12" />
+        <EmployeeAttendanceTable className="dash-span-12" />
       </div>
-
-      <EmployeeAttendanceTable />
     </div>
   );
 }
@@ -56,10 +50,13 @@ export const DashboardModule: React.FC = () => {
   const { state } = useApp();
 
   const role = state.currentPersona?.role;
-  const isAdmin =
-    role === 'admin' || (role as string) === 'super_admin' || (role as string) === 'hr_manager';
+  const isHr = role === 'hr_manager' || (role as string) === 'hr';
+  const isAdmin = role === 'admin' || role === 'super_admin';
 
-  // For non-admin accounts (employees, managers, faculty, staff), render the dedicated user view
+  if (isHr) {
+    return <HrDashboardView />;
+  }
+
   if (!isAdmin) {
     return <UserDashboardView />;
   }

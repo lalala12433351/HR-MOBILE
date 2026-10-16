@@ -51,6 +51,39 @@ function quotasFromSettings(leaveSettings: any, role?: string) {
   };
 }
 
+function roundHalf(n: number): number {
+  return Math.round((Number(n) + Number.EPSILON) * 2) / 2;
+}
+
+function monthsElapsedThisYear(joinDate?: string | Date | null, at = new Date()): number {
+  const currentYear = at.getFullYear();
+  const currentMonthIdx = at.getMonth() + 1;
+  if (!joinDate) return currentMonthIdx;
+  const join = new Date(joinDate);
+  if (Number.isNaN(join.getTime())) return currentMonthIdx;
+  const joinYear = join.getFullYear();
+  const joinMonth = join.getMonth() + 1;
+  if (joinYear === currentYear) return Math.max(1, Math.min(12, currentMonthIdx - joinMonth + 1));
+  if (joinYear > currentYear) return 0;
+  return currentMonthIdx;
+}
+
+function isMonthlyGrant(leaveSettings: any): boolean {
+  return leaveSettings?.leavePoliciesEnabled !== false && leaveSettings?.accrualFrequency === 'monthly';
+}
+
+function monthlyRolloverEnabled(leaveSettings: any): boolean {
+  return leaveSettings?.enableMonthlyRollover !== false;
+}
+
+/** Days granted so far this cycle for one leave type (before usage). */
+function grantForType(annual: number, leaveSettings: any, monthsElapsed: number): number {
+  const yearly = roundHalf(annual);
+  if (!isMonthlyGrant(leaveSettings)) return yearly;
+  if (!monthlyRolloverEnabled(leaveSettings)) return roundHalf(annual / 12);
+  return roundHalf(Math.min(yearly, (annual / 12) * monthsElapsed));
+}
+
 async function insertTx(
   query: QueryFn,
   args: {
@@ -121,9 +154,20 @@ export async function ensureLeaveBalancesBatch(
   if (missingIds.length > 0) {
     const leaveSettings = await loadLeaveSettings(query);
     const empRes = await query(
-      `SELECT id, role FROM employees WHERE id = ANY($1::uuid[])`,
+      `SELECT id, role, date_of_joining FROM employees WHERE id = ANY($1::uuid[])`,
       [missingIds]
     );
+    const enableCarryOver = leaveSettings?.leavePoliciesEnabled !== false && leaveSettings?.enableCarryOver !== false;
+    const maxCarry = Math.max(0, Number(leaveSettings?.maxCarryForwardDays) || 10);
+    const prevByEmp = new Map<string, any>();
+    if (enableCarryOver) {
+      const prev = await query(
+        `SELECT * FROM employee_leave_balances
+         WHERE year = $1 AND employee_id = ANY($2::uuid[])`,
+        [y - 1, missingIds]
+      );
+      for (const row of prev.rows) prevByEmp.set(String(row.employee_id), row);
+    }
 
     const seedRows: Array<{
       employeeId: string;
@@ -135,12 +179,22 @@ export async function ensureLeaveBalancesBatch(
 
     for (const emp of empRes.rows) {
       const q = quotasFromSettings(leaveSettings, emp.role);
+      let casual = q.casual;
+      let sick = q.sick;
+      let earned = q.earned;
+      const wfh = q.wfh;
+      const prev = prevByEmp.get(String(emp.id));
+      if (prev && enableCarryOver) {
+        casual += Math.min(maxCarry, Math.max(0, Number(prev.casual_leave) || 0));
+        sick += Math.min(maxCarry, Math.max(0, Number(prev.sick_leave) || 0));
+        earned += Math.min(maxCarry, Math.max(0, Number(prev.earned_leave) || 0));
+      }
       seedRows.push({
         employeeId: String(emp.id),
-        casual: q.casual,
-        sick: q.sick,
-        earned: q.earned,
-        wfh: q.wfh,
+        casual: roundHalf(casual),
+        sick: roundHalf(sick),
+        earned: roundHalf(earned),
+        wfh,
       });
     }
 
@@ -240,6 +294,24 @@ export async function getPendingDaysByType(
   return Number(res.rows[0]?.pending_days || 0);
 }
 
+export async function getPendingDaysThisMonthByType(
+  query: QueryFn,
+  employeeId: string,
+  leaveType: BalanceLeaveType
+): Promise<number> {
+  const res = await query(
+    `SELECT COALESCE(SUM(days_count), 0)::float AS pending_days
+     FROM leave_requests
+     WHERE employee_id = $1
+       AND leave_type = $2
+       AND status = 'pending'
+       AND start_date >= date_trunc('month', CURRENT_DATE)
+       AND start_date < date_trunc('month', CURRENT_DATE) + interval '1 month'`,
+    [employeeId, leaveType]
+  );
+  return Number(res.rows[0]?.pending_days || 0);
+}
+
 export async function assertSufficientBalance(
   query: QueryFn,
   employeeId: string,
@@ -248,11 +320,37 @@ export async function assertSufficientBalance(
   year?: number
 ): Promise<void> {
   if (!isDebitableLeaveType(leaveType)) return;
+  const leaveSettings = await loadLeaveSettings(query);
+  if (leaveSettings?.allowNegativeBalance) return;
+
   const y = currentYear(year);
   const bal = await ensureLeaveBalance(query, employeeId, y);
   const col = COLUMN_BY_TYPE[leaveType];
-  const remaining = Number(bal[col] || 0);
-  const pending = await getPendingDaysByType(query, employeeId, leaveType, y);
+  const stored = Number(bal[col] || 0);
+
+  const empRes = await query(
+    `SELECT role, date_of_joining FROM employees WHERE id = $1 LIMIT 1`,
+    [employeeId]
+  );
+  const emp = empRes.rows[0] || {};
+  const annual = quotasFromSettings(leaveSettings, emp.role)[leaveType];
+  const months = monthsElapsedThisYear(emp.date_of_joining);
+  const entitlement = grantForType(annual, leaveSettings, months);
+  const expireMonthly = isMonthlyGrant(leaveSettings) && !monthlyRolloverEnabled(leaveSettings);
+
+  const consumed = await loadConsumedDaysBatch(query, [employeeId], y);
+  const usedYear = consumed.get(String(employeeId))?.[leaveType] || 0;
+  let usedPeriod = usedYear;
+  if (expireMonthly) {
+    const monthUsed = await loadConsumedThisMonthBatch(query, [employeeId]);
+    usedPeriod = monthUsed.get(String(employeeId))?.[leaveType] || 0;
+  }
+
+  const policyRemaining = Math.max(0, roundHalf(entitlement - usedPeriod));
+  const remaining = roundHalf(Math.min(stored, policyRemaining));
+  const pending = expireMonthly
+    ? await getPendingDaysThisMonthByType(query, employeeId, leaveType)
+    : await getPendingDaysByType(query, employeeId, leaveType, y);
   if (remaining - pending < daysCount - 1e-9) {
     throw Object.assign(new Error(`Insufficient ${leaveType} leave balance`), {
       code: 'INSUFFICIENT_BALANCE',
@@ -392,17 +490,173 @@ export async function adjustLeaveBalance(
   });
 }
 
-export function serializeBalance(row: any) {
+export type ConsumedDays = Record<BalanceLeaveType, number>;
+
+const EMPTY_CONSUMED: ConsumedDays = { casual: 0, sick: 0, earned: 0, wfh: 0 };
+
+/**
+ * Net days consumed per employee/type this year (approval debits minus cancel credits).
+ * remaining + consumed = total entitlement, which also holds for rows seeded without ledger entries.
+ */
+export async function loadConsumedDaysBatch(
+  query: QueryFn,
+  employeeIds: string[],
+  year?: number
+): Promise<Map<string, ConsumedDays>> {
+  const result = new Map<string, ConsumedDays>();
+  const uniqueIds = [...new Set(employeeIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return result;
+
+  const res = await query(
+    `SELECT employee_id, leave_type, COALESCE(-SUM(delta), 0)::float AS consumed
+     FROM leave_balance_transactions
+     WHERE year = $1
+       AND employee_id = ANY($2::uuid[])
+       AND reason IN ('approve', 'cancel_credit')
+     GROUP BY employee_id, leave_type`,
+    [currentYear(year), uniqueIds]
+  );
+  for (const row of res.rows) {
+    const id = String(row.employee_id);
+    const entry = result.get(id) || { ...EMPTY_CONSUMED };
+    if (isDebitableLeaveType(row.leave_type)) {
+      entry[row.leave_type as BalanceLeaveType] = Math.max(0, Number(row.consumed) || 0);
+    }
+    result.set(id, entry);
+  }
+  return result;
+}
+
+export async function loadConsumedThisMonthBatch(
+  query: QueryFn,
+  employeeIds: string[]
+): Promise<Map<string, ConsumedDays>> {
+  const result = new Map<string, ConsumedDays>();
+  const uniqueIds = [...new Set(employeeIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return result;
+
+  const res = await query(
+    `SELECT employee_id, leave_type, COALESCE(SUM(days_count), 0)::float AS consumed
+     FROM leave_requests
+     WHERE employee_id = ANY($1::uuid[])
+       AND status = 'approved'
+       AND start_date >= date_trunc('month', CURRENT_DATE)
+       AND start_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
+     GROUP BY employee_id, leave_type`,
+    [uniqueIds]
+  );
+  for (const row of res.rows) {
+    const id = String(row.employee_id);
+    const entry = result.get(id) || { ...EMPTY_CONSUMED };
+    if (isDebitableLeaveType(row.leave_type)) {
+      entry[row.leave_type as BalanceLeaveType] = Math.max(0, Number(row.consumed) || 0);
+    }
+    result.set(id, entry);
+  }
+  return result;
+}
+
+function policyRemainingForType(
+  stored: number,
+  annual: number,
+  usedYear: number,
+  usedMonth: number,
+  leaveSettings: any,
+  monthsElapsed: number
+): { remaining: number; entitlement: number } {
+  const entitlement = grantForType(annual, leaveSettings, monthsElapsed);
+  const expireMonthly = isMonthlyGrant(leaveSettings) && !monthlyRolloverEnabled(leaveSettings);
+  const usedPeriod = expireMonthly ? usedMonth : usedYear;
+  const remaining = roundHalf(Math.min(Math.max(0, stored), Math.max(0, entitlement - usedPeriod)));
+  return { remaining, entitlement: roundHalf(entitlement) };
+}
+
+export function serializeBalance(
+  row: any,
+  consumed?: ConsumedDays,
+  policy?: {
+    leaveSettings?: any;
+    role?: string;
+    joinDate?: string | Date | null;
+    usedThisMonth?: ConsumedDays;
+  }
+) {
   if (!row) return null;
+  const used = consumed || EMPTY_CONSUMED;
+  const usedMonth = policy?.usedThisMonth || EMPTY_CONSUMED;
+  const leaveSettings = policy?.leaveSettings || {};
+  const annual = quotasFromSettings(leaveSettings, policy?.role);
+  const months = monthsElapsedThisYear(policy?.joinDate);
+  const casualP = policyRemainingForType(Number(row.casual_leave || 0), annual.casual, used.casual, usedMonth.casual, leaveSettings, months);
+  const sickP = policyRemainingForType(Number(row.sick_leave || 0), annual.sick, used.sick, usedMonth.sick, leaveSettings, months);
+  const earnedP = policyRemainingForType(Number(row.earned_leave || 0), annual.earned, used.earned, usedMonth.earned, leaveSettings, months);
+  const wfh = Number(row.wfh || 0);
   return {
     employeeId: row.employee_id,
     year: row.year,
-    casualLeave: Number(row.casual_leave || 0),
-    sickLeave: Number(row.sick_leave || 0),
-    earnedLeave: Number(row.earned_leave || 0),
-    wfh: Number(row.wfh || 0),
+    casualLeave: casualP.remaining,
+    sickLeave: sickP.remaining,
+    earnedLeave: earnedP.remaining,
+    wfh,
+    used: {
+      casualLeave: used.casual,
+      sickLeave: used.sick,
+      earnedLeave: used.earned,
+      wfh: used.wfh,
+    },
+    usedThisMonth: {
+      casualLeave: usedMonth.casual,
+      sickLeave: usedMonth.sick,
+      earnedLeave: usedMonth.earned,
+      wfh: usedMonth.wfh,
+    },
+    totals: {
+      casualLeave: annual.casual,
+      sickLeave: annual.sick,
+      earnedLeave: annual.earned,
+      wfh: wfh + used.wfh,
+    },
+    entitlement: {
+      casualLeave: casualP.entitlement,
+      sickLeave: sickP.entitlement,
+      earnedLeave: earnedP.entitlement,
+      wfh: wfh + used.wfh,
+    },
+    grantMode: isMonthlyGrant(leaveSettings)
+      ? monthlyRolloverEnabled(leaveSettings)
+        ? 'monthly_rollover'
+        : 'monthly_expire'
+      : 'yearly',
     updatedAt: row.updated_at,
   };
+}
+
+export async function serializeBalances(
+  query: QueryFn,
+  rows: any[],
+  consumed: Map<string, ConsumedDays>
+): Promise<any[]> {
+  if (!rows.length) return [];
+  const leaveSettings = await loadLeaveSettings(query);
+  const ids = rows.map((row) => String(row.employee_id));
+  const empRes = await query(
+    `SELECT id, role, date_of_joining FROM employees WHERE id = ANY($1::uuid[])`,
+    [ids]
+  );
+  const empById = new Map<string, any>(empRes.rows.map((emp: any) => [String(emp.id), emp]));
+  const usedMonth = isMonthlyGrant(leaveSettings) && !monthlyRolloverEnabled(leaveSettings)
+    ? await loadConsumedThisMonthBatch(query, ids)
+    : new Map<string, ConsumedDays>();
+
+  return rows.map((row) => {
+    const emp = empById.get(String(row.employee_id)) || {};
+    return serializeBalance(row, consumed.get(String(row.employee_id)), {
+      leaveSettings,
+      role: emp.role,
+      joinDate: emp.date_of_joining,
+      usedThisMonth: usedMonth.get(String(row.employee_id)),
+    });
+  });
 }
 
 /** Run a callback inside a single tenant connection with BEGIN/COMMIT. */

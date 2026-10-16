@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { openExternalUrl } from '@/lib/native';
 import { useRouter } from 'next/navigation';
 import { Calendar, ChevronDown, Check, ArrowRight, Video, ExternalLink } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
@@ -9,6 +8,7 @@ import { useDashboardContext } from './DashboardDataContext';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { TimesheetEntry } from '@/types';
+import { DashPanel } from './DashPanel';
 
 type ScheduleFilter = 'all' | 'today' | 'this_week';
 
@@ -16,7 +16,7 @@ function isScheduleEntry(ts: TimesheetEntry): boolean {
   return ts.entryType === 'schedule' || ts.category === 'Meeting';
 }
 
-export const SchedulesCard: React.FC = () => {
+export const SchedulesCard: React.FC<{ className?: string }> = ({ className = '' }) => {
   const router = useRouter();
   const { state } = useApp();
   const dashboardState = useDashboardContext();
@@ -79,7 +79,7 @@ export const SchedulesCard: React.FC = () => {
   }, []);
 
   const filterLabels: Record<ScheduleFilter, string> = {
-    all: currentDateFormatted,
+    all: 'All',
     today: 'Today',
     this_week: 'This Week',
   };
@@ -96,75 +96,71 @@ export const SchedulesCard: React.FC = () => {
     }
   };
 
-  return (
-    <div className="dash-card p-5" data-purpose="schedules-list">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-bold text-[var(--text-primary)]">Schedules</h2>
+  const filterControl = (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setDropdownOpen(!dropdownOpen)}
+        className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium rounded-[7px] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] transition-[background-color,border-color] duration-150 cursor-pointer"
+      >
+        <Calendar className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+        <span>{filterLabels[filter]}</span>
+        <ChevronDown
+          className={`w-3 h-3 text-[var(--text-muted)] transition-transform ${dropdownOpen ? 'rotate-180 text-[var(--studio-navy)]' : ''}`}
+        />
+      </button>
 
-        <div className="relative" ref={dropdownRef}>
-          <button
-            type="button"
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition cursor-pointer"
-          >
-            <Calendar className="w-3.5 h-3.5 text-slate-500" />
-            <span>{filterLabels[filter]}</span>
-            <ChevronDown
-              className={`w-3 h-3 text-slate-400 transition-transform ${dropdownOpen ? 'rotate-180 text-blue-600' : ''}`}
-            />
-          </button>
-
-          {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1.5 w-44 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
-              {(['all', 'today', 'this_week'] as ScheduleFilter[]).map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => {
-                    setFilter(opt);
-                    setDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition cursor-pointer ${
-                    filter === opt ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <span>{filterLabels[opt]}</span>
-                  {filter === opt && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                </button>
-              ))}
-              <div className="pt-1 mt-1 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDropdownOpen(false);
-                    router.push('/timesheets');
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-50 flex items-center justify-between transition cursor-pointer"
-                >
-                  <span>Open Timesheets</span>
-                  <ArrowRight className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-          )}
+      {dropdownOpen && (
+        <div className="absolute right-0 top-full mt-1 w-44 bg-[var(--bg-surface)] rounded-[9px] border border-[var(--border-color)] py-1 z-50">
+          {(['all', 'today', 'this_week'] as ScheduleFilter[]).map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => {
+                setFilter(opt);
+                setDropdownOpen(false);
+              }}
+              className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between cursor-pointer ${
+                filter === opt ? 'bg-[var(--studio-selected)] text-[var(--studio-navy)] font-bold' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)]'
+              }`}
+            >
+              <span>{filterLabels[opt]}</span>
+              {filter === opt && <Check className="w-3.5 h-3.5 text-[var(--studio-navy)]" />}
+            </button>
+          ))}
+          <div className="pt-1 mt-1 border-t border-[var(--border-color)]">
+            <button
+              type="button"
+              onClick={() => {
+                setDropdownOpen(false);
+                router.push('/timesheets');
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs font-bold text-[var(--studio-navy)] hover:bg-[var(--studio-selected)] flex items-center justify-between cursor-pointer"
+            >
+              <span>Open timesheets</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
+    </div>
+  );
 
+  return (
+    <DashPanel title="Schedules" action={filterControl} className={className} purpose="schedules-list">
       {dashboardState.loading ? (
         <div className="space-y-3">
-          <Skeleton height="86px" borderRadius="0.75rem" />
-          <Skeleton height="86px" borderRadius="0.75rem" />
-          <Skeleton height="86px" borderRadius="0.75rem" />
+          <Skeleton height="48px" borderRadius="8px" />
+          <Skeleton height="48px" borderRadius="8px" />
+          <Skeleton height="48px" borderRadius="8px" />
         </div>
       ) : timesheets.length === 0 ? (
-        <div className="py-6 text-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
-          <p className="text-xs font-medium">No schedules yet</p>
-          <p className="text-[11px] mt-1 text-slate-400">
-            Add one from Timesheets → Log Task → Schedule
-          </p>
+        <div className="dash-empty-state">
+          <p>No schedules yet</p>
+          <p>Add one from Timesheets → Log Task → Schedule</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div>
           {timesheets.map((ts) => {
             const formattedDate = formatWorkDate(ts.date);
             const timeLabel =
@@ -175,59 +171,46 @@ export const SchedulesCard: React.FC = () => {
                   : 'Scheduled';
 
             return (
-              <div
+              <button
                 key={ts.id}
+                type="button"
                 onClick={() => router.push('/timesheets')}
-                className="p-3 rounded-xl border border-slate-100 bg-slate-50 hover:border-slate-200 transition cursor-pointer"
+                className="dash-row dash-row--clickable"
               >
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                    {ts.projectName || 'Operations'}
-                  </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-[var(--text-primary)] truncate">
+                    {ts.taskTitle || ts.description || 'Scheduled activity'}
+                  </p>
+                  <p className="mt-1 text-[11px] text-[var(--text-muted)] truncate">
+                    {ts.projectName || 'Operations'} · {timeLabel} · {formattedDate}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
                   {ts.meetingLink && (
                     <a
                       href={ts.meetingLink}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        void openExternalUrl(String(ts.meetingLink));
-                      }}
-                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#1a73e8] hover:underline shrink-0"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-[var(--primary-blue)] hover:underline"
                       title="Open meeting link"
                     >
                       <Video className="w-3 h-3" />
                       <ExternalLink className="w-2.5 h-2.5" />
                     </a>
                   )}
+                  <UserAvatar
+                    src={state.employees?.find((e) => e.id === ts.employeeId || e.name === ts.employeeName)?.avatar}
+                    name={ts.employeeName}
+                    className="w-5 h-5 text-[9px] shrink-0"
+                  />
                 </div>
-
-                <h3 className="text-xs font-bold text-[var(--text-primary)] truncate">
-                  {ts.taskTitle || ts.description || 'Scheduled activity'}
-                </h3>
-
-                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="font-medium text-slate-500 truncate">{timeLabel}</span>
-                    <span>•</span>
-                    <span className="shrink-0">{formattedDate}</span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <UserAvatar
-                      src={state.employees?.find((e) => e.id === ts.employeeId || e.name === ts.employeeName)?.avatar}
-                      name={ts.employeeName}
-                      className="w-5 h-5 text-[9px] shrink-0"
-                    />
-                    <span className="text-[11px] font-medium text-slate-600 truncate max-w-[100px]">
-                      {ts.employeeName}
-                    </span>
-                  </div>
-                </div>
-              </div>
+              </button>
             );
           })}
         </div>
       )}
-    </div>
+    </DashPanel>
   );
 };

@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import { ensureLeadTables } from './orgLeads.js';
 
 export type AccessScopeKind = 'all' | 'team' | 'self';
 
@@ -12,7 +13,7 @@ export type AccessScope = {
 
 type TenantQuery = <T = any>(text: string, params?: any[]) => Promise<{ rows: T[] }>;
 
-const ORG_WIDE_ROLES: string[] = ['super_admin', 'hr_manager', 'admin'];
+const ORG_WIDE_ROLES: string[] = ['super_admin', 'hr_manager', 'hr', 'admin'];
 const MANAGER_ROLES: string[] = ['manager', 'team_lead', 'project_manager', 'sales_manager', 'finance_manager'];
 
 function tenantQuery(req: Request): TenantQuery | null {
@@ -72,16 +73,15 @@ export async function getAccessScope(req: Request): Promise<AccessScope> {
 
   if (MANAGER_ROLES.includes(role) || role === 'manager') {
     const q = tenantQuery(req)!;
+    await ensureLeadTables(q);
     const teamRes = await q(
       `SELECT id FROM employees
        WHERE id = $1
           OR reporting_manager_id = $1
           OR (team_id IS NOT NULL AND team_id = $2)
           OR team_id IN (SELECT id FROM teams WHERE lead_employee_id = $1)
-          OR id IN (
-            SELECT e2.id FROM employees e2
-            WHERE e2.team_id IN (SELECT id FROM teams WHERE lead_employee_id = $1)
-          )`,
+          OR team_id IN (SELECT team_id FROM team_leads WHERE employee_id = $1)
+          OR department_id IN (SELECT department_id FROM department_leads WHERE employee_id = $1)`,
       [me.id, me.team_id || null]
     );
     const ids = Array.from(new Set(teamRes.rows.map((r: any) => String(r.id))));
@@ -144,7 +144,86 @@ export async function canAccessEmployee(
   return { ok, target, scope, me };
 }
 
+/**
+ * Employee UUIDs whose tasks/projects the caller may modify, or null for org-wide access.
+ * Same as the access scope, minus anyone above the caller (reporting chain + their team lead).
+ */
+export async function getManageableEmployeeIds(req: Request): Promise<Set<string> | null> {
+  if (isOrgWideRole(req.user?.role)) return null;
+  const scope = await getAccessScope(req);
+  // Unresolved managers get 'all' for reads only; never for writes.
+  if (!scope.meId) return new Set();
+
+  const ids = new Set(scope.employeeIds);
+  const q = tenantQuery(req);
+  if (!q) return ids;
+
+  const superiors = await q(
+    `WITH RECURSIVE chain AS (
+       SELECT reporting_manager_id AS id, 1 AS depth FROM employees WHERE id = $1
+       UNION
+       SELECT e.reporting_manager_id, c.depth + 1
+       FROM employees e JOIN chain c ON e.id = c.id
+       WHERE c.depth < 20
+     )
+     SELECT id FROM chain WHERE id IS NOT NULL
+     UNION
+     SELECT t.lead_employee_id FROM teams t
+     JOIN employees me ON me.team_id = t.id
+     WHERE me.id = $1 AND t.lead_employee_id IS NOT NULL`,
+    [scope.meId]
+  );
+  for (const row of superiors.rows) {
+    if (String(row.id) !== scope.meId) ids.delete(String(row.id));
+  }
+  ids.add(scope.meId);
+  return ids;
+}
+
+export function isManagerRole(role?: string | null): boolean {
+  return !!role && (ORG_WIDE_ROLES.includes(role) || MANAGER_ROLES.includes(role));
+}
+
 /** True when caller is org-wide admin/HR. */
 export function isOrgWideRole(role?: string | null): boolean {
   return !!role && ORG_WIDE_ROLES.includes(role);
+}
+
+/**
+ * Approve/reject is a decision: org-wide HR/admin, reporting or team lead, or the
+ * project manager. The timesheet owner can never decide their own row.
+ */
+export async function canDecideTimesheet(
+  req: Request,
+  row: { employee_id: string; project_id?: string | null }
+): Promise<{ ok: boolean; meId: string | null; reason: string }> {
+  const me = await resolveCallerEmployee(req);
+  const meId = me?.id ? String(me.id) : null;
+  const ownerId = String(row.employee_id || '');
+  const forbidden = 'Only a manager, team lead, project manager, or HR can approve this timesheet.';
+
+  if (meId && ownerId && meId === ownerId) {
+    return { ok: false, meId, reason: 'You cannot approve or reject your own timesheet.' };
+  }
+
+  if (isOrgWideRole(req.user?.role)) {
+    return { ok: true, meId, reason: '' };
+  }
+
+  const ids = await getManageableEmployeeIds(req);
+  if (ids && ownerId && ids.has(ownerId) && ownerId !== meId) {
+    return { ok: true, meId, reason: '' };
+  }
+
+  if (row.project_id) {
+    const q = tenantQuery(req);
+    if (q && meId) {
+      const project = await q(`SELECT manager_id FROM projects WHERE id = $1`, [row.project_id]);
+      if (project.rows[0]?.manager_id && String(project.rows[0].manager_id) === meId) {
+        return { ok: true, meId, reason: '' };
+      }
+    }
+  }
+
+  return { ok: false, meId, reason: forbidden };
 }

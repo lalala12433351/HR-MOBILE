@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AuthService } from '@/services/authService';
 import { api } from '@/services/apiClient';
-import { APP_ORIGIN, IMPERSONATION_TENANT_KEY, isAppHost, SAME_ORIGIN_HOST } from '@/config/origins';
+import { APP_ORIGIN, IMPERSONATION_TENANT_KEY, isAppHost, isLoopbackHost, SAME_ORIGIN_HOST } from '@/config/origins';
 import type { ClientTenant } from '@/types';
 
 /**
@@ -18,7 +18,7 @@ export default function ImpersonateAcceptPage() {
 
   useEffect(() => {
     const hostname = typeof window !== 'undefined' ? window.location.hostname : null;
-    if (!SAME_ORIGIN_HOST && !isAppHost(hostname)) {
+    if (!SAME_ORIGIN_HOST && !isLoopbackHost(hostname) && !isAppHost(hostname)) {
       window.location.href = `${APP_ORIGIN}/impersonate${window.location.search}`;
       return;
     }

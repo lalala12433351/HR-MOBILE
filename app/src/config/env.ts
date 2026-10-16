@@ -22,7 +22,7 @@ const envSchema = z.object({
   DB_MAX_CONNECTIONS: z.coerce.number().default(10),
 
   // AWS Cognito
-  AWS_REGION: z.string().default('us-east-1'),
+  AWS_REGION: z.string().default('ap-south-1'),
   COGNITO_USER_POOL_ID: z.string().default('us-east-1_examplepool'),
   COGNITO_CLIENT_ID: z.string().default('exampleclientid12345'),
   COGNITO_CLIENT_SECRET: z.string().optional().default(''),
@@ -30,6 +30,17 @@ const envSchema = z.object({
   // AWS S3
   S3_BUCKET_NAME: z.string().default('enterprise-bos-documents-local'),
   S3_PRESIGNED_EXPIRATION_SECONDS: z.coerce.number().default(900),
+
+  // Auth
+  JWT_SECRET: z.string().optional(),
+
+  // Transactional email (Amazon SES v2)
+  EMAIL_TRANSPORT: z.enum(['ses', 'log']).default('ses'),
+  SES_FROM_EMAIL: z.string().default('Pixbe <auth@pixbe.in>'),
+  SES_REPLY_TO: z.string().optional(),
+  SES_CONFIGURATION_SET: z.string().optional(),
+  EMAIL_BRAND_NAME: z.string().default('Pixbe'),
+  SUPPORT_EMAIL: z.string().default('support@pixbe.in'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

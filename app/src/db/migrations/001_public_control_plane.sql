@@ -58,6 +58,7 @@ ALTER TABLE public.global_auth_mapping ADD COLUMN IF NOT EXISTS password_hash TE
 
 CREATE INDEX IF NOT EXISTS idx_global_auth_cognito_sub ON public.global_auth_mapping(cognito_sub);
 CREATE INDEX IF NOT EXISTS idx_global_auth_email ON public.global_auth_mapping(email);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_global_auth_email_lower ON public.global_auth_mapping (LOWER(email));
 
 -- 4. Global Control Plane Audit Logs
 CREATE TABLE IF NOT EXISTS public.system_audit_logs (

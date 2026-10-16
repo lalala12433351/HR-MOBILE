@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { openExternalUrl } from '@/lib/native';
 import {
   Video,
   Plus,
@@ -26,9 +25,11 @@ import {
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
-  googleSignIn,
-  googleSignOut,
-  initGoogleAuth,
+  googleWorkspaceSignIn as googleSignIn,
+  googleWorkspaceSignOut as googleSignOut,
+  initGoogleWorkspaceAuth as initGoogleAuth,
+} from '../../services/googleDrive';
+import {
   createMeetSpace,
   updateMeetSpaceSettings,
   getMeetSpace,
@@ -434,12 +435,9 @@ export const GoogleMeetComponent: React.FC<GoogleMeetComponentProps> = ({
                 <div className="flex items-center gap-2">
                   <a
                     href={lastCreatedSpace.meetingUri}
+                    target="_blank"
                     rel="noreferrer"
                     className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white p-2.5 text-xs font-extrabold shadow-xs transition-all"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      void openExternalUrl(String(lastCreatedSpace.meetingUri));
-                    }}
                   >
                     <ExternalLink className="h-3.5 w-3.5" /> Join Google Meet Now
                   </a>
@@ -510,14 +508,10 @@ export const GoogleMeetComponent: React.FC<GoogleMeetComponentProps> = ({
 
                     <a
                       href={mtg.link}
-                      
+                      target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs font-extrabold shadow-xs transition-all active:scale-95 shrink-0"
-                     onClick={(e) => {
-                      e.preventDefault();
-                      void openExternalUrl(String(mtg.link));
-                    }}
-                  >
+                    >
                       <Video className="h-3.5 w-3.5" /> Join Google Meet
                     </a>
                   </div>

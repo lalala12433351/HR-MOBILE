@@ -63,6 +63,10 @@ export interface Organization {
   domain?: string;
   industry?: string;
   size?: string;
+  streetAddress?: string;
+  city?: string;
+  stateProvince?: string;
+  postalCode?: string;
 }
 
 export interface JobTimelineItem {
@@ -121,6 +125,7 @@ export interface SalaryDeductionItem {
 
 export type AccountStatus =
   | 'Not Activated'
+  | 'Invited'
   | 'Active'
   | 'In Probation'
   | 'On Leave'
@@ -165,6 +170,8 @@ export interface Employee {
   offices?: Array<{ id: string; name: string; isPrimary: boolean }>;
   managerId?: string;
   managerName?: string;
+  /** Every department/team co-lead who can act as this employee's manager */
+  managerIds?: string[];
   lineManager?: {
     name: string;
     username: string;
@@ -278,6 +285,13 @@ export interface Employee {
   };
   /** True when leaveBalances were hydrated from GET /attendance/leave-balances. */
   leaveBalancesFromServer?: boolean;
+  /** Server ledger entitlement for the year (remaining + consumed). */
+  leaveBalanceTotals?: {
+    casualLeave: number;
+    sickLeave: number;
+    earnedLeave: number;
+    compOff?: number;
+  };
   carriedOverLeaves?: {
     casualLeave?: number;
     sickLeave?: number;
@@ -300,6 +314,13 @@ export interface Employee {
   rosterSchedule?: Record<string, string>; // e.g. "Mon" -> "sh-1", or "YYYY-MM-DD" -> "sh-1"
 }
 
+export interface AttendanceSession {
+  checkIn: string;
+  checkOut?: string;
+  locationName?: string;
+  workingHours: number;
+}
+
 export interface AttendanceRecord {
   id: string;
   employeeId: string;
@@ -308,6 +329,8 @@ export interface AttendanceRecord {
   date: string;
   checkIn: string;
   checkOut?: string;
+  /** Clock-in/out pairs for the same calendar day (lunch, split shifts). */
+  sessions?: AttendanceSession[];
   status: 'Present' | 'Late' | 'Half Day' | 'Work From Home' | 'On Leave' | 'Absent';
   locationName: string;
   latitude: number;
@@ -492,6 +515,30 @@ export interface SalaryComponentDefinition {
   description?: string;
 }
 
+export type AttendancePaySalaryMethod = 'full_then_deduct' | 'payable_days';
+export type AttendancePayLopDayRate = 'gross_per_working_day' | 'basic_per_working_day' | 'gross_per_calendar_day';
+export type AttendancePayMissingHours = 'hours_to_lop' | 'hourly_rate' | 'gross_per_hour' | 'ignore';
+
+export interface AttendancePaySettings {
+  salaryMethod: AttendancePaySalaryMethod;
+  lopFromUnpaidLeave: boolean;
+  lopFromAbsent: boolean;
+  lopFromHalfDay: boolean;
+  lopFromDayShortfall: boolean;
+  lopDayRate: AttendancePayLopDayRate;
+  missingHours: AttendancePayMissingHours;
+}
+
+export const DEFAULT_ATTENDANCE_PAY: AttendancePaySettings = {
+  salaryMethod: 'full_then_deduct',
+  lopFromUnpaidLeave: true,
+  lopFromAbsent: true,
+  lopFromHalfDay: true,
+  lopFromDayShortfall: true,
+  lopDayRate: 'gross_per_working_day',
+  missingHours: 'hours_to_lop',
+};
+
 export interface PayrollSettings {
   isConfigured: boolean;
   defaultSalaryType: SalaryType;
@@ -505,6 +552,7 @@ export interface PayrollSettings {
   autoCalculateFromAttendance: boolean; // For leave proration
   allowNegativeNetPay: boolean;
   enableDirectDepositExport: boolean;
+  attendancePay?: AttendancePaySettings;
   salaryComponentRules: {
     basicPercentOfCTC: number; // e.g. 50
     hraPercentOfBasic: number; // e.g. 40 (non-metro) or 50 (metro)
@@ -521,6 +569,20 @@ export interface PayrollSettings {
   };
 }
 
+export interface PayrollIncentive {
+  id: string;
+  employeeId: string;
+  amount: number;
+  reason: string;
+  type: 'bonus' | 'incentive' | 'reimbursement';
+}
+
+export interface PayrollDeductionLine {
+  name: string;
+  amount: number;
+  source: 'statutory' | 'group' | 'component' | 'employee' | 'lop';
+}
+
 export interface PayrollRecord {
   id: string;
   employeeId: string;
@@ -531,12 +593,21 @@ export interface PayrollRecord {
   payrollGroupId?: string;
   payrollGroupName?: string;
   hoursWorked?: number;
+  hoursRequired?: number;
+  daysWorked?: number;
+  daysRequired?: number;
+  hoursMet?: boolean;
+  lopDays?: number;
+  lopAmount?: number;
   hourlyRate?: number;
   overtimeHours?: number;
   basicSalary: number;
   allowances: number;
   overtimePay: number;
+  incentives?: number;
+  incentiveItems?: PayrollIncentive[];
   deductions: number;
+  deductionLines?: PayrollDeductionLine[];
   tax: number;
   netPay: number;
   netSalary?: number;
@@ -551,6 +622,12 @@ export interface PayrollRecord {
   };
   status: 'Draft' | 'Processed' | 'Paid';
   paymentDate?: string;
+}
+
+export interface PayrollRunDraft {
+  month: number;
+  year: number;
+  incentives: PayrollIncentive[];
 }
 
 export interface ExpenseClaim {
@@ -582,11 +659,28 @@ export interface PerformanceGoal {
   status: 'On Track' | 'At Risk' | 'Completed' | 'Lagging';
 }
 
+export interface BillingClient {
+  id: string;
+  name: string;
+  companyName?: string;
+  email?: string;
+  phone?: string;
+  billingAddress?: string;
+  gstin?: string;
+  currency: string;
+  paymentTermsDays: number;
+  defaultHourlyRate?: number | null;
+  notes?: string;
+  status: 'active' | 'inactive';
+  projectCount?: number;
+}
+
 export interface Project {
   id: string;
   name: string;
   code: string;
   clientName: string;
+  clientId?: string;
   description: string;
   managerId: string;
   managerName: string;
@@ -597,6 +691,8 @@ export interface Project {
   budget?: number;
   spent?: number;
   currency: string;
+  billingMode?: 'deliverable' | 'hourly';
+  hourlyRate?: number;
   category?: string;
   totalWorkHours?: number; // Total allocated/budgeted work hours set by Admin/HR
   loggedWorkHours?: number; // Total hours logged so far across tasks
@@ -619,6 +715,8 @@ export interface Task {
   colorClass?: string;
   assigneeId: string;
   assigneeName: string;
+  assigneeIds?: string[];
+  assigneeNames?: string[];
   assigneeAvatar?: string;
   reporterName?: string;
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
@@ -638,6 +736,19 @@ export interface Task {
   progress?: number; // 0 - 100 completion percentage
   isMilestone?: boolean; // Flag if this task represents a major project milestone
   attachedDocIds?: string[]; // IDs of DriveItems attached to this task/milestone
+  attachedDocs?: TaskAttachment[];
+  openTimesheetId?: string;
+  billable?: boolean;
+  billingType?: 'deliverable' | 'hourly';
+  unitPrice?: number;
+  clientId?: string;
+  invoiceId?: string;
+  isRecurrenceTemplate?: boolean;
+  recurrenceSeriesId?: string;
+  recurrenceRule?: { frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly'; weekday?: number; count?: number } | null;
+  recurrenceEnd?: string;
+  occurrenceDate?: string;
+  parentTaskId?: string;
 }
 
 export interface Lead {
@@ -804,6 +915,15 @@ export interface Meeting {
   actionItems: string[];
 }
 
+export interface TaskAttachment {
+  id: string;
+  name: string;
+  size?: string;
+  type?: string;
+  s3Key?: string;
+  owner?: string;
+}
+
 export interface DriveItem {
   id: string;
   name: string;
@@ -819,6 +939,7 @@ export interface DriveItem {
   taskId?: string;
   taskTitle?: string;
   downloadUrl?: string;
+  s3Key?: string;
 }
 
 export interface JobOpening {
@@ -882,6 +1003,7 @@ export interface NotificationItem {
   read: boolean;
   linkModule?: string;
   linkTab?: string;
+  linkUrl?: string;
   actorName?: string;
   actorAvatar?: string;
   actionLabel?: string;
@@ -968,9 +1090,21 @@ export interface OfficeLocationRecord {
   geofencingStatus?: 'Active' | 'Inactive' | 'Optional';
 }
 
+export interface DepartmentRecord {
+  id?: string;
+  name?: string;
+  shortCode?: string;
+  description?: string;
+  leadEmployeeId?: string | null;
+  leadName?: string | null;
+  leadEmployeeIds?: string[];
+  leadNames?: string[];
+}
+
 export interface CustomizableOptions {
   leaveTypes: { id: string; name: string; paid: boolean; annualQuota: number; color: string; description: string }[];
   departments: string[];
+  departmentRecords?: DepartmentRecord[];
   teams: string[];
   offices: string[];
   /** Full office rows with GPS — used by punch geofencing */
@@ -981,6 +1115,10 @@ export interface CustomizableOptions {
   defaultInitialPassword?: string;
   forcePasswordReset?: boolean;
   onboardingFields?: CustomProfileField[];
+  onboardingAutomation?: {
+    autoSendWelcomeEmail: boolean;
+    autoAssignBuddy?: boolean;
+  };
   shifts?: WorkShift[];
   academicBatches?: {
     id: string;
@@ -1020,6 +1158,7 @@ export interface CustomizableOptions {
     requireLocationGPS: boolean;
     /** When false, punch UI treats geofence as optional (mirrors requireLocationGPS). */
     geofenceEnabled?: boolean;
+    outOfRadiusAction?: 'Block' | 'Allow' | 'Warn';
     allowQrCodeAttendance: boolean;
     qrRefreshIntervalSeconds: number;
     allowedIpAddresses: string;
@@ -1030,6 +1169,8 @@ export interface CustomizableOptions {
       geofencingStatus: 'Active' | 'Inactive' | 'Optional';
       radiusMeters?: number;
       address?: string;
+      clockingDevices?: string;
+      qrCodeEnabled?: boolean;
     }>;
     includeSaturdayInWorkHours?: boolean;
     workingDays?: string[];
@@ -1052,7 +1193,11 @@ export interface CustomizableOptions {
     maxConsecutiveDaysWithoutDoc: number;
     maxCarryForwardDays: number;
     enableCarryOver?: boolean;
+    /** Master switch for grant-period / rollover rules. Quotas still apply when off. */
+    leavePoliciesEnabled?: boolean;
     accrualFrequency?: 'annual' | 'monthly';
+    /** When monthly: unused days from this month add to next month (up to the annual quota). */
+    enableMonthlyRollover?: boolean;
     monthlyAccrualRates?: Record<string, { casualLeave: number; sickLeave: number; earnedLeave: number }>;
     allowNegativeBalance: boolean;
     restrictDuringNoticePeriod: boolean;
@@ -1198,6 +1343,54 @@ export interface Student {
   };
 }
 
+export type LicenseStatus = 'trialing' | 'active' | 'expiring' | 'expired' | 'canceled';
+
+export interface LicenseSummary {
+  subscriptionId?: string | null;
+  planId: string | null;
+  planKey: string;
+  planName: string;
+  status: LicenseStatus;
+  maxSeats: number;
+  seatsUsed: number;
+  billingCycle: 'monthly' | 'annual';
+  periodStart: string | null;
+  periodEnd: string | null;
+  trialEndsAt: string | null;
+  daysRemaining: number;
+  features: string[];
+}
+
+export interface LicensePlan {
+  id: string;
+  key: string;
+  name: string;
+  description?: string;
+  priceMonthly: number;
+  priceAnnual: number;
+  maxSeats: number;
+  trialDays: number;
+  features: string[];
+  isActive: boolean;
+  isPublic: boolean;
+  sortOrder?: number;
+  activeClientsCount?: number;
+}
+
+export interface LicenseEvent {
+  id: string;
+  action: string;
+  actorEmail?: string | null;
+  fromPlan?: string | null;
+  toPlan?: string | null;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  details?: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface ClientTenant {
   id: string;
   slug: string;
@@ -1205,7 +1398,15 @@ export interface ClientTenant {
   domain?: string;
   industry: string;
   schemaName: string;
-  plan: 'starter' | 'professional' | 'enterprise';
+  plan: string;
+  planId?: string | null;
+  planName?: string;
+  licenseStatus?: LicenseStatus;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  trialEndsAt?: string | null;
+  daysRemaining?: number;
+  billingCycle?: 'monthly' | 'annual';
   maxSeats: number;
   activeUsersCount: number;
   adminName: string;

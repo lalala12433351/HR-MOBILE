@@ -1,23 +1,15 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  Home,
-  FolderKanban,
-  Calendar,
-  Clock,
-  Users,
-  BarChart3,
-  Mail,
-  GraduationCap,
-  BookOpen,
-} from 'lucide-react';
 import { UserPersona } from '@/types';
 import { useApp } from '@/context/AppContext';
-import { KiteLogoMark } from '@/components/common/KiteLogoMark';
+import { OrgBrandMark } from '@/components/common/PixbeBrand';
+import { PixbeIcon, PixbeIconName } from '@/components/common/PixbeIcon';
 import { isInstitutionMode } from '@/utils/organizationMode';
+import { isExecutiveOrAdmin } from '@/utils/teamAccess';
+import { useChatUnread } from '@/hooks/useChat';
 
 interface SidebarProps {
   currentPersona?: UserPersona;
@@ -27,7 +19,18 @@ interface SidebarProps {
   onSelectModule?: (mod: string) => void;
 }
 
-const NAV_ITEM_STEP_PX = 44 + 10; // h-11 + gap-2.5
+interface NavItem {
+  id: string;
+  label: string;
+  path: string;
+  icon: PixbeIconName;
+}
+
+interface NavGroup {
+  id: string;
+  label?: string;
+  items: NavItem[];
+}
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentPersona: propPersona,
@@ -42,9 +45,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const isInstitution = isInstitutionMode(state.organization, currentPersona);
   const isStudentRole = currentPersona?.role === 'student';
+  const canManageSettings = isExecutiveOrAdmin(currentPersona);
+  const chatUnread = useChatUnread();
 
   const [drawerMounted, setDrawerMounted] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const collapseTimer = useRef<number | null>(null);
+
+  const expandSidebar = () => {
+    if (collapseTimer.current) {
+      window.clearTimeout(collapseTimer.current);
+      collapseTimer.current = null;
+    }
+    setExpanded(true);
+  };
+
+  const collapseSidebar = () => {
+    if (collapseTimer.current) window.clearTimeout(collapseTimer.current);
+    collapseTimer.current = window.setTimeout(() => {
+      setExpanded(false);
+      collapseTimer.current = null;
+    }, 120);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (collapseTimer.current) window.clearTimeout(collapseTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.style.removeProperty('--sidebar-width');
+  }, []);
 
   useEffect(() => {
     if (mobileOpen) {
@@ -60,120 +93,80 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return () => window.clearTimeout(timeout);
   }, [mobileOpen]);
 
-  const navItems = isStudentRole
+  const chatItem: NavItem = { id: 'chat', label: 'Chat', path: '/chat', icon: 'chat' };
+  const payrollItem: NavItem = { id: 'payroll', label: 'Payroll', path: '/payroll', icon: 'payslips' };
+  const reportsItem: NavItem = { id: 'reports', label: 'Reports', path: '/reports', icon: 'reports' };
+  const settingsItem: NavItem = { id: 'settings', label: 'Settings', path: '/settings', icon: 'settings' };
+
+  const navGroups: NavGroup[] = isStudentRole
     ? [
         {
-          id: 'timetable',
-          label: 'Class Timetable',
-          path: '/timetable',
-          icon: Calendar,
-        },
-        {
-          id: 'student-attendance',
-          label: 'My Attendance',
-          path: '/student-attendance',
-          icon: Clock,
-        },
-        {
-          id: 'announcements',
-          label: 'Announcements',
-          path: '/announcements',
-          icon: Mail,
+          id: 'student',
+          items: [
+            { id: 'timetable', label: 'Class timetable', path: '/timetable', icon: 'timetable' },
+            { id: 'student-attendance', label: 'My attendance', path: '/student-attendance', icon: 'attendance' },
+            { id: 'announcements', label: 'Announcements', path: '/announcements', icon: 'announcements' },
+          ],
         },
       ]
     : isInstitution
     ? [
         {
-          id: 'dashboard',
-          label: 'Home',
-          path: '/dashboard',
-          icon: Home,
+          id: 'workspace',
+          items: [
+            { id: 'dashboard', label: 'Home', path: '/dashboard', icon: 'home' },
+            chatItem,
+          ],
         },
         {
-          id: 'student-directory',
-          label: 'Student Directory',
-          path: '/student-directory',
-          icon: GraduationCap,
+          id: 'classes',
+          label: 'Classes',
+          items: [
+            { id: 'student-directory', label: 'Students', path: '/student-directory', icon: 'students' },
+            { id: 'timetable', label: 'Timetables', path: '/timetable', icon: 'timetable' },
+            { id: 'student-attendance', label: 'Class attendance', path: '/student-attendance', icon: 'attendance' },
+          ],
         },
         {
-          id: 'timetable',
-          label: 'Class Timetables',
-          path: '/timetable',
-          icon: Calendar,
-        },
-        {
-          id: 'student-attendance',
-          label: 'Class Attendance',
-          path: '/student-attendance',
-          icon: BookOpen,
-        },
-        {
-          id: 'hr',
-          label: 'Staff & Faculty',
-          path: '/hr',
-          icon: Users,
-        },
-        {
-          id: 'attendance',
-          label: 'Staff Attendance',
-          path: '/attendance',
-          icon: Clock,
-        },
-        {
-          id: 'announcements',
-          label: 'Comms & Announcements',
-          path: '/announcements',
-          icon: Mail,
-        },
-        {
-          id: 'reports',
-          label: 'Reports & Analytics',
-          path: '/reports',
-          icon: BarChart3,
+          id: 'institute',
+          label: 'Institute',
+          items: [
+            { id: 'hr', label: 'Staff', path: '/hr', icon: 'people' },
+            { id: 'attendance', label: 'Staff attendance', path: '/attendance', icon: 'attendance' },
+            ...(canManageSettings ? [payrollItem] : []),
+            { id: 'announcements', label: 'Announcements', path: '/announcements', icon: 'announcements' },
+            ...(canManageSettings ? [reportsItem] : []),
+            ...(canManageSettings ? [settingsItem] : []),
+          ],
         },
       ]
     : [
         {
-          id: 'dashboard',
-          label: 'Home',
-          path: '/dashboard',
-          icon: Home,
+          id: 'workspace',
+          items: [
+            { id: 'dashboard', label: 'Home', path: '/dashboard', icon: 'home' },
+            chatItem,
+          ],
         },
         {
-          id: 'projects',
-          label: 'Projects & Tasks',
-          path: '/projects',
-          icon: FolderKanban,
+          id: 'work',
+          label: 'Work',
+          items: [
+            { id: 'projects', label: 'Projects', path: '/projects', icon: 'projects' },
+            { id: 'attendance', label: 'Calendar', path: '/attendance', icon: 'calendar' },
+            { id: 'timesheets', label: 'Timesheets', path: '/timesheets', icon: 'attendance' },
+          ],
         },
         {
-          id: 'attendance',
-          label: 'Calendar & Schedules',
-          path: '/attendance',
-          icon: Calendar,
-        },
-        {
-          id: 'timesheets',
-          label: 'Timesheets & Attendance',
-          path: '/timesheets',
-          icon: Clock,
-        },
-        {
-          id: 'hr',
-          label: 'Team & Employees',
-          path: '/hr',
-          icon: Users,
-        },
-        {
-          id: 'reports',
-          label: 'Reports & Analytics',
-          path: '/reports',
-          icon: BarChart3,
-        },
-        {
-          id: 'announcements',
-          label: 'Comms & Announcements',
-          path: '/announcements',
-          icon: Mail,
+          id: 'organisation',
+          label: 'Organisation',
+          items: [
+            { id: 'hr', label: 'Team', path: '/hr', icon: 'people' },
+            ...(canManageSettings ? [payrollItem] : []),
+            ...(canManageSettings ? [reportsItem] : []),
+            { id: 'announcements', label: 'Announcements', path: '/announcements', icon: 'announcements' },
+            ...(canManageSettings ? [settingsItem] : []),
+          ],
         },
       ];
 
@@ -188,8 +181,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return pathname.startsWith(path);
   };
 
-  const activeIndex = navItems.findIndex((item) => isItemActive(item.path, item.id));
-
   const handleItemClick = (path: string, id: string) => {
     if (onSelectModule) {
       onSelectModule(id);
@@ -197,56 +188,87 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onCloseMobile();
   };
 
-  const navContent = (
+  const homeHref = isStudentRole ? '/student-attendance' : '/dashboard';
+  const orgName =
+    state.organization?.name &&
+    state.organization.name !== 'Corporate Headquarters' &&
+    state.organization.name !== 'Office Location'
+      ? state.organization.name
+      : isInstitution
+        ? 'Institute workspace'
+        : 'Pixbe Workspace';
+
+  const renderRail = (showGroupLabels: boolean) => (
     <div className="sidebar-rail">
-      <div className="flex flex-col items-center gap-4 shrink-0 w-full">
-        <Link
-          href={isStudentRole ? '/student-attendance' : '/dashboard'}
-          onClick={onCloseMobile}
-          className="sidebar-logo"
-          title={isStudentRole ? 'Student Attendance Portal' : 'Workspace Dashboard'}
-        >
-          <KiteLogoMark className="w-5 h-5 text-white" />
-        </Link>
+      <Link
+        href={homeHref}
+        onClick={onCloseMobile}
+        className="sidebar-brand"
+        title={isStudentRole ? 'Student attendance portal' : 'Workspace home'}
+      >
+        <OrgBrandMark src={state.organization?.logo} className="sidebar-brand-mark" />
+        <span className="sidebar-brand-copy">
+          <strong>Pixbe</strong>
+          <small>{orgName}</small>
+        </span>
+      </Link>
 
-        <nav className="sidebar-nav" aria-label="Primary">
-          <span
-            className="sidebar-nav-indicator"
-            data-hidden={activeIndex < 0 ? 'true' : 'false'}
-            style={{
-              transform: `translateY(${Math.max(activeIndex, 0) * NAV_ITEM_STEP_PX}px)`,
-            }}
-            aria-hidden
-          />
+      <nav className="sidebar-nav custom-scrollbar" aria-label="Primary">
+        {navGroups.map((group) => (
+          <div key={group.id} className="sidebar-nav-group">
+            {group.label ? <p className="sidebar-nav-label">{group.label}</p> : null}
+            {group.items.map((item) => {
+              const active = isItemActive(item.path, item.id);
+              const badge = item.id === 'chat' && chatUnread > 0 ? chatUnread : 0;
 
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = isItemActive(item.path, item.id);
-
-            return (
-              <div key={item.id} className="relative flex items-center justify-center w-full">
+              return (
                 <Link
+                  key={item.id}
                   href={item.path}
                   onClick={() => handleItemClick(item.path, item.id)}
-                  title={item.label}
+                  title={
+                    showGroupLabels || expanded
+                      ? undefined
+                      : badge
+                        ? `${item.label} (${badge} unread)`
+                        : item.label
+                  }
+                  aria-label={badge ? `${item.label}, ${badge} unread` : item.label}
                   aria-current={active ? 'page' : undefined}
                   data-active={active ? 'true' : 'false'}
                   className="sidebar-nav-item"
                 >
-                  <Icon className="sidebar-nav-icon" />
+                  <PixbeIcon name={item.icon} className="sidebar-nav-icon" />
+                  <span className="sidebar-nav-text">{item.label}</span>
+                  {badge > 0 && (
+                    <span aria-hidden className="sidebar-nav-badge">
+                      {badge > 99 ? '99+' : badge}
+                    </span>
+                  )}
                 </Link>
-              </div>
-            );
-          })}
-        </nav>
-      </div>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
     </div>
   );
 
   return (
     <>
-      <aside className="hidden lg:flex fixed left-0 top-0 bottom-0 z-40 w-[68px]">
-        {navContent}
+      <aside
+        id="pixbe-sidebar"
+        className="sidebar-dock hidden lg:block fixed left-0 top-0 bottom-0 z-40"
+        data-expanded={expanded ? 'true' : 'false'}
+        onMouseEnter={expandSidebar}
+        onMouseLeave={collapseSidebar}
+        onFocusCapture={expandSidebar}
+        onBlurCapture={(event) => {
+          const next = event.relatedTarget as Node | null;
+          if (!event.currentTarget.contains(next)) collapseSidebar();
+        }}
+      >
+        {renderRail(false)}
       </aside>
 
       {drawerMounted && (
@@ -264,7 +286,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             aria-modal="true"
             aria-label="Navigation"
           >
-            {navContent}
+            {renderRail(true)}
           </div>
         </div>
       )}

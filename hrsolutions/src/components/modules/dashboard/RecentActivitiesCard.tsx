@@ -3,8 +3,8 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import { GoogleIcon } from '@/components/ui/GoogleIcon';
-import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
+import { DashPanel } from './DashPanel';
 
 /** Helper to convert raw strings/JSON from audit log details into human-readable copy */
 function formatLogDetails(rawDetails: any, action?: string, entity?: string): string {
@@ -70,54 +70,31 @@ function formatLogDetails(rawDetails: any, action?: string, entity?: string): st
 /** Helper to choose contextual icon & soft color scheme for each activity type */
 function getActivityBadge(action = '', entity = '', details = '') {
   const combined = `${action} ${entity} ${details}`.toUpperCase();
+  const tone = 'bg-[var(--bg-surface-subtle)] text-[var(--studio-navy)] border border-[var(--border-color)]';
 
   if (combined.includes('PAYROLL') || combined.includes('PAYOUT') || combined.includes('SALARY') || combined.includes('PAYSLIP')) {
-    return {
-      iconName: 'payments',
-      bgClass: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40',
-    };
+    return { iconName: 'payments', bgClass: tone };
   }
   if (combined.includes('WORKSPACE') || combined.includes('SETUP') || combined.includes('DATABASE') || combined.includes('INITIALIZE') || combined.includes('POSTGRES')) {
-    return {
-      iconName: 'database',
-      bgClass: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40',
-    };
+    return { iconName: 'database', bgClass: tone };
   }
   if (combined.includes('PERSONA') || combined.includes('SWITCH') || combined.includes('LOGIN') || combined.includes('AUTH') || combined.includes('USER')) {
-    return {
-      iconName: 'person',
-      bgClass: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/40',
-    };
+    return { iconName: 'person', bgClass: tone };
   }
   if (combined.includes('PROJECT') || combined.includes('TASK') || combined.includes('BOARD') || combined.includes('ASSIGN')) {
-    return {
-      iconName: 'assignment',
-      bgClass: 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/40',
-    };
+    return { iconName: 'assignment', bgClass: tone };
   }
   if (combined.includes('ATTENDANCE') || combined.includes('PUNCH') || combined.includes('CLOCK') || combined.includes('TIMESHEET')) {
-    return {
-      iconName: 'schedule',
-      bgClass: 'bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 border border-teal-100 dark:border-teal-900/40',
-    };
+    return { iconName: 'schedule', bgClass: tone };
   }
   if (combined.includes('LEAVE') || combined.includes('HOLIDAY') || combined.includes('VACATION')) {
-    return {
-      iconName: 'beach_access',
-      bgClass: 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-900/40',
-    };
+    return { iconName: 'beach_access', bgClass: tone };
   }
   if (combined.includes('STUDENT') || combined.includes('CLASS') || combined.includes('COURSE') || combined.includes('BATCH')) {
-    return {
-      iconName: 'school',
-      bgClass: 'bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 border border-sky-100 dark:border-sky-900/40',
-    };
+    return { iconName: 'school', bgClass: tone };
   }
 
-  return {
-    iconName: 'verified_user',
-    bgClass: 'bg-slate-100 dark:bg-[#202024] text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-[#282830]',
-  };
+  return { iconName: 'verified_user', bgClass: tone };
 }
 
 /** Format timestamp into compact human-readable time */
@@ -135,9 +112,8 @@ function formatLogTime(timestamp?: string): string {
   return timestamp.slice(11, 16) || 'Recent';
 }
 
-export const RecentActivitiesCard: React.FC = () => {
+export const RecentActivitiesCard: React.FC<{ className?: string }> = ({ className = '' }) => {
   const router = useRouter();
-  const { state } = useApp();
   const dashboardState = useDashboardContext();
 
   const displayItems = React.useMemo(() => {
@@ -158,48 +134,47 @@ export const RecentActivitiesCard: React.FC = () => {
   }, [dashboardState.auditLogs]);
 
   return (
-    <div
-      className="dash-card p-5"
-      data-purpose="recent-activities"
-    >
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-bold text-[var(--text-primary)]">Recent Activities</h2>
+    <DashPanel
+      title="Recent activity"
+      className={className}
+      purpose="recent-activities"
+      action={
         <button
           type="button"
           onClick={() => router.push('/notifications')}
-          className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer inline-flex items-center gap-1 transition-colors"
+          className="text-xs font-semibold text-[var(--studio-navy)] hover:underline cursor-pointer inline-flex items-center gap-1"
         >
-          <span>View All Log</span>
+          View log
           <GoogleIcon name="arrow_forward" size={14} />
         </button>
-      </div>
-
+      }
+    >
       {displayItems.length === 0 ? (
-        <div className="py-8 text-center text-xs text-slate-400 dark:text-slate-500 border border-dashed border-slate-200 dark:border-[#282830] rounded-xl">
-          <p>No recent activity logs recorded yet</p>
+        <div className="dash-empty-state">
+          <p>No recent activity recorded yet</p>
         </div>
       ) : (
-        <div className="space-y-3.5 divide-y divide-slate-100/80 dark:divide-[#222228]">
-          {displayItems.map((item, idx) => (
-            <div key={item.id} className={`flex items-start gap-3 ${idx > 0 ? 'pt-3.5' : ''}`}>
-              <div
-                className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 shadow-2xs ${item.badge.bgClass}`}
-              >
-                <GoogleIcon name={item.badge.iconName} size={17} weight={500} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                  <strong className="font-semibold text-slate-900 dark:text-white mr-1.5">{item.user}</strong>
+        <div>
+          {displayItems.map((item) => (
+            <div key={item.id} className="dash-row">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <div
+                  className={`w-8 h-8 rounded-[8px] flex items-center justify-center shrink-0 ${item.badge.bgClass}`}
+                >
+                  <GoogleIcon name={item.badge.iconName} size={17} weight={500} />
+                </div>
+                <p className="text-xs text-[var(--text-secondary)] leading-relaxed min-w-0">
+                  <strong className="font-semibold text-[var(--text-primary)] mr-1.5">{item.user}</strong>
                   <span>{item.text}</span>
                 </p>
-                <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mt-0.5 block">
-                  {item.time}
-                </span>
               </div>
+              <span className="text-[11px] font-semibold text-[var(--text-muted)] tabular-nums shrink-0">
+                {item.time}
+              </span>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </DashPanel>
   );
 };

@@ -48,7 +48,6 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Settings,
   Send,
   Sparkles,
   Paperclip,
@@ -57,36 +56,40 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { AppState } from '../../services/store';
-import { AttendanceRecord, AttendanceRegularization, Employee, LeaveRequest } from '../../types';
-import { AttendanceSettingsView } from './AttendanceSettingsView';
+import { AttendanceRecord, AttendanceRegularization, Employee, Holiday, LeaveRequest } from '../../types';
 import { HolidayCalendarView } from './attendance/HolidayCalendarView';
 import { AttendanceReportsModal } from './attendance/AttendanceReportsModal';
 import { AttendanceStatCards } from './attendance/AttendanceStatCards';
 import { AttendanceFilterToolbar } from './attendance/AttendanceFilterToolbar';
 import { AttendanceOverviewChart } from './attendance/AttendanceOverviewChart';
 import { AttendanceStatusPill } from './attendance/AttendanceStatusPill';
+import { MyAttendanceTodayPanel } from './attendance/MyAttendanceTodayPanel';
+import { MyAttendanceLogTable } from './attendance/MyAttendanceLogTable';
 import {
   ATT_BTN_PRIMARY,
   ATT_BTN_SECONDARY,
   ATT_CARD,
-  ATT_PAGE_META,
-  ATT_PAGE_TITLE,
-  ATT_SECTION_SUB,
   ATT_SECTION_TITLE,
-  ATT_SUBNAV_ACTIVE,
-  ATT_SUBNAV_BASE,
-  ATT_SUBNAV_IDLE,
   ATT_TABLE_HEAD,
   ATT_TABLE_SHELL,
 } from './attendance/attendanceUi';
 import { UserAvatar } from '../common/UserAvatar';
 import { PunchLocationLeafletMap } from '../common/PunchLocationLeafletMap';
-import { api } from '../../services/apiClient';
+import { reverseGeocodeLatLng } from '@/lib/googleMaps';
+import { api, type ApiResponse } from '../../services/apiClient';
+import { persistClockOutTaskSessions } from '../../utils/taskBoard';
+import {
+  applyPunchToDailyRecord,
+  attendanceElapsedSeconds,
+  hasOpenAttendanceSession,
+  sessionsFromRecord,
+  toLocalDateKey,
+} from '@/utils/attendancePunches';
 import { isInstitutionMode } from '@/utils/organizationMode';
-import { getCurrentPosition, getSelfieStream, captureSelfiePhoto, isNativePlatform } from '@/lib/native';
 
 import {
   isExecutiveOrAdmin,
+  isHRPersona,
   isManagerPersona,
   getTeamEmployees,
   getTeamLeaves,
@@ -116,6 +119,17 @@ interface KekaAttendanceModuleProps {
 
 type TeamStatusType = 'on_time' | 'late' | 'logged_out' | 'not_in_yet' | 'time_off';
 type TeamGeoLabel = 'within' | 'outside' | 'remote' | 'none' | 'no_punch';
+
+function mapHolidayRows(rows: any[]): Holiday[] {
+  return rows.map((h) => ({
+    id: h.id,
+    name: h.name,
+    date: String(h.date || '').slice(0, 10),
+    year: Number(h.year) || Number(String(h.date || '').slice(0, 4)),
+    dayOfWeek: h.dayOfWeek || h.day_of_week || '',
+    isApproved: h.isApproved !== false && h.is_approved !== false,
+  }));
+}
 
 /** Match daily attendance to a team member by stable IDs only (never by name). */
 function findAttendanceForEmployee(
@@ -165,6 +179,76 @@ function hasValidOfficeCoordinates(officeLocation?: {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
 }
 
+function renderMyAttendancePunchAction({
+  hasConfiguredOffice,
+  selectedLocation,
+  isSuperAdmin,
+  isHR,
+  isStudentMode,
+  isAttendanceConfigured,
+  isCheckedOut,
+  isCheckedIn,
+  onSetup,
+  onPunch,
+}: {
+  hasConfiguredOffice: boolean;
+  selectedLocation: string;
+  isSuperAdmin: boolean;
+  isHR: boolean;
+  isStudentMode: boolean;
+  isAttendanceConfigured: boolean;
+  isCheckedOut: boolean;
+  isCheckedIn: boolean;
+  onSetup: () => void;
+  onPunch: () => void;
+}) {
+  if (!hasConfiguredOffice && selectedLocation !== 'wfh') {
+    if (isSuperAdmin || isHR) {
+      return (
+        <button type="button" onClick={onSetup} className="work-btn-secondary">
+          {isStudentMode ? 'Setup campus' : 'Setup office'}
+        </button>
+      );
+    }
+    return (
+      <div
+        title="Attendance is disabled until your administrator sets up an office / campus location."
+        className="att-status"
+      >
+        {isStudentMode ? 'Campus setup pending' : 'Office setup pending'}
+      </div>
+    );
+  }
+
+  if (!isAttendanceConfigured) {
+    if (isSuperAdmin || isHR) {
+      return (
+        <button type="button" onClick={onSetup} className="work-btn-secondary">
+          Setup rules
+        </button>
+      );
+    }
+    return (
+      <div
+        title="Attendance tracking is awaiting configuration by your HR administrator."
+        className="att-status"
+      >
+        Setup pending
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onPunch}
+      className="work-btn-primary"
+    >
+      {isCheckedIn ? 'Clock out' : isCheckedOut ? 'Punch in again' : 'Punch in'}
+    </button>
+  );
+}
+
 function TeamStatusBadge({
   statusType,
   isStudentMode,
@@ -209,44 +293,32 @@ function TeamStatusBadge({
 
 function TeamGeoBadge({ geoLabel }: { geoLabel: TeamGeoLabel }) {
   if (geoLabel === 'no_punch') {
-    return <span className="text-xs text-slate-400">-</span>;
+    return <span className="text-xs text-[var(--text-muted)]">-</span>;
   }
   if (geoLabel === 'within') {
     return (
-      <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80"
-        title="Within office geofence"
-      >
-        <MapPin className="h-3 w-3" /> Within
+      <span className="work-chip work-chip-sage" title="Within office geofence">
+        Within
       </span>
     );
   }
   if (geoLabel === 'outside') {
     return (
-      <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200/80"
-        title="Outside office geofence"
-      >
-        <MapPin className="h-3 w-3" /> Outside
+      <span className="work-chip work-chip-error" title="Outside office geofence">
+        Outside
       </span>
     );
   }
   if (geoLabel === 'remote') {
     return (
-      <span
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200/80"
-        title="Remote / WFH punch"
-      >
-        <Globe className="h-3 w-3" /> Remote
+      <span className="work-chip work-chip-navy" title="Remote / WFH punch">
+        Remote
       </span>
     );
   }
   return (
-    <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-50 text-slate-600 border border-slate-200/80"
-      title="No GPS coordinates on punch"
-    >
-      <MapPin className="h-3 w-3" /> No GPS
+    <span className="work-chip work-chip-muted" title="No GPS coordinates on punch">
+      No GPS
     </span>
   );
 }
@@ -321,10 +393,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   const isStudentMode = mode === 'student';
 
   const isSuperAdmin = state.currentPersona.role === 'super_admin' || state.currentPersona.role === 'admin';
-  const isHR = state.currentPersona.role === 'hr_manager';
+  const isHR = isHRPersona(state.currentPersona);
   const isManager = isManagerPersona(state.currentPersona, state.employees);
   const isInstitution = isInstitutionMode(state.organization, state.currentPersona) || isStudentMode;
   const isUserView = !isSuperAdmin && !isHR && !isManager && !isStudentMode;
+  const canAccessReports = isExecutiveOrAdmin(state.currentPersona);
 
   const handleEmployeeClick = (empIdOrEmp: string | Employee | { id: string; name: string }) => {
     let emp: Employee | undefined;
@@ -339,7 +412,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     }
 
     if (emp) {
-      const todayIso = teamAttendanceDate || new Date().toISOString().split('T')[0];
+      const todayIso = teamAttendanceDate || toLocalDateKey();
       const att = state.attendance.find((a) => a.employeeId === emp?.id && a.date === todayIso);
       const targetAtt: AttendanceRecord = att || {
         id: `att_${Date.now()}_${emp.id}`,
@@ -446,6 +519,74 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     }
   }, [initialSubTab]);
 
+  // The holidays endpoint replaces the whole list, so saves are sent one at a time
+  // and rapid edits collapse into a single request carrying the newest list.
+  const holidaySaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const latestHolidayPayloadRef = useRef<Holiday[] | null>(null);
+  const lastHolidaySendRef = useRef<Promise<void>>(Promise.resolve());
+  const holidaySavesInFlightRef = useRef(0);
+
+  const applyHolidaysToState = useCallback(
+    (holidays: Holiday[]) => {
+      onUpdateState((prev) => ({
+        ...prev,
+        customOptions: { ...prev.customOptions, holidays },
+      }));
+    },
+    [onUpdateState]
+  );
+
+  const reloadHolidaysFromServer = useCallback(async () => {
+    const res = await api.attendance.getHolidays();
+    if (!Array.isArray(res.data)) return;
+    if (holidaySavesInFlightRef.current > 0 || latestHolidayPayloadRef.current) return;
+    applyHolidaysToState(mapHolidayRows(res.data));
+  }, [applyHolidaysToState]);
+
+  const persistHolidays = useCallback(
+    (holidays: Holiday[]): Promise<void> => {
+      latestHolidayPayloadRef.current = holidays;
+      const run = holidaySaveChainRef.current
+        .catch(() => undefined)
+        .then(() => {
+          const payload = latestHolidayPayloadRef.current;
+          if (!payload) return lastHolidaySendRef.current;
+          latestHolidayPayloadRef.current = null;
+          holidaySavesInFlightRef.current += 1;
+          const send = api.attendance
+            .saveHolidays({
+              holidays: payload.map((h) => ({
+                id: h.id,
+                name: h.name,
+                date: h.date,
+                year: Number(h.year) || Number(h.date.slice(0, 4)),
+                dayOfWeek: h.dayOfWeek || '',
+                isApproved: h.isApproved !== false,
+              })),
+            })
+            .then(() => undefined)
+            .finally(() => {
+              holidaySavesInFlightRef.current -= 1;
+            });
+          lastHolidaySendRef.current = send;
+          return send;
+        });
+      holidaySaveChainRef.current = run;
+      return run.catch((err) => {
+        void reloadHolidaysFromServer().catch(() => undefined);
+        throw err;
+      });
+    },
+    [reloadHolidaysFromServer]
+  );
+
+  useEffect(() => {
+    if (subTab !== 'holidays' || isStudentMode) return;
+    void reloadHolidaysFromServer().catch((err) => {
+      console.debug('[Holidays] Refresh skipped:', err?.message || err);
+    });
+  }, [subTab, isStudentMode, reloadHolidaysFromServer]);
+
   useEffect(() => {
     if (initialOpenApplyModal) {
       setShowApplyLeaveModal(true);
@@ -465,13 +606,6 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       setSubTab('team_attendance');
     }
   }, [isStudentMode, state.currentPersona.role, subTab]);
-
-  // Security guard: Non-Admin/HR personas (including Managers) cannot access settings
-  useEffect(() => {
-    if (!isSuperAdmin && !isHR && subTab === 'settings') {
-      setSubTab(isStudentMode ? 'team_attendance' : 'my_attendance');
-    }
-  }, [isSuperAdmin, isHR, subTab, isStudentMode]);
 
   // Reports Modal State
   const [showReportsModal, setShowReportsModal] = useState<boolean>(false);
@@ -876,7 +1010,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   };
 
   const handleApproveAllPending = async () => {
-    const pendingLeaves = state.leaves.filter((l) => l.status === 'Pending');
+    const pendingLeaves = state.leaves.filter(
+      (l) => l.status === 'Pending' && canApproveLeave(state.currentPersona, l, state.employees)
+    );
     if (pendingLeaves.length === 0) return;
     
     setIsSaving(true);
@@ -890,7 +1026,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       onUpdateState((prev) => ({
         ...prev,
         leaves: prev.leaves.map((l) => {
-          if (l.status !== 'Pending') return l;
+          if (!pendingLeaves.some((item) => item.id === l.id)) return l;
           const emp = prev.employees.find((e) => e.id === l.employeeId || (e.name && e.name.toLowerCase() === l.employeeName.toLowerCase()));
           const inProbation = isEmployeeInProbation(emp, prev.customOptions?.probationSettings);
           const isPaid = isPaidLeaveType(l.leaveType, l.isPaid);
@@ -1075,7 +1211,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       setIsSaving(false);
     }
   };
-  const [teamAttendanceDate, setTeamAttendanceDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [teamAttendanceDate, setTeamAttendanceDate] = useState(() => toLocalDateKey());
   const [teamTabFilter, setTeamTabFilter] = useState<'All' | 'Checked In' | 'Late' | 'Not Checked In' | 'Hourly'>('All');
   const [teamStatusFilter, setTeamStatusFilter] = useState<'all' | 'on_time' | 'late' | 'not_in_yet' | 'time_off'>('all');
   const [teamBatchFilter, setTeamBatchFilter] = useState<string>('All');
@@ -1111,7 +1247,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     let timeOff = 0;
     let notInYet = 0;
 
-    const todayIso = new Date().toISOString().split('T')[0];
+    const todayIso = toLocalDateKey();
 
     const enrichedRecords = teamMembers.map((emp) => {
       const att = findAttendanceForEmployee(
@@ -1474,7 +1610,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   const handleApproveRegularization = async (regId: string, approved: boolean) => {
     const reg = state.regularizations.find((r) => r.id === regId);
     if (!reg) return;
-    
+    if (!canApproveRegularization(state.currentPersona, reg, state.employees)) {
+      alert('You can only decide regularizations for your team.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       await api.attendance.updateRegularizationStatus(regId, {
@@ -1489,31 +1629,28 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             ? { ...r, status: approved ? 'Approved' : 'Rejected', approvedBy: state.currentPersona.name }
             : r
         ),
-      }));
-
-      // Update actual attendance record if approved
-      if (approved && reg) {
-        onUpdateState((prev) => ({
-          ...prev,
-          attendance: prev.attendance.map((a) => {
-            if (
-              (a.employeeId === reg.employeeId || a.employeeName === reg.employeeName) &&
-              a.date === reg.date
-            ) {
-              const u = { ...a };
-              if (reg.requestedCheckIn) u.checkIn = reg.requestedCheckIn;
-              if (reg.requestedCheckOut) u.checkOut = reg.requestedCheckOut;
-              u.status = 'Present';
-              u.workingHours = calculateWorkedHours(u.checkIn, u.checkOut || undefined);
-              return u;
+        ...(approved
+          ? {
+              attendance: prev.attendance.map((a) => {
+                if (
+                  (a.employeeId === reg.employeeId || a.employeeName === reg.employeeName) &&
+                  a.date === reg.date
+                ) {
+                  const u = { ...a };
+                  if (reg.requestedCheckIn) u.checkIn = reg.requestedCheckIn;
+                  if (reg.requestedCheckOut) u.checkOut = reg.requestedCheckOut;
+                  u.status = 'Present';
+                  u.workingHours = calculateWorkedHours(u.checkIn, u.checkOut || undefined);
+                  return u;
+                }
+                return a;
+              }),
             }
-            return a;
-          }),
-        }));
-      }
-    } catch (err) {
+          : {}),
+      }));
+    } catch (err: any) {
       console.error('Failed to update regularization status', err);
-      alert('Failed to update regularization status');
+      alert(err?.message || 'Failed to update regularization status');
     } finally {
       setIsSaving(false);
     }
@@ -1525,12 +1662,20 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   useEffect(() => {
     setIsMounted(true);
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
+    const tick = () => setNow(new Date());
+    const timer = setInterval(tick, 1000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, []);
 
-  // Today's Record for Current Persona (matched to active date)
-  const todayIsoStr = new Date().toISOString().split('T')[0];
+  // Today's Record for Current Persona (matched to local calendar date)
+  const todayIsoStr = toLocalDateKey(now);
   const myTodayRecord = state.attendance.find(
     (a) =>
       (a.employeeId === state.currentPersona.id ||
@@ -1538,8 +1683,10 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           a.employeeName.toLowerCase() === state.currentPersona.name?.toLowerCase())) &&
       a.date === todayIsoStr
   );
-  const isCheckedIn = !!myTodayRecord && !!myTodayRecord.checkIn;
-  const isCheckedOut = isCheckedIn && !!myTodayRecord?.checkOut;
+  const hasPunchedToday = !!myTodayRecord && !!myTodayRecord.checkIn;
+  const isCheckedIn = hasOpenAttendanceSession(myTodayRecord);
+  const isCheckedOut = hasPunchedToday && !isCheckedIn;
+  const todaySessionCount = sessionsFromRecord(myTodayRecord).length;
   const hasConfiguredOffice = useMemo(() => {
     const records = Array.isArray(state.customOptions?.officeRecords)
       ? state.customOptions.officeRecords
@@ -1777,7 +1924,6 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     if (attSettings?.geofenceEnabled === false || attPolicies?.geofenceEnabled === false) return true;
     if (attSettings?.requireGPS === false || attPolicies?.requireGPS === false) return true;
     if (attSettings?.geofencePolicy === 'Optional' || attSettings?.geofencePolicy === 'Disabled') return true;
-    if (attSettings?.outOfRadiusAction === 'Allow') return true;
 
     // Per-selected-office policy (not "any Inactive disables all")
     if (selectedOfficeRecord) {
@@ -1831,7 +1977,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   // Break & Shift States
   const [isOnBreak, setIsOnBreak] = useState(false);
   const [breakType, setBreakType] = useState<'Lunch' | 'Tea' | 'General'>('Lunch');
-  const [breakSeconds, setBreakSeconds] = useState(1800); // 30m
+  const [breakElapsedSnapshot, setBreakElapsedSnapshot] = useState<number | null>(null);
 
   // GPS & Geofencing States
   const [isPingingGps, setIsPingingGps] = useState(false);
@@ -1843,9 +1989,25 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   const [showClockOutModal, setShowClockOutModal] = useState(false);
   const [clockOutNotes, setClockOutNotes] = useState('');
 
+  const attPolicy = (state.customOptions?.attendanceSettings || {}) as any;
+  const requireSelfieNow = isCheckedIn
+    ? attPolicy.requireSelfieCheckOut === true
+    : attPolicy.requireSelfieCheckIn === true;
+  const allowQrAttendance =
+    attPolicy.allowQrCodeAttendance === true &&
+    (selectedOfficeRecord as { qrCodeEnabled?: boolean } | null)?.qrCodeEnabled !== false;
+  const outOfRadiusAction: 'Block' | 'Allow' | 'Warn' =
+    attPolicy.outOfRadiusAction === 'Allow' || attPolicy.outOfRadiusAction === 'Warn'
+      ? attPolicy.outOfRadiusAction
+      : 'Block';
+
   // Confirm Punch Location Modal State (map → camera, or geofence warning)
   const [showPunchLocationModal, setShowPunchLocationModal] = useState(false);
-  const [punchStep, setPunchStep] = useState<'map' | 'confirm_out_radius'>('map');
+  const [punchStep, setPunchStep] = useState<'map' | 'confirm_out_radius' | 'qr'>('map');
+  const [punchMode, setPunchMode] = useState<'gps' | 'qr'>('gps');
+  const [qrTokenInput, setQrTokenInput] = useState('');
+  const [officeQr, setOfficeQr] = useState<{ token: string; expiresAt: string; officeName?: string } | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
   const [punchAddress, setPunchAddress] = useState('Acquiring device GPS location...');
   const [currentLat, setCurrentLat] = useState(activeOfficeLat);
   const [currentLng, setCurrentLng] = useState(activeOfficeLng);
@@ -2081,21 +2243,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     return parseTimeToTodayDate(myTodayRecord?.checkOut, now);
   }, [myTodayRecord?.checkOut, now, parseTimeToTodayDate]);
 
-  // Dynamically calculate elapsed working seconds: (now - clockInTime)
+  // Sum of completed sessions plus the open session (paused snapshot while on break)
   const currentElapsedSeconds = useMemo(() => {
-    if (!isCheckedIn) return 0;
-    if (isCheckedOut) {
-      if (checkInDate && checkOutDate) {
-        return Math.max(0, Math.floor((checkOutDate.getTime() - checkInDate.getTime()) / 1000));
-      }
-      return Math.round((myTodayRecord?.workingHours || 8) * 3600);
+    if (!hasPunchedToday) return 0;
+    if (isOnBreak && breakElapsedSnapshot != null) {
+      return breakElapsedSnapshot;
     }
-    if (checkInDate) {
-      const diff = Math.max(0, Math.floor((now.getTime() - checkInDate.getTime()) / 1000));
-      return Math.max(0, diff - (isOnBreak ? breakSeconds : 0));
-    }
-    return 0;
-  }, [isCheckedIn, isCheckedOut, checkInDate, checkOutDate, now, isOnBreak, breakSeconds, myTodayRecord?.workingHours]);
+    return attendanceElapsedSeconds(myTodayRecord, now);
+  }, [hasPunchedToday, isOnBreak, breakElapsedSnapshot, myTodayRecord, now]);
 
 
 
@@ -2106,57 +2261,81 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     status?: AttendanceRecord['status'];
     checkInTime?: string;
     checkOutTime?: string;
-  }) => {
-    const today = new Date().toISOString().split('T')[0];
+    selfiePhoto?: string | null;
+    qrToken?: string;
+    workFromHome?: boolean;
+  }): Promise<ApiResponse> => {
+    const today = toLocalDateKey();
     const useStudentApi = isStudentMode || state.currentPersona.role === 'student';
-    if (useStudentApi) {
-      const existing = state.attendance.find(
-        (a) => a.employeeId === state.currentPersona.id && a.date === today
-      );
-      const rawStatus = opts.status || (opts.punchType === 'check_in' ? 'Present' : existing?.status || 'Present');
-      const status =
-        rawStatus === 'Work From Home' || rawStatus === 'On Leave' ? 'Present' : rawStatus;
-      return api.institute.recordStudentAttendance({
-        studentId: state.currentPersona.id,
-        attendanceDate: today,
-        status: status as 'Present' | 'Absent' | 'Late' | 'Half Day' | 'Excused',
-        checkInTime:
-          opts.punchType === 'check_in'
-            ? opts.checkInTime
-            : opts.checkInTime || existing?.checkIn || undefined,
-        checkOutTime:
-          opts.punchType === 'check_out'
-            ? opts.checkOutTime
-            : opts.checkOutTime || existing?.checkOut || undefined,
-        remarks: opts.deviceInfo,
+    const lat = Number.isFinite(currentLat) ? currentLat : undefined;
+    const lng = Number.isFinite(currentLng) ? currentLng : undefined;
+    try {
+      if (useStudentApi) {
+        const existing = state.attendance.find(
+          (a) => a.employeeId === state.currentPersona.id && a.date === today
+        );
+        const rawStatus = opts.status || (opts.punchType === 'check_in' ? 'Present' : existing?.status || 'Present');
+        const status =
+          rawStatus === 'Work From Home' || rawStatus === 'On Leave' ? 'Present' : rawStatus;
+        return await api.institute.recordStudentAttendance({
+          studentId: state.currentPersona.id,
+          attendanceDate: today,
+          status: status as 'Present' | 'Absent' | 'Late' | 'Half Day' | 'Excused',
+          checkInTime:
+            opts.punchType === 'check_in'
+              ? opts.checkInTime
+              : opts.checkInTime || existing?.checkIn || undefined,
+          checkOutTime:
+            opts.punchType === 'check_out'
+              ? opts.checkOutTime
+              : opts.checkOutTime || existing?.checkOut || undefined,
+          remarks: opts.deviceInfo,
+          latitude: lat,
+          longitude: lng,
+          selfiePhoto: opts.selfiePhoto || undefined,
+        });
+      }
+      return await api.attendance.recordPunch({
+        employeeId: state.currentPersona.id,
+        punchType: opts.punchType,
+        officeId: selectedLocation !== 'wfh' ? selectedOfficeIdForPunch : undefined,
+        latitude: lat,
+        longitude: lng,
+        deviceInfo: opts.deviceInfo,
+        selfiePhoto: opts.selfiePhoto || undefined,
+        qrToken: opts.qrToken || undefined,
+        workFromHome: selectedLocation === 'wfh' || opts.workFromHome,
       });
+    } catch (err: any) {
+      return {
+        success: false,
+        error: {
+          code: err?.code || 'PUNCH_FAILED',
+          message: err?.message || 'Failed to record attendance',
+        },
+      };
     }
-    return api.attendance.recordPunch({
-      employeeId: state.currentPersona.id,
-      punchType: opts.punchType,
-      officeId: selectedLocation !== 'wfh' ? selectedOfficeIdForPunch : undefined,
-      latitude: currentLat,
-      longitude: currentLng,
-      deviceInfo: opts.deviceInfo,
-    });
   };
 
-  const handleToggleBreak = async (type: 'Lunch' | 'Tea') => {
+  const handleToggleBreak = async (type: 'Lunch' | 'Tea' | 'General' = 'General') => {
     setIsSaving(true);
     try {
       await api.attendance.toggleBreak({ employeeId: state.currentPersona.id, isOnBreak: !isOnBreak });
       if (isOnBreak) {
         setIsOnBreak(false);
-        setPingToast(`Resumed from ${breakType} Break`);
+        setBreakElapsedSnapshot(null);
+        setPingToast('Resumed work');
       } else {
         setIsOnBreak(true);
         setBreakType(type);
-        setPingToast(`Started ${type} Break`);
+        setBreakElapsedSnapshot(currentElapsedSeconds);
+        setPingToast('Break started');
       }
       setTimeout(() => setPingToast(null), 3000);
     } catch (err) {
       console.error('Failed to toggle break', err);
-      alert('Failed to toggle break');
+      setPingToast('Could not update break. Try again.');
+      setTimeout(() => setPingToast(null), 3000);
     } finally {
       setIsSaving(false);
     }
@@ -2196,25 +2375,26 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       hour12: true,
     });
 
-    const todayIsoDate = new Date().toISOString().split('T')[0];
-    const newRecord: AttendanceRecord = {
-      id: punchRes.data?.id || `att_${Date.now()}`,
+    const todayIsoDate = toLocalDateKey();
+    const existingToday = state.attendance.find(
+      (a) => a.employeeId === state.currentPersona.id && a.date === todayIsoDate
+    );
+    const newRecord = applyPunchToDailyRecord(existingToday, {
+      type: 'check_in',
+      time: timeStr,
+      date: todayIsoDate,
       employeeId: state.currentPersona.id,
       employeeName: state.currentPersona.name,
       avatar: state.currentPersona.avatar,
-      date: todayIsoDate,
-      checkIn: timeStr,
-      checkOut: undefined,
-      status: 'Present',
       locationName: activeOfficeDisplayName,
       latitude: currentLat,
       longitude: currentLng,
       isWithinGeofence: selectedLocation !== 'wfh',
       ipAddress: '106.51.72.18',
       device: 'Web GPS Verified',
-      workingHours: 0,
-      breakHours: 0,
-    };
+      status: 'Present',
+      id: punchRes.data?.id,
+    });
 
     onUpdateState((prev) => ({
       ...prev,
@@ -2302,15 +2482,29 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     const workedHoursVal = Math.max(0.01, Number((currentElapsedSeconds / 3600).toFixed(2)));
 
     const nowTime = Date.now();
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = toLocalDateKey();
+
+    try {
+      await persistClockOutTaskSessions(
+        state.tasks,
+        state.timesheets,
+        state.currentPersona.id,
+        state.currentPersona.name,
+        nowTime
+      );
+    } catch (err) {
+      console.error('Failed to close task timesheets on clock-out', err);
+    }
 
     onUpdateState((prev) => {
       let updatedTimesheets = [...prev.timesheets];
 
         const updatedTasks = prev.tasks.map((t) => {
           const isMyTask =
-            t.assigneeId === prev.currentPersona.id ||
-            (t.assigneeName && t.assigneeName.toLowerCase() === prev.currentPersona.name.toLowerCase());
+            [...(t.assigneeIds || []), t.assigneeId].includes(prev.currentPersona.id) ||
+            [...(t.assigneeNames || []), t.assigneeName].some(
+              (name) => name && name.toLowerCase() === prev.currentPersona.name.toLowerCase()
+            );
 
           if (isMyTask && t.status === 'In Progress' && t.isTimerRunning && t.timerStartedAt) {
             let timeSpentSeconds = t.timeSpentSeconds || (t.actualHours ? Math.round(t.actualHours * 3600) : 0);
@@ -2346,21 +2540,33 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           return t;
         });
 
+      const prior = prev.attendance.find(
+        (a) =>
+          (a.employeeId === prev.currentPersona.id || a.employeeName === prev.currentPersona.name) &&
+          a.date === todayStr
+      );
+      const closed = applyPunchToDailyRecord(prior, {
+        type: 'check_out',
+        time: timeStr,
+        date: todayStr,
+        employeeId: prev.currentPersona.id,
+        employeeName: prev.currentPersona.name,
+        avatar: prev.currentPersona.avatar,
+        locationName: prior?.locationName,
+      });
+
       return {
         ...prev,
-        attendance: prev.attendance.map((a) => {
-          if (
-            (a.employeeId === prev.currentPersona.id || a.employeeName === prev.currentPersona.name) &&
-            a.date === todayStr
-          ) {
-            return {
-              ...a,
-              checkOut: timeStr,
-              workingHours: workedHoursVal,
-            };
-          }
-          return a;
-        }),
+        attendance: [
+          closed,
+          ...prev.attendance.filter(
+            (a) =>
+              !(
+                (a.employeeId === prev.currentPersona.id || a.employeeName === prev.currentPersona.name) &&
+                a.date === todayStr
+              )
+          ),
+        ],
         tasks: updatedTasks,
         timesheets: updatedTimesheets,
         auditLogs: [
@@ -2427,23 +2633,38 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         second: '2-digit',
         hour12: true,
       });
-      const todayStr = new Date().toISOString().split('T')[0];
-      onUpdateState((prev) => ({
-        ...prev,
-        attendance: prev.attendance.map((a) => {
-          if ((a.employeeId === state.currentPersona.id || a.employeeName === state.currentPersona.name) && a.date === todayStr) {
-            return {
-              ...a,
-              checkIn: timeStr,
-              checkOut: undefined,
-              workingHours: 0,
-              latitude: currentLat,
-              longitude: currentLng,
-            };
-          }
-          return a;
-        }),
-      }));
+      const todayStr = toLocalDateKey();
+      onUpdateState((prev) => {
+        const prior = prev.attendance.find(
+          (a) =>
+            (a.employeeId === state.currentPersona.id || a.employeeName === state.currentPersona.name) &&
+            a.date === todayStr
+        );
+        const resumed = applyPunchToDailyRecord(prior, {
+          type: 'check_in',
+          time: timeStr,
+          date: todayStr,
+          employeeId: state.currentPersona.id,
+          employeeName: state.currentPersona.name,
+          avatar: state.currentPersona.avatar,
+          locationName: activeOfficeDisplayName,
+          latitude: currentLat,
+          longitude: currentLng,
+        });
+        return {
+          ...prev,
+          attendance: [
+            resumed,
+            ...prev.attendance.filter(
+              (a) =>
+                !(
+                  (a.employeeId === state.currentPersona.id || a.employeeName === state.currentPersona.name) &&
+                  a.date === todayStr
+                )
+            ),
+          ],
+        };
+      });
       setPingToast(`Clocked in at ${timeStr}`);
       setTimeout(() => setPingToast(null), 3000);
     } catch (err) {
@@ -2460,22 +2681,30 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     
     setIsSaving(true);
     try {
-      const newReg: AttendanceRegularization = {
-        id: `reg_${Date.now()}`,
+      const remarks = regRemarks || 'Regularization request for shift adjustments';
+      const created = await api.attendance.requestRegularization({
         employeeId: state.currentPersona.id,
+        date: regDate,
+        requestedCheckIn: to24HourTime(regInTime) || regInTime,
+        requestedCheckOut: to24HourTime(regOutTime) || regOutTime,
+        reason: regReason,
+        remarks,
+      });
+
+      const newReg: AttendanceRegularization = {
+        id: created.data?.id || `reg_${Date.now()}`,
+        employeeId: created.data?.employee_id || state.currentPersona.id,
         employeeName: state.currentPersona.name,
         avatar: state.currentPersona.avatar,
         department: state.currentPersona.department,
-        date: regDate,
+        date: String(created.data?.date || regDate).slice(0, 10),
         requestedCheckIn: regInTime,
         requestedCheckOut: regOutTime,
         reason: regReason,
-        remarks: regRemarks || 'Regularization request for shift adjustments',
+        remarks,
         status: 'Pending',
         appliedOn: toLocalISODate(),
       };
-
-      await api.attendance.requestRegularization(newReg);
 
       onUpdateState((prev) => ({
         ...prev,
@@ -2500,9 +2729,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       }));
       setShowRegModal(false);
       setRegRemarks('');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to submit regularization request', err);
-      alert('Failed to submit regularization request');
+      alert(err?.message || 'Failed to submit regularization request');
     } finally {
       setIsSaving(false);
     }
@@ -2521,8 +2750,6 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     return 9;
   }, [configuredShiftStart, configuredShiftEnd, now, parseTimeToTodayDate]);
 
-  const targetHoursFormatted = `${String(Math.floor(shiftTargetHours)).padStart(2, '0')}h ${String(Math.round((shiftTargetHours % 1) * 60)).padStart(2, '0')}m`;
-
   const weeklyTargetHours = useMemo(() => {
     let days = workDaysInWeek;
     if (
@@ -2538,7 +2765,6 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   // Generate Dynamic Attendance Log Rows strictly from actual recorded attendance
   const attendanceHistory = useMemo(() => {
-    const locName = activeOfficeDisplayName;
     const targetSeconds = shiftTargetHours * 3600;
 
     const userAttendanceLogs = state.attendance.filter(
@@ -2549,24 +2775,10 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
     const historyRows = userAttendanceLogs.map((log) => {
       const isTodayRecord = log.date === todayIsoStr;
-      const isOngoing = isTodayRecord && isCheckedIn && !log.checkOut;
-
-      let loggedSecs = 0;
-      if (isOngoing) {
-        loggedSecs = currentElapsedSeconds;
-      } else if (log.checkIn && log.checkOut) {
-        const inDate = parseTimeToTodayDate(log.checkIn, now);
-        const outDate = parseTimeToTodayDate(log.checkOut, now);
-        if (inDate && outDate) {
-          let diffMs = outDate.getTime() - inDate.getTime();
-          if (diffMs < 0) diffMs += 24 * 3600 * 1000;
-          loggedSecs = Math.max(0, Math.floor(diffMs / 1000));
-        } else if (log.workingHours !== undefined && log.workingHours !== null) {
-          loggedSecs = Math.round(log.workingHours * 3600);
-        }
-      } else if (log.workingHours !== undefined && log.workingHours !== null && log.workingHours > 0) {
-        loggedSecs = Math.round(log.workingHours * 3600);
-      }
+      const sessions = sessionsFromRecord(log);
+      const isOngoing = isTodayRecord && hasOpenAttendanceSession(log);
+      const loggedSecs = isTodayRecord ? currentElapsedSeconds : attendanceElapsedSeconds(log, now);
+      const lastSession = sessions[sessions.length - 1];
 
       const hoursNum = Math.floor(loggedSecs / 3600);
       const minsNum = Math.floor((loggedSecs % 3600) / 60);
@@ -2583,16 +2795,28 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         deficitDisplay = defHours > 0 ? `-${defHours}h ${String(defRemainMins).padStart(2, '0')}m` : `-${defRemainMins}m`;
       }
 
+      const clean = (value?: string) => (value ? value.replace(/\s*\(GMT[^\)]*\)/gi, '').trim() : '');
+
       return {
         date: log.date,
-        in: log.checkIn ? log.checkIn.replace(/\s*\(GMT[^\)]*\)/gi, '').trim() : '—',
+        in: clean(log.checkIn) || '—',
         inLoc: log.locationName || activeOfficeDisplayName,
-        out: log.checkOut ? log.checkOut.replace(/\s*\(GMT[^\)]*\)/gi, '').trim() : (log.checkIn ? 'In Progress' : '—'),
-        outLoc: log.locationName || activeOfficeDisplayName,
+        out: lastSession?.checkOut
+          ? clean(lastSession.checkOut)
+          : log.checkIn
+            ? 'In Progress'
+            : '—',
+        outLoc: lastSession?.locationName || log.locationName || activeOfficeDisplayName,
         sched: `${Math.floor(shiftTargetHours)}h`,
         logged: formattedLogged,
         deficit: deficitDisplay,
         status: log.status || (isOngoing ? 'Present (Active)' : 'Present'),
+        sessions: sessions.map((s, idx) => ({
+          label: `Login ${idx + 1}`,
+          in: clean(s.checkIn) || '—',
+          out: s.checkOut ? clean(s.checkOut) : 'In Progress',
+          loc: s.locationName || log.locationName || activeOfficeDisplayName,
+        })),
       };
     });
 
@@ -2600,15 +2824,28 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   }, [state.attendance, state.currentPersona, todayIsoStr, isCheckedIn, isCheckedOut, myTodayRecord, activeOfficeDisplayName, currentElapsedSeconds, shiftTargetHours, parseTimeToTodayDate, now]);
 
   const filteredHistory = useMemo(() => {
+    const currentMonth = todayIsoStr.slice(0, 7);
+    const lastMonthDate = new Date(`${todayIsoStr}T00:00:00`);
+    lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
+    const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
     return attendanceHistory.filter((item) => {
-      if (recordFilter !== 'All' && item.status !== recordFilter) return false;
+      if (dateRangeFilter === 'Current Month' && !item.date.startsWith(currentMonth)) return false;
+      if (dateRangeFilter === 'Last Month' && !item.date.startsWith(lastMonth)) return false;
+      if (recordFilter !== 'All' && !item.status.toLowerCase().includes(recordFilter.toLowerCase())) return false;
       if (locationFilter !== 'All' && !item.inLoc.toLowerCase().includes(locationFilter.toLowerCase())) return false;
+      if (statusFilter === 'Regularized' && !item.status.toLowerCase().includes('regular')) return false;
+      if (statusFilter === 'Verified' && item.status.toLowerCase().includes('regular')) return false;
       return true;
     });
-  }, [attendanceHistory, recordFilter, locationFilter]);
+  }, [attendanceHistory, recordFilter, locationFilter, dateRangeFilter, statusFilter, todayIsoStr]);
 
   const totalPages = Math.ceil(filteredHistory.length / rowsPerPage) || 1;
   const paginatedHistory = filteredHistory.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateRangeFilter, recordFilter, locationFilter, statusFilter]);
 
   // Dynamic Calculations in sync with Attendance & Live Clock state
   const parseHoursMinutes = (str: string) => {
@@ -2626,7 +2863,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   const pastWeekLoggedHours = historyPastWeek.reduce((acc, curr) => acc + parseHoursMinutes(curr.logged), 0);
 
   // Today's live logged hours
-  const todayLiveHours = isCheckedIn ? (currentElapsedSeconds / 3600) : 0;
+  const todayLiveHours = hasPunchedToday ? currentElapsedSeconds / 3600 : 0;
 
   // Dynamic Totals live in sync
   const dynamicLoggedHours = (pastWeekLoggedHours + todayLiveHours).toFixed(1);
@@ -2683,26 +2920,21 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   // Real Geolocation Fetcher & Validator
   const fetchCurrentLocation = useCallback(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || !navigator.geolocation) {
       setGpsStatus('denied');
       setIsLocating(false);
-      setPunchAddress('Geolocation is not supported.');
+      setPunchAddress('Geolocation is not supported by your browser.');
       return;
     }
 
     setIsLocating(true);
     setGpsStatus('locating');
 
-    void (async () => {
-      try {
-        const position = await getCurrentPosition({
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0,
-        });
-        const userLat = position.latitude;
-        const userLng = position.longitude;
-        const accuracy = position.accuracy || 5;
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const userLat = position.coords.latitude;
+        const userLng = position.coords.longitude;
+        const accuracy = position.coords.accuracy || 5;
 
         setCurrentLat(userLat);
         setCurrentLng(userLng);
@@ -2711,6 +2943,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         setGpsStatus('granted');
         setIsLocating(false);
 
+        // Compute distance to the active physical office
         if (selectedLocation === 'wfh' || isGeofenceOptional) {
           setGeofenceDistanceMeters(0);
           setSimulatedDistance(0);
@@ -2727,37 +2960,71 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           setIsInsideRadius(inRadius);
         }
 
+        // Reverse-geocode device GPS to real street address
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${userLat}&lon=${userLng}`,
-            { headers: { 'Accept-Language': 'en' } }
-          );
-          if (res.ok) {
-            const data = await res.json();
-            setPunchAddress(data.display_name || `${userLat.toFixed(5)}, ${userLng.toFixed(5)}`);
-          } else {
-            setPunchAddress(`${userLat.toFixed(5)}, ${userLng.toFixed(5)}`);
-          }
+          const address = await reverseGeocodeLatLng(userLat, userLng);
+          setPunchAddress(address || `${userLat.toFixed(5)}, ${userLng.toFixed(5)}`);
         } catch {
           setPunchAddress(`${userLat.toFixed(5)}, ${userLng.toFixed(5)}`);
         }
-      } catch (error) {
+      },
+      (error) => {
         console.warn('Geolocation error:', error);
         setIsLocating(false);
         setGpsStatus(isGeofenceOptional ? 'granted' : 'denied');
-        setHasDeviceGpsLocation(isGeofenceOptional);
+        setHasDeviceGpsLocation(false);
         if (isGeofenceOptional) {
           setIsInsideRadius(true);
         }
-        const message = error instanceof Error ? error.message : '';
         setPunchAddress(
-          /denied|permission/i.test(message)
-            ? 'Location permission denied. Please enable GPS location.'
+          error.code === error.PERMISSION_DENIED
+            ? 'Browser location permission denied. Please enable GPS location.'
             : 'Unable to retrieve your current location.'
         );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
       }
-    })();
+    );
   }, [activeOfficeLat, activeOfficeLng, configuredGeofenceRadius, selectedLocation, hasConfiguredOfficeCoords, isGeofenceOptional]);
+
+  useEffect(() => {
+    if (!showPunchLocationModal || punchMode !== 'qr' || !allowQrAttendance) return;
+    if (!(isSuperAdmin || isHR || isManager || state.currentPersona.role === 'faculty')) return;
+    let cancelled = false;
+    const refresh = async () => {
+      const res = await api.attendance.getOfficeQrToken(selectedOfficeIdForPunch);
+      if (cancelled) return;
+      if (res.success && res.data) {
+        setOfficeQr({
+          token: res.data.token,
+          expiresAt: res.data.expiresAt,
+          officeName: res.data.officeName,
+        });
+        setQrError(null);
+      } else {
+        setQrError(res.error?.message || 'Could not load office QR');
+      }
+    };
+    void refresh();
+    const ms = Math.max(15, Number(attPolicy.qrRefreshIntervalSeconds) || 30) * 1000;
+    const id = window.setInterval(refresh, ms);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [
+    showPunchLocationModal,
+    punchMode,
+    allowQrAttendance,
+    isSuperAdmin,
+    isHR,
+    isManager,
+    selectedOfficeIdForPunch,
+    attPolicy.qrRefreshIntervalSeconds,
+  ]);
 
   // Handle GPS Refresh Ping with real device geolocation
   const handlePingGps = () => {
@@ -2782,13 +3049,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       setTimeout(() => setPingToast(null), 4000);
       return;
     }
-    if (isCheckedIn && isCheckedOut) {
-      setPingToast('You have already completed and checked out of your shift for today.');
-      setTimeout(() => setPingToast(null), 4000);
-      return;
-    }
     setShowPunchLocationModal(true);
     setPunchStep('map');
+    setPunchMode('gps');
+    setQrTokenInput('');
+    setQrError(null);
     setHasDeviceGpsLocation(false);
     setGpsStatus('locating');
     fetchCurrentLocation();
@@ -2823,8 +3088,17 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       setTimeout(() => setPingToast(null), 5000);
       return;
     }
+    const proceed = (asRemote: boolean) => {
+      if (requireSelfieNow) {
+        handleOpenSelfieCamera(asRemote);
+      } else {
+        void handleFinalConfirmPunch(asRemote, null);
+      }
+    };
     if (selectedLocation === 'wfh' || isInsideRadius || isGeofenceOptional) {
-      handleOpenSelfieCamera(selectedLocation === 'wfh');
+      proceed(selectedLocation === 'wfh');
+    } else if (outOfRadiusAction === 'Allow') {
+      proceed(true);
     } else {
       setPunchStep('confirm_out_radius');
     }
@@ -2849,7 +3123,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           streamRef.current = null;
         }
 
-        const { stream } = await getSelfieStream();
+        if (!navigator?.mediaDevices?.getUserMedia) {
+          throw new Error('Camera device API not supported by browser');
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false,
+        });
 
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
@@ -2886,25 +3167,10 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       } catch (err: any) {
         if (!cancelled) {
           console.error('Camera stream error:', err);
-          // On native shells, fall back to the Capacitor Camera plugin (no live preview).
-          if (isNativePlatform()) {
-            try {
-              const dataUrl = await captureSelfiePhoto();
-              if (!cancelled) {
-                setCapturedSelfie(dataUrl);
-                setCameraError(null);
-                setIsCameraLoading(false);
-                setIsCameraReady(false);
-              }
-              return;
-            } catch (nativeErr) {
-              console.error('Native camera capture error:', nativeErr);
-            }
-          }
           const isDenied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
           setCameraError(
             isDenied
-              ? 'Camera access is blocked. Please allow camera permissions and click Retry Camera.'
+              ? 'Camera access is blocked. Please allow camera permissions in your browser address bar and click Retry Camera.'
               : 'Camera device unavailable. Please ensure your camera is connected and click Retry Camera.'
           );
           setIsCameraLoading(false);
@@ -2960,23 +3226,6 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     setCameraAttempt((prev) => prev + 1);
   };
 
-  /** Native-only: open system camera when live WebView stream is unavailable. */
-  const handleNativeCameraCapture = async () => {
-    if (!isNativePlatform()) return;
-    setIsCameraLoading(true);
-    setCameraError(null);
-    try {
-      const dataUrl = await captureSelfiePhoto();
-      setCapturedSelfie(dataUrl);
-      setIsCameraReady(false);
-    } catch (err) {
-      console.error('Native camera capture error:', err);
-      setCameraError('Unable to open the device camera. Please allow camera permission and try again.');
-    } finally {
-      setIsCameraLoading(false);
-    }
-  };
-
   // Retake: clear captured photo and restart camera
   const handleRetake = () => {
     handleRetryCamera();
@@ -2984,6 +3233,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   // Final punch submission (called after selfie capture or skip)
   const handleFinalConfirmPunch = async (asRemote: boolean = false, selfieDataUrl?: string | null) => {
+    setShowPunchLocationModal(false);
     const timeStr = now.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
@@ -2994,11 +3244,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     setIsSaving(true);
     try {
       if (!isCheckedIn) {
-        // Calculate status based on configured shift start and grace period
+        // Late only on the first punch of the day
         const expectedStartDate = parseTimeToTodayDate(configuredShiftStart, now);
-        let calculatedStatus: AttendanceRecord['status'] = 'Present';
+        let calculatedStatus: AttendanceRecord['status'] = myTodayRecord?.status || 'Present';
         const gracePeriodMins = state.customOptions?.attendanceSettings?.gracePeriodMinutes ?? 15;
-        if (expectedStartDate) {
+        if (!hasPunchedToday && expectedStartDate) {
           const graceTimeMs = expectedStartDate.getTime() + gracePeriodMins * 60 * 1000;
           if (now.getTime() > graceTimeMs) {
             calculatedStatus = 'Late';
@@ -3007,9 +3257,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
         const punchRes = await persistPunch({
           punchType: 'check_in',
-          deviceInfo: asRemote ? 'Remote / Out of Geofence' : 'GPS + Webcam Verified',
+          deviceInfo: asRemote ? 'Remote / Out of Geofence' : punchMode === 'qr' ? 'Office QR Verified' : 'GPS + Webcam Verified',
           checkInTime: timeStr,
           status: calculatedStatus,
+          selfiePhoto: selfieDataUrl,
+          qrToken: punchMode === 'qr' ? qrTokenInput.trim() : undefined,
+          workFromHome: asRemote,
         });
         if (!punchRes.success) {
           alert(`Check-in failed on backend: ${punchRes.error?.message || 'Request failed'}`);
@@ -3017,26 +3270,28 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           return;
         }
 
-      const todayIsoDate = new Date().toISOString().split('T')[0];
-      const newRecord: AttendanceRecord = {
-        id: `att_${Date.now()}`,
+      const todayIsoDate = toLocalDateKey();
+      const existingToday = state.attendance.find(
+        (a) => a.employeeId === state.currentPersona.id && a.date === todayIsoDate
+      );
+      const newRecord = applyPunchToDailyRecord(existingToday, {
+        type: 'check_in',
+        time: timeStr,
+        date: todayIsoDate,
         employeeId: state.currentPersona.id,
         employeeName: state.currentPersona.name,
         avatar: state.currentPersona.avatar,
-        date: todayIsoDate,
-        checkIn: timeStr,
-        checkOut: undefined,
-        status: calculatedStatus,
-        locationName: asRemote ? 'Remote / Out of Geofence' : punchAddress.split(',')[0] || state.organization?.officeLocation?.address || 'Primary Office',
+        locationName: asRemote
+          ? 'Remote / Out of Geofence'
+          : punchAddress.split(',')[0] || state.organization?.officeLocation?.address || 'Primary Office',
         latitude: currentLat,
         longitude: currentLng,
         isWithinGeofence: !asRemote && isInsideRadius,
         ipAddress: '106.51.72.18',
         device: 'Web GPS Verified',
-        workingHours: 0,
-        breakHours: 0,
-        ...(selfieDataUrl ? { selfiePhoto: selfieDataUrl, checkInPhoto: selfieDataUrl } : {}),
-      };
+        status: calculatedStatus,
+        selfiePhoto: selfieDataUrl,
+      });
 
       onUpdateState((prev) => ({
         ...prev,
@@ -3075,12 +3330,19 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           ...prev.notifications,
         ],
       }));
-        setPingToast(`Punch In Verified via GPS at ${timeStr}`);
-      } else if (!isCheckedOut) {
+        setPingToast(
+          hasPunchedToday
+            ? `Punched in again at ${timeStr}`
+            : `Punch In Verified via GPS at ${timeStr}`
+        );
+      } else {
         const punchRes = await persistPunch({
           punchType: 'check_out',
-          deviceInfo: asRemote ? 'Remote / Out of Geofence' : 'GPS + Webcam Verified',
+          deviceInfo: asRemote ? 'Remote / Out of Geofence' : punchMode === 'qr' ? 'Office QR Verified' : 'GPS + Webcam Verified',
           checkOutTime: timeStr,
+          selfiePhoto: selfieDataUrl,
+          qrToken: punchMode === 'qr' ? qrTokenInput.trim() : undefined,
+          workFromHome: asRemote,
         });
         if (!punchRes.success) {
           alert(`Check-out failed on backend: ${punchRes.error?.message || 'Request failed'}`);
@@ -3099,15 +3361,29 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         }
 
       const nowTime = Date.now();
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = toLocalDateKey();
+
+      try {
+        await persistClockOutTaskSessions(
+          state.tasks,
+          state.timesheets,
+          state.currentPersona.id,
+          state.currentPersona.name,
+          nowTime
+        );
+      } catch (err) {
+        console.error('Failed to close task timesheets on clock-out', err);
+      }
 
       onUpdateState((prev) => {
         let updatedTimesheets = [...prev.timesheets];
 
         const updatedTasks = prev.tasks.map((t) => {
           const isMyTask =
-            t.assigneeId === prev.currentPersona.id ||
-            (t.assigneeName && t.assigneeName.toLowerCase() === prev.currentPersona.name.toLowerCase());
+            [...(t.assigneeIds || []), t.assigneeId].includes(prev.currentPersona.id) ||
+            [...(t.assigneeNames || []), t.assigneeName].some(
+              (name) => name && name.toLowerCase() === prev.currentPersona.name.toLowerCase()
+            );
 
           if (isMyTask && t.status === 'In Progress' && t.isTimerRunning && t.timerStartedAt) {
             let timeSpentSeconds = t.timeSpentSeconds || (t.actualHours ? Math.round(t.actualHours * 3600) : 0);
@@ -3143,23 +3419,35 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           return t;
         });
 
+        const prior = prev.attendance.find(
+          (a) =>
+            (a.employeeId === prev.currentPersona.id || a.employeeName === prev.currentPersona.name) &&
+            a.date === todayStr
+        );
+        const closed = applyPunchToDailyRecord(prior, {
+          type: 'check_out',
+          time: timeStr,
+          date: todayStr,
+          employeeId: prev.currentPersona.id,
+          employeeName: prev.currentPersona.name,
+          avatar: prev.currentPersona.avatar,
+          locationName: asRemote ? 'Remote / Out of Geofence' : prior?.locationName,
+          status: finalStatus,
+          selfiePhoto: selfieDataUrl,
+        });
+
         return {
           ...prev,
-          attendance: prev.attendance.map((a) => {
-            if (
-              (a.employeeId === prev.currentPersona.id || a.employeeName === prev.currentPersona.name) &&
-              a.date === todayStr
-            ) {
-              return {
-                ...a,
-                checkOut: timeStr,
-                workingHours: workedHoursVal,
-                status: finalStatus,
-                ...(selfieDataUrl ? { checkOutPhoto: selfieDataUrl } : {}),
-              };
-            }
-            return a;
-          }),
+          attendance: [
+            closed,
+            ...prev.attendance.filter(
+              (a) =>
+                !(
+                  (a.employeeId === prev.currentPersona.id || a.employeeName === prev.currentPersona.name) &&
+                  a.date === todayStr
+                )
+            ),
+          ],
           tasks: updatedTasks,
           timesheets: updatedTimesheets,
           auditLogs: [
@@ -3191,21 +3479,15 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           ],
         };
       });
-        setPingToast(`Punch Out Verified via GPS at ${timeStr}. Shift completed for today!`);
-      } else {
-        setPingToast('You have already completed and checked out of your shift for today.');
-        setShowSelfieModal(false);
-        stopCameraStream();
-        setTimeout(() => setPingToast(null), 4000);
-        return;
+        setPingToast(`Punched out at ${timeStr}. You can punch in again today if you return.`);
       }
 
       setShowSelfieModal(false);
       stopCameraStream();
       setTimeout(() => setPingToast(null), 3500);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to process punch', err);
-      alert('Failed to process punch');
+      alert(err?.message || 'Failed to process punch');
     } finally {
       setIsSaving(false);
     }
@@ -3216,38 +3498,29 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   );
 
   const mainContent = (
-    <div className="space-y-6 text-slate-900">
-      {/* Top Secondary Sub-nav for HR / Managers / Staff */}
+    <div className="work-page">
       {state.currentPersona.role !== 'student' && (
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar touch-pan-x py-1 w-full">
+        <div className="work-tabs overflow-x-auto no-scrollbar touch-pan-x">
           {!isStudentMode && (
             <button
+              type="button"
               onClick={() => setSubTab('my_attendance')}
-              className={`${ATT_SUBNAV_BASE} ${
-                subTab === 'my_attendance' ? ATT_SUBNAV_ACTIVE : ATT_SUBNAV_IDLE
-              }`}
+              className="work-tab"
+              aria-selected={subTab === 'my_attendance'}
             >
-              <Clock className={`h-4 w-4 shrink-0 ${subTab === 'my_attendance' ? 'text-white' : 'text-slate-500'}`} />
-              <span>My Attendance</span>
+              My attendance
             </button>
           )}
 
           {(!isUserView || isStudentMode) && (
             <button
+              type="button"
               onClick={() => setSubTab('team_attendance')}
-              className={`${ATT_SUBNAV_BASE} ${
-                subTab === 'team_attendance' ? ATT_SUBNAV_ACTIVE : ATT_SUBNAV_IDLE
-              }`}
+              className="work-tab"
+              aria-selected={subTab === 'team_attendance'}
             >
-              <Users className={`h-4 w-4 shrink-0 ${subTab === 'team_attendance' ? 'text-white' : 'text-slate-500'}`} />
-              <span>{isStudentMode ? 'Class Attendance' : isSuperAdmin || isHR || isInstitution ? 'Staff Attendance' : 'Team Attendance'}</span>
-              <span
-                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  subTab === 'team_attendance'
-                    ? 'bg-white/20 text-white'
-                    : 'bg-slate-100 text-slate-600'
-                }`}
-              >
+              {isStudentMode ? 'Class attendance' : isSuperAdmin || isHR || isInstitution ? 'Staff attendance' : 'Team attendance'}
+              <span className={`work-chip ${subTab === 'team_attendance' ? 'work-chip-navy' : 'work-chip-muted'}`}>
                 {teamAttendanceStats.totalEmployees}
               </span>
             </button>
@@ -3255,21 +3528,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
           {!isStudentMode && (
             <button
+              type="button"
               onClick={() => setSubTab('leaves')}
-              className={`${ATT_SUBNAV_BASE} ${
-                subTab === 'leaves' ? ATT_SUBNAV_ACTIVE : ATT_SUBNAV_IDLE
-              }`}
+              className="work-tab"
+              aria-selected={subTab === 'leaves'}
             >
-              <CalendarIcon className={`h-4 w-4 shrink-0 ${subTab === 'leaves' ? 'text-white' : 'text-slate-500'}`} />
-              <span>Leaves & Time Off</span>
+              Leaves
               {pendingLeavesCount > 0 && (
-                <span
-                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                    subTab === 'leaves'
-                      ? 'bg-white/20 text-white'
-                      : 'bg-amber-100 text-amber-800'
-                  }`}
-                >
+                <span className={`work-chip ${subTab === 'leaves' ? 'work-chip-navy' : 'work-chip-muted'}`}>
                   {pendingLeavesCount}
                 </span>
               )}
@@ -3278,21 +3544,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
           {!isStudentMode && (
             <button
+              type="button"
               onClick={() => setSubTab('regularizations')}
-              className={`${ATT_SUBNAV_BASE} ${
-                subTab === 'regularizations' ? ATT_SUBNAV_ACTIVE : ATT_SUBNAV_IDLE
-              }`}
+              className="work-tab"
+              aria-selected={subTab === 'regularizations'}
             >
-              <FileCheck className={`h-4 w-4 shrink-0 ${subTab === 'regularizations' ? 'text-white' : 'text-slate-500'}`} />
-              <span>Regularizations</span>
+              Regularizations
               {pendingRegCount > 0 && (
-                <span
-                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                    subTab === 'regularizations'
-                      ? 'bg-white/20 text-white'
-                      : 'bg-amber-100 text-amber-800'
-                  }`}
-                >
+                <span className={`work-chip ${subTab === 'regularizations' ? 'work-chip-navy' : 'work-chip-muted'}`}>
                   {pendingRegCount}
                 </span>
               )}
@@ -3301,281 +3560,130 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
           {!isStudentMode && (
             <button
+              type="button"
               onClick={() => setSubTab('holidays')}
-              className={`${ATT_SUBNAV_BASE} ${
-                subTab === 'holidays' ? ATT_SUBNAV_ACTIVE : ATT_SUBNAV_IDLE
-              }`}
+              className="work-tab"
+              aria-selected={subTab === 'holidays'}
             >
-              <CalendarIcon className={`h-4 w-4 shrink-0 ${subTab === 'holidays' ? 'text-white' : 'text-slate-500'}`} />
-              <span>Holidays</span>
-            </button>
-          )}
-
-          {(isSuperAdmin || isHR) && (
-            <button
-              onClick={() => setSubTab('settings')}
-              className={`${ATT_SUBNAV_BASE} ${
-                subTab === 'settings' ? ATT_SUBNAV_ACTIVE : ATT_SUBNAV_IDLE
-              }`}
-            >
-              <Settings className={`h-4 w-4 shrink-0 ${subTab === 'settings' ? 'text-white' : 'text-slate-500'}`} />
-              <span>{isStudentMode ? 'Campus Settings' : 'Settings'}</span>
+              Holidays
             </button>
           )}
         </div>
       )}
 
       {/* VIEW 1: MY ATTENDANCE */}
-      {(!isStudentMode || state.currentPersona.role === 'student') && subTab === 'my_attendance' && (
-        <div className="space-y-6">
-          {/* Toast Notification */}
+      {(!isStudentMode || state.currentPersona.role === 'student') && (
+        <div className={`flex flex-col gap-5${subTab === 'my_attendance' ? '' : ' hidden'}`}>
           {pingToast && (
-            <div className="fixed top-5 right-5 z-50 flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-bold animate-in fade-in slide-in-from-top-2">
-              <CheckCircle2 className="h-4 w-4" />
+            <div className="fixed top-5 right-5 z-50 flex items-center gap-2 bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-primary)] px-4 py-2.5 rounded-[var(--card-radius)] shadow-[0_9px_22px_rgba(26,58,84,.09)] text-[13px] font-semibold">
+              <CheckCircle2 className="h-4 w-4 text-[#2f5d45]" />
               <span>{pingToast}</span>
             </div>
           )}
 
-          <div>
-            <h1 className={ATT_PAGE_TITLE}>My Attendance</h1>
+          <div className="work-head">
+            <h1 className="work-title">My attendance</h1>
           </div>
 
-          {/* UNIFIED SHIFT TIMING & GEOFENCING TILE */}
-          <div className={`${ATT_CARD} p-5 sm:p-6 space-y-4 text-slate-900 font-sans`}>
-            {/* Top Bar: Shift Timing + Location Dropdown */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-100 pb-3">
-              <span className="text-xs font-semibold text-slate-500">
-                {isStudentMode
-                  ? `${activeShiftName} (${configuredShiftStart} — ${configuredShiftEnd})`
-                  : isUserHourlyWorker
-                  ? `Hourly / Flexible Shift (₹${userHourlyRate}/hr)`
-                  : `${activeShiftName} (${configuredShiftStart} — ${configuredShiftEnd})`}
-              </span>
-
-              {/* Location Dropdown */}
-              <div className="relative">
-                <select
-                  value={selectedLocation}
-                  onChange={(e) => setSelectedLocation(e.target.value)}
-                  className="bg-white hover:bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 px-3 py-1.5 rounded-lg outline-none cursor-pointer focus:border-blue-600 transition-colors shadow-2xs w-full sm:w-auto"
-                >
-                  {availableOffices.map((off, idx) => (
-                    <option key={`office-${off}-${idx}`} value={off}>
-                      {off}
-                    </option>
-                  ))}
-                  {!isInstitution && !isStudentMode && !isStudentLogin && (
-                    <option value="wfh">Work From Home (WFH)</option>
-                  )}
-                  {availableOffices.length === 0 && (
-                    <option value="" disabled>No Campus Location Configured</option>
-                  )}
-                </select>
-              </div>
-            </div>
-
-            {/* Middle Row: Date & Live Tracked Session */}
-            <div className="space-y-1">
-              <h3 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight" suppressHydrationWarning>
-                {isMounted ? now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) : 'Monday, Aug 31'}
-              </h3>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
-                <span className="font-bold text-slate-900 text-sm tabular-nums" suppressHydrationWarning>
-                  {isMounted && isCheckedIn
-                    ? (!isCheckedOut ? formatTimer(currentElapsedSeconds) : `${myTodayRecord?.workingHours || shiftTargetHours}h 00m`)
-                    : '00h 00m 00s'}
-                </span>
-                <span className="text-slate-400">/ {targetHoursFormatted}</span>
-                <span className="text-slate-300">•</span>
-                <span className="text-slate-600 font-medium truncate">
-                  {activeOfficeDisplayName}
-                </span>
-              </div>
-            </div>
-
-            {/* Bottom Controls Row: Status Indicator on Left, Action Button on Right */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
-              {/* Left Status Indicator */}
-              <div>
-                {!isCheckedIn ? (
-                  <span className="tabular-nums text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg inline-block" suppressHydrationWarning>
-                    {currentTimeFormatted}
-                  </span>
-                ) : !isCheckedOut ? (
-                  <span className="tabular-nums text-xs font-bold text-blue-600 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg inline-block tracking-tight" suppressHydrationWarning>
-                    {formatTimer(currentElapsedSeconds)}
-                  </span>
-                ) : (
-                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg inline-block">
-                    Shift Completed ({myTodayRecord?.workingHours || shiftTargetHours}h logged)
-                  </span>
-                )}
-              </div>
-
-              {/* Right Action Button */}
-              <div>
-                {!hasConfiguredOffice && selectedLocation !== 'wfh' ? (
-                  (isSuperAdmin || isHR) ? (
-                    <button
-                      type="button"
-                      onClick={() => setSubTab('settings')}
-                      className="w-full sm:w-auto px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all cursor-pointer shadow-2xs"
-                    >
-                      {isStudentMode ? 'Setup Campus' : 'Setup Office'}
-                    </button>
-                  ) : (
-                    <div
-                      title="Attendance is disabled until your administrator sets up an office / campus location."
-                      className="px-4 py-2 rounded-lg text-xs font-medium bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed select-none text-center"
-                    >
-                      {isStudentMode ? 'Campus Setup Pending' : 'Office Setup Pending'}
-                    </div>
-                  )
-                ) : !isAttendanceConfigured ? (
-                  (isSuperAdmin || isHR) ? (
-                    <button
-                      type="button"
-                      onClick={() => setSubTab('settings')}
-                      className="w-full sm:w-auto px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all cursor-pointer shadow-2xs"
-                    >
-                      Setup Rules
-                    </button>
-                  ) : (
-                    <div
-                      title="Attendance tracking is awaiting configuration by your HR administrator."
-                      className="px-4 py-2 rounded-lg text-xs font-medium bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed select-none text-center"
-                    >
-                      Setup Pending
-                    </div>
-                  )
-                ) : !isCheckedOut ? (
-                  <button
-                    type="button"
-                    onClick={handlePunch}
-                    className={`${ATT_BTN_PRIMARY} w-full sm:w-auto px-6 ${
-                      !isCheckedIn ? '' : '!bg-rose-600 hover:!bg-rose-700 shadow-rose-500/10'
-                    }`}
-                  >
-                    {!isCheckedIn ? 'Punch In' : 'Punch Out'}
-                  </button>
-                ) : (
-                  <div
-                    title="Shift completed for today. Multiple check-ins on the same day are restricted."
-                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-100 border border-slate-200 text-slate-500 cursor-not-allowed select-none text-center"
-                  >
-                    Logged for Today
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Stat Metric Cards (Work Schedule & Logged Time - Hidden for Students) */}
-          {!isStudentMode && (
-            isUserHourlyWorker ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-                {/* Card 1: Hourly Work Schedule */}
-                <div
-                  title="Shift type: Hourly / Flexible schedule based on logged punches"
-                  className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs group hover:border-indigo-500/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#9e9ea7]">
-                    <span className="font-semibold">Shift Schedule</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700">HOURLY</span>
-                  </div>
-                  <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">Flexible Hours</p>
-                </div>
-
-                {/* Card 2: Logged Time This Week */}
-                <div
-                  title="Total working hours logged for the active work week"
-                  className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs group hover:border-indigo-500/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#9e9ea7]">
-                    <span className="font-semibold">Logged This Week</span>
-                    <Info className="h-3.5 w-3.5 text-slate-400 group-hover:text-indigo-500 transition-colors" />
-                  </div>
-                  <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">{dynamicLoggedHours} Hours</p>
-                </div>
-
-                {/* Card 3: Hourly Billing Rate */}
-                <div
-                  title="Configured hourly rate for wage disbursement"
-                  className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs group hover:border-indigo-500/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#9e9ea7]">
-                    <span className="font-semibold">Hourly Wage Rate</span>
-                    <Clock className="h-3.5 w-3.5 text-slate-400 group-hover:text-indigo-500 transition-colors" />
-                  </div>
-                  <p className="text-xl md:text-2xl font-bold text-indigo-700 tabular-nums">₹{userHourlyRate} / hr</p>
-                </div>
-
-                {/* Card 4: Tracked Weekly Pay */}
-                <div
-                  title="Estimated earnings tracked from logged hours this week"
-                  className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs group hover:border-emerald-500/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#9e9ea7]">
-                    <span className="font-semibold">Tracked Earnings</span>
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                  </div>
-                  <p className="text-xl md:text-2xl font-bold text-emerald-700 tabular-nums">
-                    ₹{Math.round(Number(dynamicLoggedHours) * userHourlyRate).toLocaleString('en-IN')}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {/* Card 1: Work Schedule */}
-                <div
-                  title={`Weekly work schedule: ${shiftTargetHours}h/day × ${workDaysInWeek} working days (${includeSaturday ? 'Mon–Sat' : 'Mon–Fri'})`}
-                  className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs group hover:border-blue-500/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#9e9ea7]">
-                    <span className="font-semibold">Work Schedule</span>
-                    <Info className="h-3.5 w-3.5 text-slate-400 group-hover:text-blue-500 transition-colors" />
-                  </div>
-                  <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">{dynamicWorkSchedule}</p>
-                </div>
-
-                {/* Card 2: Logged Time */}
-                <div
-                  title="Total working hours logged for the active work week"
-                  className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs group hover:border-blue-500/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#9e9ea7]">
-                    <span className="font-semibold">Logged Time</span>
-                    <Info className="h-3.5 w-3.5 text-slate-400 group-hover:text-blue-500 transition-colors" />
-                  </div>
-                  <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">{dynamicLoggedHours} Hours</p>
-                </div>
-              </div>
-            )
-          )}
-
-          {/* Info Notice Banner */}
-          {!isStudentMode && state.currentPersona.role !== 'student' && (
-            <div className="rounded-xl border border-blue-200 dark:border-blue-900/40 bg-blue-50/80 dark:bg-blue-950/20 px-4 py-3 text-xs text-blue-800 dark:text-blue-300 flex items-center justify-between gap-3 shadow-2xs">
-              <div className="flex items-center gap-2.5">
-                <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                <span>You can only update or regularize attendance records within the last 11 days.</span>
-              </div>
-              <button
-                onClick={openRegModal}
-                className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline shrink-0 cursor-pointer"
+          <MyAttendanceTodayPanel
+            shiftName={
+              `${isUserHourlyWorker && !isStudentMode
+                ? `Hourly / flexible shift (₹${userHourlyRate}/hr)`
+                : activeShiftName}${todaySessionCount > 1 ? ` · ${todaySessionCount} logins` : ''}`
+            }
+            shiftHours={`${configuredShiftStart} – ${configuredShiftEnd}`}
+            elapsedSeconds={currentElapsedSeconds}
+            targetSeconds={Math.max(3600, Math.round(shiftTargetHours * 3600))}
+            statusKind={
+              !hasPunchedToday
+                ? 'idle'
+                : isOnBreak
+                  ? 'break'
+                  : isCheckedIn
+                    ? 'live'
+                    : 'done'
+            }
+            locationSelect={
+              <select
+                value={selectedLocation}
+                onChange={(e) => setSelectedLocation(e.target.value)}
+                aria-label="Punch location"
+                className="work-field att-today-loc"
               >
-                Apply Regularization →
-              </button>
-            </div>
-          )}
+                {availableOffices.map((off, idx) => (
+                  <option key={`office-${off}-${idx}`} value={off}>
+                    {off}
+                  </option>
+                ))}
+                {!isInstitution && !isStudentMode && !isStudentLogin && (
+                  <option value="wfh">Work From Home (WFH)</option>
+                )}
+                {availableOffices.length === 0 && (
+                  <option value="" disabled>
+                    No campus location configured
+                  </option>
+                )}
+              </select>
+            }
+            action={renderMyAttendancePunchAction({
+              hasConfiguredOffice,
+              selectedLocation,
+              isSuperAdmin,
+              isHR,
+              isStudentMode,
+              isAttendanceConfigured,
+              isCheckedOut,
+              isCheckedIn,
+              onSetup: () => router.push('/settings?section=attendance'),
+              onPunch: handlePunch,
+            })}
+            breakAction={
+              isCheckedIn && !isStudentMode ? (
+                <button
+                  type="button"
+                  className="work-btn-secondary"
+                  disabled={isSaving}
+                  onClick={() => void handleToggleBreak('General')}
+                >
+                  {isOnBreak ? 'Resume work' : 'Take a break'}
+                </button>
+              ) : undefined
+            }
+            week={
+              isStudentMode
+                ? null
+                : {
+                    loggedHours: dynamicLoggedHours,
+                    scheduleLabel: dynamicWorkSchedule,
+                    progress:
+                      weeklyTargetHours > 0
+                        ? (Number(dynamicLoggedHours) / weeklyTargetHours) * 100
+                        : 0,
+                    figures: isUserHourlyWorker
+                      ? [
+                          { label: 'Hourly wage', value: `₹${userHourlyRate}` },
+                          {
+                            label: 'Tracked earnings',
+                            value: `₹${Math.round(Number(dynamicLoggedHours) * userHourlyRate).toLocaleString('en-IN')}`,
+                          },
+                        ]
+                      : undefined,
+                  }
+            }
+          />
 
-          {/* Filter Strip */}
           <AttendanceFilterToolbar
             leading={
-              <div className="flex items-center justify-center sm:justify-start gap-2 bg-slate-50 px-3.5 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700">
-                <CalendarIcon className="h-3.5 w-3.5 text-slate-400" />
-                <span>{dateRangeFilter}</span>
-              </div>
+              <select
+                value={dateRangeFilter}
+                onChange={(e) => setDateRangeFilter(e.target.value)}
+                aria-label="Filter by date range"
+                className="work-field min-w-0 flex-1 sm:flex-none"
+              >
+                <option value="Current Month">Current month</option>
+                <option value="Last Month">Last month</option>
+                <option value="All">All dates</option>
+              </select>
             }
             selects={[
               {
@@ -3584,10 +3692,10 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 onChange: setRecordFilter,
                 'aria-label': 'Filter by record',
                 options: [
-                  { value: 'All', label: 'All Record' },
+                  { value: 'All', label: 'All records' },
                   { value: 'Present', label: 'Present' },
                   { value: 'Late', label: 'Late' },
-                  ...(!isInstitution ? [{ value: 'WFH', label: 'Work From Home' }] : []),
+                  ...(!isInstitution ? [{ value: 'WFH', label: 'Work from home' }] : []),
                 ],
               },
               {
@@ -3596,7 +3704,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 onChange: setLocationFilter,
                 'aria-label': 'Filter by location',
                 options: [
-                  { value: 'All', label: 'All Location' },
+                  { value: 'All', label: 'All locations' },
                   ...availableOffices.map((off) => ({ value: off, label: off })),
                   ...(!isInstitution ? [{ value: 'Remote', label: 'Remote' }] : []),
                 ],
@@ -3607,142 +3715,44 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 onChange: setStatusFilter,
                 'aria-label': 'Filter by status',
                 options: [
-                  { value: 'All', label: 'All Status' },
+                  { value: 'All', label: 'All statuses' },
                   { value: 'Verified', label: 'Verified' },
                   { value: 'Regularized', label: 'Regularized' },
                 ],
               },
             ]}
+            trailing={
+              !isStudentMode && state.currentPersona.role !== 'student' ? (
+                <button type="button" onClick={openRegModal} className="work-btn-secondary">
+                  Apply regularization
+                </button>
+              ) : null
+            }
           />
 
-          {/* Attendance Logs Table */}
-          <div className={ATT_TABLE_SHELL}>
-            <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className={ATT_TABLE_HEAD}>
-                <tr>
-                  <th className="p-3.5 text-slate-900 dark:text-white">Date ▾</th>
-                  <th className="p-3.5">Clock In</th>
-                  <th className="p-3.5">Clock In Location</th>
-                  <th className="p-3.5">Clock Out</th>
-                  <th className="p-3.5">Clock Out Location</th>
-                  {!isStudentMode && <th className="p-3.5">Work Schedule</th>}
-                  {!isStudentMode && <th className="p-3.5">Logged Time</th>}
-                  {!isStudentMode && <th className="p-3.5 text-right">Deficit</th>}
-                  {isStudentMode && <th className="p-3.5 text-right">Attendance Status</th>}
-                </tr>
-              </thead>
-              <tbody className="font-medium text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-[#282830]">
-                {paginatedHistory.map((row, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-[#18181d] transition-colors duration-150">
-                    <td className="p-3.5 font-bold text-slate-900 dark:text-white whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
-                        <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{row.date}</span>
-                      </div>
-                    </td>
-                    <td className="p-3.5 tabular-nums text-slate-800 dark:text-slate-200" suppressHydrationWarning>{row.in}</td>
-                    <td className="p-3.5 text-slate-500 dark:text-[#9e9ea7] truncate max-w-[160px]">{row.inLoc}</td>
-                    <td className="p-3.5 tabular-nums text-slate-800 dark:text-slate-200" suppressHydrationWarning>{row.out}</td>
-                    <td className="p-3.5 text-slate-500 dark:text-[#9e9ea7] truncate max-w-[160px]">{row.outLoc}</td>
-                    {!isStudentMode && <td className="p-3.5 tabular-nums text-slate-600 dark:text-slate-300">{row.sched}</td>}
-                    {!isStudentMode && <td className="p-3.5 tabular-nums font-bold text-slate-900 dark:text-white" suppressHydrationWarning>{row.logged}</td>}
-                    {!isStudentMode && (
-                      <td className="p-3.5 tabular-nums text-right font-bold text-blue-600 dark:text-blue-400" suppressHydrationWarning>
-                        {row.deficit}
-                      </td>
-                    )}
-                    {isStudentMode && (
-                      <td className="p-3.5 text-right whitespace-nowrap">
-                        <AttendanceStatusPill
-                          kind={
-                            row.status === 'Present'
-                              ? 'present'
-                              : row.status === 'Late'
-                                ? 'late'
-                                : 'on_leave'
-                          }
-                          label={row.status}
-                        />
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-
-            {/* Table Pagination Bar */}
-            <div className="p-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
-              {/* Pagination Controls */}
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="h-7 w-7 flex items-center justify-center border border-slate-200 rounded-lg disabled:opacity-30 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-                {[1, 2, 3].map((page) => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`h-7 w-7 flex items-center justify-center rounded-lg font-bold text-xs cursor-pointer ${currentPage === page
-                        ? 'bg-blue-600 text-white'
-                        : 'border border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                  >
-                    {page}
-                  </button>
-                ))}
-                <span className="px-1 text-slate-400">...</span>
-                <button
-                  onClick={() => setCurrentPage(totalPages)}
-                  className="h-7 w-7 flex items-center justify-center border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"
-                >
-                  {totalPages}
-                </button>
-                <button
-                  onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className="h-7 w-7 flex items-center justify-center border border-slate-200 rounded-lg disabled:opacity-30 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              {/* Showing Entries and Rows dropdown */}
-              <div className="flex items-center gap-4 text-[11px]">
-                <span>
-                  Showing {Math.min((currentPage - 1) * rowsPerPage + 1, filteredHistory.length)} to{' '}
-                  {Math.min(currentPage * rowsPerPage, filteredHistory.length)} of {filteredHistory.length} entries
-                </span>
-                <div className="flex items-center gap-1">
-                  <span>Show</span>
-                  <select
-                    value={rowsPerPage}
-                    onChange={(e) => setRowsPerPage(Number(e.target.value))}
-                    className="bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-800 px-2 py-1 rounded-lg outline-none cursor-pointer"
-                  >
-                    <option value={6}>6</option>
-                    <option value={10}>10</option>
-                    <option value={20}>20</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
+          <MyAttendanceLogTable
+            rows={paginatedHistory}
+            totalCount={filteredHistory.length}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            rowsPerPage={rowsPerPage}
+            onPageChange={setCurrentPage}
+            onRowsPerPageChange={(rows) => {
+              setRowsPerPage(rows);
+              setCurrentPage(1);
+            }}
+            isStudentMode={isStudentMode}
+          />
         </div>
       )}
 
       {/* VIEW 2: TEAM ATTENDANCE (FOR HR / MANAGERS / FACULTY) */}
       {state.currentPersona.role !== 'student' && subTab === 'team_attendance' && (
-        <div className="space-y-6 text-slate-900">
-          <div>
-            <h1 className={ATT_PAGE_TITLE}>
-              {isStudentMode ? 'Class Attendance' : 'Attendance'}
+        <div className="space-y-5 text-[var(--text-primary)]">
+          <div className="work-head">
+            <h1 className="work-title">
+              {isStudentMode ? 'Class attendance' : 'Staff attendance'}
             </h1>
-            <p className={ATT_PAGE_META}>{teamAttendanceDate}</p>
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-5 gap-3 items-stretch">
@@ -3792,27 +3802,27 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           {/* Quick Attendance Summary Card */}
           <div className={`${ATT_CARD} overflow-hidden`}>
             {/* Header with Title, Employee Search & Date Picker */}
-            <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-4 sm:p-5 border-b border-[var(--border-color)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h2 className={ATT_SECTION_TITLE}>Employee Attendance</h2>
+                <h2 className={ATT_SECTION_TITLE}>Employee attendance</h2>
               </div>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 {/* Employee Search Bar */}
                 <div className="relative w-full sm:w-60">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-muted)]" />
                   <input
                     type="text"
                     value={teamSearchQuery}
                     onChange={(e) => setTeamSearchQuery(e.target.value)}
                     placeholder="Search employee…"
-                    className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white focus:bg-white text-xs font-medium text-slate-800 placeholder:text-slate-400 outline-none focus:border-blue-500 transition-[background-color,border-color] duration-150 ease-out shadow-2xs"
+                    className="work-field w-full pl-10 pr-8"
                   />
                   {teamSearchQuery && (
                     <button
                       type="button"
                       onClick={() => setTeamSearchQuery('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)] cursor-pointer"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -3820,29 +3830,29 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 </div>
 
                 {/* Date Picker */}
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 sm:bg-white text-xs font-medium text-slate-700 shadow-2xs justify-between sm:justify-start">
+                <div className="work-field flex items-center gap-2 justify-between sm:justify-start">
                   <div className="flex items-center gap-1.5">
-                    <CalendarIcon className="h-4 w-4 text-slate-500 shrink-0" />
-                    <span className="text-[11px] font-medium text-slate-400 sm:hidden">Date:</span>
+                    <CalendarIcon className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
+                    <span className="text-[11px] font-medium text-[var(--text-muted)] sm:hidden">Date:</span>
                   </div>
                   <input
                     type="date"
                     value={teamAttendanceDate}
                     onChange={(e) => setTeamAttendanceDate(e.target.value)}
-                    className="bg-transparent outline-none text-xs font-semibold text-slate-800 cursor-pointer"
+                    className="bg-transparent outline-none text-xs font-semibold text-[var(--text-primary)] cursor-pointer"
                   />
                 </div>
 
                 {/* Batch Selector & Group by Batch Toggle for Student/School Mode */}
                 {isStudentMode && (
                   <>
-                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 sm:bg-white text-xs font-semibold text-slate-700 shadow-2xs">
-                      <Filter className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-                      <span className="text-[11px] font-medium text-slate-400">Batch:</span>
+                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] sm:bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-secondary)] shadow-2xs">
+                      <Filter className="h-3.5 w-3.5 text-[var(--text-muted)] shrink-0" />
+                      <span className="text-[11px] font-medium text-[var(--text-muted)]">Batch:</span>
                       <select
                         value={teamBatchFilter}
                         onChange={(e) => setTeamBatchFilter(e.target.value)}
-                        className="bg-transparent outline-none text-xs font-bold text-slate-800 cursor-pointer"
+                        className="bg-transparent outline-none text-xs font-bold text-[var(--text-primary)] cursor-pointer"
                       >
                         <option value="All">All Batches ({teamAttendanceStats.totalEmployees})</option>
                         {uniqueBatches.map((b) => (
@@ -3857,9 +3867,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       type="button"
                       onClick={() => setTeamGroupByBatch(!teamGroupByBatch)}
                       className={`${ATT_BTN_SECONDARY} ${
-                        teamGroupByBatch
-                          ? '!bg-blue-600 !text-white !border-blue-600'
-                          : ''
+                        teamGroupByBatch ? 'is-selected' : ''
                       }`}
                       title="Toggle batch-wise grouped breakdown"
                     >
@@ -3869,7 +3877,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   </>
                 )}
 
-                {/* Export PDF Report Button */}
+                {canAccessReports && (
                 <button
                   type="button"
                   onClick={() => {
@@ -3879,36 +3887,33 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   className={ATT_BTN_SECONDARY}
                   title="Export Attendance Report (PDF)"
                 >
-                  <Printer className="h-3.5 w-3.5 text-slate-500" />
+                  <Printer className="h-3.5 w-3.5 text-[var(--text-muted)]" />
                   <span>Export Report</span>
                 </button>
+                )}
               </div>
             </div>
 
             {/* Filter Tabs: All, Checked In, Late, Not Checked In */}
-            <div className="px-4 py-2.5 flex items-center gap-1.5 overflow-x-auto no-scrollbar touch-pan-x border-b border-slate-100 text-xs">
+            <div className="px-4 py-2.5 work-tabs overflow-x-auto no-scrollbar touch-pan-x border-b-0">
               {[
                 { id: 'All' as const, label: 'All', count: teamAttendanceStats.totalEmployees },
-                { id: 'Checked In' as const, label: isStudentMode ? 'Present' : 'Checked In', count: teamAttendanceStats.onTime },
+                { id: 'Checked In' as const, label: isStudentMode ? 'Present' : 'Checked in', count: teamAttendanceStats.onTime },
                 { id: 'Late' as const, label: 'Late', count: teamAttendanceStats.late },
-                { id: 'Not Checked In' as const, label: isStudentMode ? 'Absent' : 'Not Checked In', count: teamAttendanceStats.notInYet },
-                ...(isStudentMode ? [] : [{ id: 'Hourly' as const, label: 'Hourly Staff', count: teamAttendanceStats.hourlyCount }]),
+                { id: 'Not Checked In' as const, label: isStudentMode ? 'Absent' : 'Not checked in', count: teamAttendanceStats.notInYet },
+                ...(isStudentMode ? [] : [{ id: 'Hourly' as const, label: 'Hourly staff', count: teamAttendanceStats.hourlyCount }]),
               ].map((tab) => {
                 const isActive = teamTabFilter === tab.id;
                 return (
                   <button
                     key={tab.id}
+                    type="button"
                     onClick={() => setTeamTabFilter(tab.id as any)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                      isActive
-                        ? 'bg-blue-600 text-white font-semibold shadow-xs'
-                        : 'bg-slate-100/90 hover:bg-slate-200 text-slate-700'
-                    }`}
+                    className="work-tab"
+                    aria-selected={isActive}
                   >
-                    <span>{tab.label}</span>
-                    <span className={`px-1.5 py-0.2 rounded-full text-[11px] font-semibold tabular-nums ${
-                      isActive ? 'bg-white/20 text-white' : 'bg-white text-slate-700 shadow-2xs'
-                    }`}>
+                    {tab.label}
+                    <span className={`work-chip ${isActive ? 'work-chip-navy' : 'work-chip-muted'}`}>
                       {tab.count}
                     </span>
                   </button>
@@ -3916,79 +3921,55 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               })}
             </div>
 
-            {/* Status Filter Cards (4 Cards: On Time, Late, Not in Yet, Time Off) */}
             <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {/* Card 1: On Time */}
               <button
                 type="button"
                 onClick={() => setTeamStatusFilter(teamStatusFilter === 'on_time' ? 'all' : 'on_time')}
-                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                  teamStatusFilter === 'on_time'
-                    ? 'border-emerald-500 bg-emerald-50/70 shadow-xs ring-1 ring-emerald-500/30'
-                    : 'border-slate-200 bg-white hover:bg-slate-50/80 shadow-2xs'
-                }`}
+                className={`att-stat${teamStatusFilter === 'on_time' ? ' is-active' : ''}`}
               >
-                <div className="text-xl font-bold tracking-tight text-slate-900 tabular-nums">{teamAttendanceStats.onTime}</div>
-                <div className="text-xs font-medium text-slate-500 mt-0.5">{isStudentMode ? 'Present' : 'On Time'}</div>
+                <div className="att-stat-value">{teamAttendanceStats.onTime}</div>
+                <div className="att-stat-label">{isStudentMode ? 'Present' : 'On time'}</div>
               </button>
-
-              {/* Card 2: Late */}
               <button
                 type="button"
                 onClick={() => setTeamStatusFilter(teamStatusFilter === 'late' ? 'all' : 'late')}
-                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                  teamStatusFilter === 'late'
-                    ? 'border-rose-500 bg-rose-50/70 shadow-xs ring-1 ring-rose-500/30'
-                    : 'border-slate-200 bg-white hover:bg-slate-50/80 shadow-2xs'
-                }`}
+                className={`att-stat${teamStatusFilter === 'late' ? ' is-active' : ''}`}
               >
-                <div className="text-xl font-bold tracking-tight text-slate-900 tabular-nums">{teamAttendanceStats.late}</div>
-                <div className="text-xs font-medium text-slate-500 mt-0.5">Late Arrival</div>
+                <div className="att-stat-value">{teamAttendanceStats.late}</div>
+                <div className="att-stat-label">Late</div>
               </button>
-
-              {/* Card 3: Not in Yet */}
               <button
                 type="button"
                 onClick={() => setTeamStatusFilter(teamStatusFilter === 'not_in_yet' ? 'all' : 'not_in_yet')}
-                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                  teamStatusFilter === 'not_in_yet'
-                    ? 'border-amber-500 bg-amber-50/70 shadow-xs ring-1 ring-amber-500/30'
-                    : 'border-slate-200 bg-white hover:bg-slate-50/80 shadow-2xs'
-                }`}
+                className={`att-stat${teamStatusFilter === 'not_in_yet' ? ' is-active' : ''}`}
               >
-                <div className="text-xl font-bold tracking-tight text-slate-900 tabular-nums">{teamAttendanceStats.notInYet}</div>
-                <div className="text-xs font-medium text-slate-500 mt-0.5">{isStudentMode ? 'Absent' : 'Not in Yet'}</div>
+                <div className="att-stat-value">{teamAttendanceStats.notInYet}</div>
+                <div className="att-stat-label">{isStudentMode ? 'Absent' : 'Not in yet'}</div>
               </button>
-
-              {/* Card 4: Time Off */}
               <button
                 type="button"
                 onClick={() => setTeamStatusFilter(teamStatusFilter === 'time_off' ? 'all' : 'time_off')}
-                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                  teamStatusFilter === 'time_off'
-                    ? 'border-purple-500 bg-purple-50/70 shadow-xs ring-1 ring-purple-500/30'
-                    : 'border-slate-200 bg-white hover:bg-slate-50/80 shadow-2xs'
-                }`}
+                className={`att-stat${teamStatusFilter === 'time_off' ? ' is-active' : ''}`}
               >
-                <div className="text-xl font-bold tracking-tight text-slate-900 tabular-nums">{teamAttendanceStats.timeOff}</div>
-                <div className="text-xs font-medium text-slate-500 mt-0.5">{isStudentMode ? 'On Leave' : 'Time Off'}</div>
+                <div className="att-stat-value">{teamAttendanceStats.timeOff}</div>
+                <div className="att-stat-label">{isStudentMode ? 'On leave' : 'Time off'}</div>
               </button>
             </div>
 
             {/* Mobile Staff / Student Attendance Cards */}
-            <div className="block md:hidden p-4 space-y-3 border-t border-slate-100">
+            <div className="block md:hidden p-4 space-y-3 border-t border-[var(--border-color)]">
               {filteredTeamRecords.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-400 font-medium bg-slate-50/60 rounded-2xl border border-slate-200/80">
+                <div className="p-8 text-center text-xs text-[var(--text-muted)] font-medium bg-[var(--bg-surface-subtle)]/60 rounded-xl border border-[var(--border-color)]">
                   No {isStudentMode ? 'student' : 'employee'} attendance records match the selected shift or status filters.
                 </div>
               ) : teamGroupByBatch && isStudentMode ? (
                 /* Grouped Mobile Cards */
                 groupedBatches.map((grp) => (
                   <div key={grp.batchName} className="space-y-2.5">
-                    <div className="p-3 bg-slate-100/90 rounded-2xl border border-slate-200 flex items-center justify-between">
+                    <div className="p-3 bg-[var(--bg-surface-subtle)]/90 rounded-xl border border-[var(--border-color)] flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs text-slate-900">{grp.batchName}</span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white text-slate-700 border border-slate-200 shadow-2xs">
+                        <span className="font-bold text-xs text-[var(--text-primary)]">{grp.batchName}</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--bg-surface)] text-[var(--text-secondary)] border border-[var(--border-color)] shadow-2xs">
                           {grp.totalEnrolled} Students
                         </span>
                       </div>
@@ -4000,7 +3981,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     </div>
 
                     {grp.records.map(({ emp, att, statusType, firstPunch, lastPunch, hoursFormatted, breakHours, isWarning, isHourlyWorker, hourlyRate, earnedToday, overtimeHours, overtimeFormatted, cumulativeAttendanceRate, isBelowThreshold, geoLabel }) => (
-                      <div key={emp.id} className="p-4 rounded-2xl border border-slate-200 bg-white shadow-2xs space-y-3">
+                      <div key={emp.id} className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xs space-y-3">
                         <div className="flex items-start justify-between gap-2">
                           <button
                             type="button"
@@ -4013,9 +3994,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                               className="w-10 h-10 ring-1 ring-slate-200"
                             />
                             <div className="min-w-0 space-y-0.5">
-                              <h4 className="font-semibold text-slate-900 text-sm truncate hover:text-blue-600">{emp.name}</h4>
+                              <h4 className="font-semibold text-[var(--text-primary)] text-sm truncate hover:text-[var(--studio-navy)]">{emp.name}</h4>
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <p className="text-xs text-slate-500 truncate">{emp.designation || 'Student'}</p>
+                                <p className="text-xs text-[var(--text-muted)] truncate">{emp.designation || 'Student'}</p>
                                 {isBelowThreshold && (
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
                                     <AlertTriangle className="w-2.5 h-2.5 text-amber-600" /> &lt; 75% At-Risk
@@ -4031,16 +4012,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 text-xs">
+                        <div className="grid grid-cols-2 gap-2 bg-[var(--bg-surface-subtle)]/80 p-2.5 rounded-xl border border-[var(--border-color)] text-xs">
                           <div>
-                            <span className="text-[11px] font-medium text-slate-400">Punch Times</span>
-                            <p className="font-semibold text-slate-800 text-xs mt-0.5 tabular-nums">
+                            <span className="text-[11px] font-medium text-[var(--text-muted)]">Punch Times</span>
+                            <p className="font-semibold text-[var(--text-primary)] text-xs mt-0.5 tabular-nums">
                               {firstPunch} – {lastPunch}
                             </p>
                           </div>
                           <div>
-                            <span className="text-[11px] font-medium text-slate-400">Attendance Rate</span>
-                            <p className="font-semibold text-slate-800 text-xs mt-0.5 tabular-nums">
+                            <span className="text-[11px] font-medium text-[var(--text-muted)]">Attendance Rate</span>
+                            <p className="font-semibold text-[var(--text-primary)] text-xs mt-0.5 tabular-nums">
                               {cumulativeAttendanceRate}% Cumulative
                             </p>
                           </div>
@@ -4052,7 +4033,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               ) : (
                 /* Flat Mobile Cards */
                 filteredTeamRecords.map(({ emp, att, statusType, firstPunch, lastPunch, hoursFormatted, breakHours, isWarning, isHourlyWorker, hourlyRate, earnedToday, overtimeHours, overtimeFormatted, cumulativeAttendanceRate, isBelowThreshold, geoLabel }) => (
-                  <div key={emp.id} className="p-4 rounded-2xl border border-slate-200 bg-white shadow-2xs space-y-3">
+                  <div key={emp.id} className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xs space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <button
                         type="button"
@@ -4065,9 +4046,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                           className="w-10 h-10 ring-1 ring-slate-200"
                         />
                         <div className="min-w-0 space-y-0.5">
-                          <h4 className="font-semibold text-slate-900 text-sm truncate hover:text-blue-600">{emp.name}</h4>
+                          <h4 className="font-semibold text-[var(--text-primary)] text-sm truncate hover:text-[var(--studio-navy)]">{emp.name}</h4>
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <p className="text-xs text-slate-500 truncate">{emp.designation || (isStudentMode ? 'Student' : 'Employee')}</p>
+                            <p className="text-xs text-[var(--text-muted)] truncate">{emp.designation || (isStudentMode ? 'Student' : 'Employee')}</p>
                             {isHourlyWorker && (
                               <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/80">
                                 <Clock className="w-2.5 h-2.5 text-indigo-600" /> Hourly (₹{hourlyRate}/hr)
@@ -4088,25 +4069,25 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 text-xs">
+                    <div className="grid grid-cols-2 gap-2 bg-[var(--bg-surface-subtle)]/80 p-2.5 rounded-xl border border-[var(--border-color)] text-xs">
                       <div>
-                        <span className="text-[11px] font-medium text-slate-400">Punch Times</span>
-                        <p className="font-semibold text-slate-800 text-xs mt-0.5 tabular-nums">
+                        <span className="text-[11px] font-medium text-[var(--text-muted)]">Punch Times</span>
+                        <p className="font-semibold text-[var(--text-primary)] text-xs mt-0.5 tabular-nums">
                           {firstPunch} – {lastPunch}
                         </p>
                       </div>
                       <div>
-                        <span className="text-[11px] font-medium text-slate-400">{isStudentMode ? 'Attendance Rate' : 'Work & Break'}</span>
-                        <div className="font-semibold text-slate-800 text-xs mt-0.5 space-y-0.5">
+                        <span className="text-[11px] font-medium text-[var(--text-muted)]">{isStudentMode ? 'Attendance Rate' : 'Work & Break'}</span>
+                        <div className="font-semibold text-[var(--text-primary)] text-xs mt-0.5 space-y-0.5">
                           {isStudentMode ? (
                             <div className="flex items-center gap-1 tabular-nums font-bold">
                               <span>{cumulativeAttendanceRate}%</span>
-                              <span className="text-slate-400 font-normal">({hoursFormatted})</span>
+                              <span className="text-[var(--text-muted)] font-normal">({hoursFormatted})</span>
                             </div>
                           ) : (
                             <div className="flex items-center gap-1 tabular-nums">
                               <span>{hoursFormatted}</span>
-                              <span className="text-slate-400 font-normal">({breakHours} break)</span>
+                              <span className="text-[var(--text-muted)] font-normal">({breakHours} break)</span>
                               {isWarning && !isHourlyWorker && (
                                 <AlertTriangle className="h-3 w-3 text-amber-500 inline shrink-0" />
                               )}
@@ -4121,12 +4102,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100 text-xs">
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-[var(--border-color)] text-xs">
                       {att && (
                         <button
                           type="button"
                           onClick={() => setSelectedAttendancePhotoRecord(att)}
-                          className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-medium transition-all cursor-pointer shadow-2xs"
+                          className="px-3 py-1.5 rounded-xl border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] text-xs font-medium transition-all cursor-pointer shadow-2xs"
                         >
                           View Photo
                         </button>
@@ -4153,7 +4134,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                           };
                           handleOpenEditAttendance(targetAtt);
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
+                        className="px-3 py-1.5 rounded-xl bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                         <span>Edit</span>
@@ -4165,26 +4146,26 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             </div>
 
             {/* Desktop Staff / Student Attendance Matrix Table */}
-            <div className="hidden md:block overflow-x-auto border-t border-slate-100">
+            <div className="hidden md:block overflow-x-auto border-t border-[var(--border-color)]">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 text-slate-500 font-semibold text-xs border-b border-slate-100 select-none">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-semibold text-xs border-b border-[var(--border-color)] select-none">
                   <tr>
                     <th
                       onClick={() => handleToggleSort('employee')}
-                      className="p-3.5 pl-5 cursor-pointer hover:bg-slate-100 transition-colors"
+                      className="p-3.5 pl-5 cursor-pointer hover:bg-[var(--bg-surface-subtle)] transition-colors"
                     >
                       <div className="flex items-center gap-1.5">
                         <span className={teamSortField === 'employee' ? 'text-blue-600 font-semibold' : ''}>{isStudentMode ? 'Student' : 'Employee'}</span>
                         {teamSortField === 'employee' ? (
                           teamSortDirection === 'asc' ? <ArrowUp className="h-3.5 w-3.5 text-blue-600" /> : <ArrowDown className="h-3.5 w-3.5 text-blue-600" />
                         ) : (
-                          <ArrowUpDown className="h-3 w-3 text-slate-400" />
+                          <ArrowUpDown className="h-3 w-3 text-[var(--text-muted)]" />
                         )}
                       </div>
                     </th>
                     <th
                       onClick={() => handleToggleSort('batch')}
-                      className="p-3.5 font-semibold cursor-pointer hover:bg-slate-100 transition-colors"
+                      className="p-3.5 font-semibold cursor-pointer hover:bg-[var(--bg-surface-subtle)] transition-colors"
                     >
                       <div className="flex items-center gap-1.5">
                         <span className={teamSortField === 'batch' || teamSortField === 'roles' ? 'text-blue-600 font-semibold' : ''}>
@@ -4201,7 +4182,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     <th className="p-3.5 font-semibold">{isStudentMode ? 'Class Hours' : 'Working Hours'}</th>
                     <th
                       onClick={() => isStudentMode && handleToggleSort('attendanceRate')}
-                      className={`p-3.5 font-semibold ${isStudentMode ? 'cursor-pointer hover:bg-slate-100' : ''}`}
+                      className={`p-3.5 font-semibold ${isStudentMode ? 'cursor-pointer hover:bg-[var(--bg-surface-subtle)]' : ''}`}
                     >
                       <div className="flex items-center gap-1.5">
                         <span>{isStudentMode ? 'Attendance Rate' : 'Break'}</span>
@@ -4215,10 +4196,10 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     <th className="p-3.5 pr-5 text-right font-semibold">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-primary)]">
                   {filteredTeamRecords.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="p-10 text-center text-xs text-slate-400">
+                      <td colSpan={10} className="p-10 text-center text-xs text-[var(--text-muted)]">
                         No {isStudentMode ? 'student' : 'employee'} attendance records match the selected shift or status filters.
                       </td>
                     </tr>
@@ -4226,20 +4207,20 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     /* Grouped Batch Rows */
                     groupedBatches.map((grp) => (
                       <React.Fragment key={grp.batchName}>
-                        <tr className="bg-slate-100/80 border-y border-slate-200">
+                        <tr className="bg-[var(--bg-surface-subtle)]/80 border-y border-[var(--border-color)]">
                           <td colSpan={10} className="py-2.5 px-5">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2.5">
-                                <span className="font-bold text-xs text-slate-900">{grp.batchName}</span>
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white text-slate-700 border border-slate-200 shadow-2xs">
+                                <span className="font-bold text-xs text-[var(--text-primary)]">{grp.batchName}</span>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--bg-surface)] text-[var(--text-secondary)] border border-[var(--border-color)] shadow-2xs">
                                   {grp.totalEnrolled} Students Enrolled
                                 </span>
-                                <span className="text-[11px] text-slate-500 font-medium">
+                                <span className="text-[11px] text-[var(--text-muted)] font-medium">
                                   (Present: {grp.activeCount}, Late: {grp.lateCount}, Absent: {grp.absentCount})
                                 </span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="text-[11px] font-semibold text-slate-500">Batch Health:</span>
+                                <span className="text-[11px] font-semibold text-[var(--text-muted)]">Batch Health:</span>
                                 <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
                                   grp.rate >= 75
                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
@@ -4252,7 +4233,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                           </td>
                         </tr>
                         {grp.records.map(({ emp, att, statusType, firstPunch, lastPunch, workingHours, hoursFormatted, breakHours, isWarning, shift, shiftKind, isHourlyWorker, hourlyRate, earnedToday, overtimeHours, overtimeFormatted, cumulativeAttendanceRate, isBelowThreshold, geoLabel }) => (
-                          <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
+                          <tr key={emp.id} className="hover:bg-[var(--bg-surface-subtle)]/80 transition-colors">
                             <td className="p-3.5 pl-5">
                               <button
                                 type="button"
@@ -4266,34 +4247,34 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                   className="w-8 h-8 ring-1 ring-slate-200 group-hover:ring-blue-500 transition-all"
                                 />
                                 <div>
-                                  <div className="font-semibold text-slate-900 text-xs group-hover:text-blue-600 group-hover:underline transition-colors">{emp.name}</div>
-                                  <div className="text-[10px] text-slate-400 font-mono">STU-{emp.employeeId || emp.id}</div>
+                                  <div className="font-semibold text-[var(--text-primary)] text-xs group-hover:text-[var(--studio-navy)] group-hover:underline transition-colors">{emp.name}</div>
+                                  <div className="text-[10px] text-[var(--text-muted)] font-mono">STU-{emp.employeeId || emp.id}</div>
                                 </div>
                               </button>
                             </td>
                             <td className="p-3.5">
-                              <div className="font-medium text-slate-700 text-xs">{emp.designation || 'Student'}</div>
+                              <div className="font-medium text-[var(--text-secondary)] text-xs">{emp.designation || 'Student'}</div>
                             </td>
                             <td className="p-3.5">
                               <div className="space-y-0.5">
-                                <div className="font-semibold text-xs text-slate-800">{shift}</div>
+                                <div className="font-semibold text-xs text-[var(--text-primary)]">{shift}</div>
                                 {shiftKind && (
-                                  <div className="text-[10px] text-slate-400">{shiftKind}</div>
+                                  <div className="text-[10px] text-[var(--text-muted)]">{shiftKind}</div>
                                 )}
                               </div>
                             </td>
-                            <td className="p-3.5 text-xs font-medium text-slate-700 tabular-nums">
+                            <td className="p-3.5 text-xs font-medium text-[var(--text-secondary)] tabular-nums">
                               {firstPunch}
                             </td>
-                            <td className="p-3.5 text-xs font-medium text-slate-500 tabular-nums">
+                            <td className="p-3.5 text-xs font-medium text-[var(--text-muted)] tabular-nums">
                               {lastPunch}
                             </td>
-                            <td className="p-3.5 text-xs font-semibold text-slate-900 tabular-nums">
+                            <td className="p-3.5 text-xs font-semibold text-[var(--text-primary)] tabular-nums">
                               <span>{hoursFormatted}</span>
                             </td>
                             <td className="p-3.5 text-xs tabular-nums">
                               <div className="flex items-center gap-1.5">
-                                <span className={`font-bold text-xs ${cumulativeAttendanceRate < 75 ? 'text-amber-800' : 'text-slate-900'}`}>
+                                <span className={`font-bold text-xs ${cumulativeAttendanceRate < 75 ? 'text-amber-800' : 'text-[var(--text-primary)]'}`}>
                                   {cumulativeAttendanceRate}%
                                 </span>
                                 {isBelowThreshold && (
@@ -4315,7 +4296,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => setSelectedAttendancePhotoRecord(att)}
-                                    className="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-medium transition-all cursor-pointer shadow-2xs"
+                                    className="px-2.5 py-1 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] text-xs font-medium transition-all cursor-pointer shadow-2xs"
                                   >
                                     View Photo
                                   </button>
@@ -4342,7 +4323,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                     };
                                     handleOpenEditAttendance(targetAtt);
                                   }}
-                                  className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
+                                  className="px-2.5 py-1 rounded-lg bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
                                   title="Edit Attendance"
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
@@ -4357,7 +4338,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   ) : (
                     /* Flat Table Rows */
                     filteredTeamRecords.map(({ emp, att, statusType, firstPunch, lastPunch, workingHours, hoursFormatted, breakHours, isWarning, shift, shiftKind, isHourlyWorker, hourlyRate, earnedToday, overtimeHours, overtimeFormatted, cumulativeAttendanceRate, isBelowThreshold, geoLabel }) => (
-                      <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
+                      <tr key={emp.id} className="hover:bg-[var(--bg-surface-subtle)]/80 transition-colors">
                         <td className="p-3.5 pl-5">
                           <button
                             type="button"
@@ -4370,11 +4351,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                               name={emp.name}
                               className="w-8 h-8 ring-1 ring-slate-200 group-hover:ring-blue-500 transition-all"
                             />
-                            <div className="font-semibold text-slate-900 text-xs group-hover:text-blue-600 group-hover:underline transition-colors">{emp.name}</div>
+                            <div className="font-semibold text-[var(--text-primary)] text-xs group-hover:text-[var(--studio-navy)] group-hover:underline transition-colors">{emp.name}</div>
                           </button>
                         </td>
                         <td className="p-3.5">
-                          <div className="font-medium text-slate-700 text-xs">{emp.designation || (isStudentMode ? 'Student' : 'Employee')}</div>
+                          <div className="font-medium text-[var(--text-secondary)] text-xs">{emp.designation || (isStudentMode ? 'Student' : 'Employee')}</div>
                         </td>
                         <td className="p-3.5">
                           {isHourlyWorker ? (
@@ -4382,24 +4363,24 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/80">
                                 <Clock className="w-3 h-3 text-indigo-600" /> Hourly (Flexible)
                               </span>
-                              <div className="text-[10px] text-slate-500 font-mono font-medium pl-1">₹{hourlyRate}/hr</div>
+                              <div className="text-[10px] text-[var(--text-muted)] font-mono font-medium pl-1">₹{hourlyRate}/hr</div>
                             </div>
                           ) : (
                             <div className="space-y-0.5">
-                              <div className="font-semibold text-xs text-slate-800">{shift}</div>
+                              <div className="font-semibold text-xs text-[var(--text-primary)]">{shift}</div>
                               {shiftKind && (
-                                <div className="text-[10px] text-slate-400">{shiftKind}</div>
+                                <div className="text-[10px] text-[var(--text-muted)]">{shiftKind}</div>
                               )}
                             </div>
                           )}
                         </td>
-                        <td className="p-3.5 text-xs font-medium text-slate-700 tabular-nums">
+                        <td className="p-3.5 text-xs font-medium text-[var(--text-secondary)] tabular-nums">
                           {firstPunch}
                         </td>
-                        <td className="p-3.5 text-xs font-medium text-slate-500 tabular-nums">
+                        <td className="p-3.5 text-xs font-medium text-[var(--text-muted)] tabular-nums">
                           {lastPunch}
                         </td>
-                        <td className="p-3.5 text-xs font-semibold text-slate-900 tabular-nums">
+                        <td className="p-3.5 text-xs font-semibold text-[var(--text-primary)] tabular-nums">
                           <div className="space-y-0.5">
                             <div className="flex items-center gap-1">
                               <span>{hoursFormatted}</span>
@@ -4417,10 +4398,10 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                             )}
                           </div>
                         </td>
-                        <td className="p-3.5 text-xs font-medium text-slate-600 tabular-nums">
+                        <td className="p-3.5 text-xs font-medium text-[var(--text-secondary)] tabular-nums">
                           {isStudentMode ? (
                             <div className="flex items-center gap-1.5">
-                              <span className={`font-bold text-xs ${cumulativeAttendanceRate < 75 ? 'text-amber-800' : 'text-slate-900'}`}>
+                              <span className={`font-bold text-xs ${cumulativeAttendanceRate < 75 ? 'text-amber-800' : 'text-[var(--text-primary)]'}`}>
                                 {cumulativeAttendanceRate}%
                               </span>
                               {isBelowThreshold && (
@@ -4445,7 +4426,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setSelectedAttendancePhotoRecord(att)}
-                                className="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-medium transition-all cursor-pointer shadow-2xs"
+                                className="px-2.5 py-1 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] text-xs font-medium transition-all cursor-pointer shadow-2xs"
                               >
                                 View Photo
                               </button>
@@ -4472,7 +4453,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                 };
                                 handleOpenEditAttendance(targetAtt);
                               }}
-                              className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
+                              className="px-2.5 py-1 rounded-lg bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
                               title="Edit Attendance"
                             >
                               <Pencil className="h-3.5 w-3.5" />
@@ -4495,7 +4476,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         <div className="space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
             <div>
-              <h2 className={ATT_PAGE_TITLE}>Regularizations</h2>
+                <h2 className="work-title">Regularizations</h2>
             </div>
             <button
               onClick={openRegModal}
@@ -4516,7 +4497,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     canApproveRegularization(state.currentPersona, r, state.employees)
                 )
             ).length === 0 ? (
-              <div className={`p-8 ${ATT_CARD} text-center text-xs text-slate-400 font-semibold`}>
+              <div className={`p-8 ${ATT_CARD} text-center text-xs text-[var(--text-muted)] font-semibold`}>
                 No attendance correction requests found.
               </div>
             ) : (
@@ -4537,11 +4518,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         <button
                           type="button"
                           onClick={() => handleEmployeeClick(reg.employeeId || reg.employeeName)}
-                          className="text-left font-bold text-slate-900 text-xs hover:text-blue-600 cursor-pointer"
+                          className="text-left font-bold text-[var(--text-primary)] text-xs hover:text-[var(--studio-navy)] cursor-pointer"
                         >
                           {reg.employeeName}
                         </button>
-                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">{reg.date}</p>
+                        <p className="text-[11px] text-[var(--text-muted)] font-mono mt-0.5">{reg.date}</p>
                       </div>
                       <AttendanceStatusPill
                         kind={reg.status === 'Approved' ? 'approved' : 'pending'}
@@ -4549,17 +4530,17 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       />
                     </div>
 
-                    <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-200/70 text-xs space-y-1">
-                      <p className="text-[11px] font-mono text-slate-700">
+                    <div className="rounded-xl bg-[var(--bg-surface-subtle)] p-2.5 border border-[var(--border-color)] text-xs space-y-1">
+                      <p className="text-[11px] font-mono text-[var(--text-secondary)]">
                         <strong>Requested:</strong> {reg.requestedCheckIn} — {reg.requestedCheckOut}
                       </p>
-                      <p className="text-[11px] text-slate-500">
+                      <p className="text-[11px] text-[var(--text-muted)]">
                         <strong>Reason:</strong> {reg.reason} {reg.remarks ? `• ${reg.remarks}` : ''}
                       </p>
                     </div>
 
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                      <span className="text-[11px] text-slate-400">
+                    <div className="flex items-center justify-between pt-2 border-t border-[var(--border-color)] text-xs">
+                      <span className="text-[11px] text-[var(--text-muted)]">
                         {reg.status === 'Approved' ? 'Authorized' : 'Pending Approval'}
                       </span>
                       {reg.status === 'Pending' && canApprove && (
@@ -4567,14 +4548,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                           <button
                             type="button"
                             onClick={() => handleApproveRegularization(reg.id, true)}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow-xs cursor-pointer active:scale-[0.97] transition-transform duration-100"
+                            className="px-3 py-1.5 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white font-bold text-[11px] shadow-xs cursor-pointer active:scale-[0.97] transition-transform duration-100"
                           >
                             Approve
                           </button>
                           <button
                             type="button"
                             onClick={() => handleApproveRegularization(reg.id, false)}
-                            className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[11px] cursor-pointer active:scale-[0.97] transition-transform duration-100"
+                            className="px-3 py-1.5 rounded-xl bg-[var(--studio-error-surface)] hover:bg-[var(--studio-error-surface)] text-[var(--studio-error)] border border-[var(--border-color)] font-bold text-[11px] cursor-pointer active:scale-[0.97] transition-transform duration-100"
                           >
                             Reject
                           </button>
@@ -4593,7 +4574,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead className={ATT_TABLE_HEAD}>
                 <tr>
-                  <th className="p-3.5 text-slate-900">Employee</th>
+                  <th className="p-3.5 text-[var(--text-primary)]">Employee</th>
                   <th className="p-3.5">Date</th>
                   <th className="p-3.5">Requested Hours</th>
                   <th className="p-3.5">Reason</th>
@@ -4601,7 +4582,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   <th className="p-3.5 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="font-medium text-slate-700 divide-y divide-slate-100">
+              <tbody className="font-medium text-[var(--text-secondary)] divide-y divide-[var(--border-color)]">
                 {(isSuperAdmin || isHR
                   ? state.regularizations
                   : state.regularizations.filter(
@@ -4612,7 +4593,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     )
                 ).length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-xs text-slate-400">
+                    <td colSpan={6} className="p-8 text-center text-xs text-[var(--text-muted)]">
                       No attendance correction requests found.
                     </td>
                   </tr>
@@ -4628,12 +4609,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   ).map((reg) => {
                     const canApprove = canApproveRegularization(state.currentPersona, reg, state.employees);
                     return (
-                      <tr key={reg.id} className="hover:bg-slate-50/80 transition-colors duration-150">
-                        <td className="p-3.5 font-bold text-slate-900">
+                      <tr key={reg.id} className="hover:bg-[var(--bg-surface-subtle)]/80 transition-colors duration-150">
+                        <td className="p-3.5 font-bold text-[var(--text-primary)]">
                           <button
                             type="button"
                             onClick={() => handleEmployeeClick(reg.employeeId || reg.employeeName)}
-                            className="text-left font-bold text-slate-900 hover:text-blue-600 hover:underline cursor-pointer transition-colors"
+                            className="text-left font-bold text-[var(--text-primary)] hover:text-[var(--studio-navy)] hover:underline cursor-pointer transition-colors"
                             title={`View profile for ${reg.employeeName}`}
                           >
                             {reg.employeeName}
@@ -4641,7 +4622,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         </td>
                         <td className="p-3.5">{reg.date}</td>
                         <td className="p-3.5 font-mono">{reg.requestedCheckIn} to {reg.requestedCheckOut}</td>
-                        <td className="p-3.5 text-slate-500">{reg.reason} • {reg.remarks}</td>
+                        <td className="p-3.5 text-[var(--text-muted)]">{reg.reason} • {reg.remarks}</td>
                         <td className="p-3.5">
                           <AttendanceStatusPill
                             kind={reg.status === 'Approved' ? 'approved' : reg.status === 'Rejected' ? 'rejected' : 'pending'}
@@ -4654,20 +4635,20 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleApproveRegularization(reg.id, true)}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] cursor-pointer transition-colors shadow-2xs active:scale-[0.97]"
+                                className="px-2.5 py-1 rounded-lg bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white font-bold text-[11px] cursor-pointer transition-colors shadow-2xs active:scale-[0.97]"
                               >
                                 Approve
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleApproveRegularization(reg.id, false)}
-                                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-[11px] cursor-pointer transition-colors active:scale-[0.97]"
+                                className="px-2.5 py-1 rounded-lg bg-[var(--studio-error-surface)] hover:bg-[var(--studio-error-surface)] text-[var(--studio-error)] border border-[var(--border-color)] font-bold text-[11px] cursor-pointer transition-colors active:scale-[0.97]"
                               >
                                 Reject
                               </button>
                             </>
                           ) : (
-                            <span className="text-[11px] text-slate-400">
+                            <span className="text-[11px] text-[var(--text-muted)]">
                               {reg.status === 'Approved' ? 'Authorized' : 'Submitted'}
                             </span>
                           )}
@@ -4690,10 +4671,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             {/* Header with Apply Action */}
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
               <div>
-                <h2 className={ATT_PAGE_TITLE}>My Leaves</h2>
+                <h2 className="work-title">My leaves</h2>
               </div>
 
               <div className="flex items-center gap-2">
+                {canAccessReports && (
                 <button
                   type="button"
                   onClick={() => {
@@ -4702,9 +4684,10 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   }}
                   className={ATT_BTN_SECONDARY}
                 >
-                  <Printer className="h-3.5 w-3.5 text-slate-500" />
+                  <Printer className="h-3.5 w-3.5 text-[var(--text-muted)]" />
                   <span>Export Report</span>
                 </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowApplyLeaveModal(true)}
@@ -4733,9 +4716,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             {/* Current Leaves Left (4 Balance Cards) */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
               {/* Card 1: Casual Leave */}
-              <div className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  p-4 flex flex-col justify-between space-y-2 shadow-2xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Casual Leave</span>
+                  <span className="text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-200">Casual Leave</span>
                   {isTargetInProbation ? (
                     <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
                       Restricted
@@ -4745,16 +4728,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       {casualPending}d pending
                     </span>
                   ) : (
-                    <span className="text-[10px] text-slate-400 dark:text-[#686873]">{casualUsed}d used</span>
+                    <span className="text-[10px] text-[var(--text-muted)] dark:text-[#686873]">{casualUsed}d used</span>
                   )}
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
-                    {isTargetInProbation ? 0 : formatLeaveDays(casualLeft)} <span className="text-xs font-normal text-slate-500 dark:text-[#9e9ea7]">/ {isTargetInProbation ? 0 : formatLeaveDays(casualQuota)} Days Left</span>
+                  <p className="text-2xl font-bold text-[var(--text-primary)] dark:text-white tabular-nums">
+                    {isTargetInProbation ? 0 : formatLeaveDays(casualLeft)} <span className="text-xs font-normal text-[var(--text-muted)] dark:text-[#9e9ea7]">/ {isTargetInProbation ? 0 : formatLeaveDays(casualQuota)} Days Left</span>
                   </p>
-                  <div className="mt-2 h-1.5 w-full bg-slate-100 dark:bg-[#282830] rounded-full overflow-hidden">
+                  <div className="mt-2 h-1.5 w-full bg-[var(--bg-surface-subtle)]  rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                      className="h-full bg-[var(--studio-navy)] rounded-full"
                       style={{ width: `${isTargetInProbation || casualQuota === 0 ? 0 : Math.min(100, (casualLeft / casualQuota) * 100)}%` }}
                     />
                   </div>
@@ -4762,9 +4745,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               </div>
 
               {/* Card 2: Sick Leave */}
-              <div className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  p-4 flex flex-col justify-between space-y-2 shadow-2xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Sick Leave</span>
+                  <span className="text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-200">Sick Leave</span>
                   {isTargetInProbation ? (
                     <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
                       Restricted
@@ -4774,16 +4757,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       {sickPending}d pending
                     </span>
                   ) : (
-                    <span className="text-[10px] text-slate-400 dark:text-[#686873]">{sickUsed}d used</span>
+                    <span className="text-[10px] text-[var(--text-muted)] dark:text-[#686873]">{sickUsed}d used</span>
                   )}
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
-                    {isTargetInProbation ? 0 : formatLeaveDays(sickLeft)} <span className="text-xs font-normal text-slate-500 dark:text-[#9e9ea7]">/ {isTargetInProbation ? 0 : formatLeaveDays(sickQuota)} Days Left</span>
+                  <p className="text-2xl font-bold text-[var(--text-primary)] dark:text-white tabular-nums">
+                    {isTargetInProbation ? 0 : formatLeaveDays(sickLeft)} <span className="text-xs font-normal text-[var(--text-muted)] dark:text-[#9e9ea7]">/ {isTargetInProbation ? 0 : formatLeaveDays(sickQuota)} Days Left</span>
                   </p>
-                  <div className="mt-2 h-1.5 w-full bg-slate-100 dark:bg-[#282830] rounded-full overflow-hidden">
+                  <div className="mt-2 h-1.5 w-full bg-[var(--bg-surface-subtle)]  rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                      className="h-full bg-[var(--studio-navy)] rounded-full"
                       style={{ width: `${isTargetInProbation || sickQuota === 0 ? 0 : Math.min(100, (sickLeft / sickQuota) * 100)}%` }}
                     />
                   </div>
@@ -4791,9 +4774,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               </div>
 
               {/* Card 3: Earned / Privilege */}
-              <div className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  p-4 flex flex-col justify-between space-y-2 shadow-2xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Earned / Privilege</span>
+                  <span className="text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-200">Earned / Privilege</span>
                   {isTargetInProbation ? (
                     <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
                       Restricted
@@ -4803,16 +4786,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       {earnedPending}d pending
                     </span>
                   ) : (
-                    <span className="text-[10px] text-slate-400 dark:text-[#686873]">{earnedUsed}d used</span>
+                    <span className="text-[10px] text-[var(--text-muted)] dark:text-[#686873]">{earnedUsed}d used</span>
                   )}
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
-                    {isTargetInProbation ? 0 : formatLeaveDays(earnedLeft)} <span className="text-xs font-normal text-slate-500 dark:text-[#9e9ea7]">/ {isTargetInProbation ? 0 : formatLeaveDays(earnedQuota)} Days Left</span>
+                  <p className="text-2xl font-bold text-[var(--text-primary)] dark:text-white tabular-nums">
+                    {isTargetInProbation ? 0 : formatLeaveDays(earnedLeft)} <span className="text-xs font-normal text-[var(--text-muted)] dark:text-[#9e9ea7]">/ {isTargetInProbation ? 0 : formatLeaveDays(earnedQuota)} Days Left</span>
                   </p>
-                  <div className="mt-2 h-1.5 w-full bg-slate-100 dark:bg-[#282830] rounded-full overflow-hidden">
+                  <div className="mt-2 h-1.5 w-full bg-[var(--bg-surface-subtle)]  rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-purple-500 rounded-full transition-all duration-300"
+                      className="h-full bg-[var(--studio-navy)] rounded-full"
                       style={{ width: `${isTargetInProbation || earnedQuota === 0 ? 0 : Math.min(100, (earnedLeft / earnedQuota) * 100)}%` }}
                     />
                   </div>
@@ -4821,9 +4804,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
               {/* Card 4: Work From Home */}
               {!isInstitution && (
-                <div className="rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] p-4 flex flex-col justify-between space-y-2 shadow-2xs">
+                <div className="rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  p-4 flex flex-col justify-between space-y-2 shadow-2xs">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Work From Home</span>
+                    <span className="text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-200">Work From Home</span>
                     {isTargetInProbation ? (
                       <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
                         Restricted
@@ -4833,16 +4816,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         {wfhPending}d pending
                       </span>
                     ) : (
-                      <span className="text-[10px] text-slate-400 dark:text-[#686873]">{wfhUsed}d used</span>
+                      <span className="text-[10px] text-[var(--text-muted)] dark:text-[#686873]">{wfhUsed}d used</span>
                     )}
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
-                      {isTargetInProbation ? 0 : formatLeaveDays(wfhLeft)} <span className="text-xs font-normal text-slate-500 dark:text-[#9e9ea7]">/ {isTargetInProbation ? 0 : formatLeaveDays(wfhQuota)} Days Left</span>
+                    <p className="text-2xl font-bold text-[var(--text-primary)] dark:text-white tabular-nums">
+                      {isTargetInProbation ? 0 : formatLeaveDays(wfhLeft)} <span className="text-xs font-normal text-[var(--text-muted)] dark:text-[#9e9ea7]">/ {isTargetInProbation ? 0 : formatLeaveDays(wfhQuota)} Days Left</span>
                     </p>
-                    <div className="mt-2 h-1.5 w-full bg-slate-100 dark:bg-[#282830] rounded-full overflow-hidden">
+                    <div className="mt-2 h-1.5 w-full bg-[var(--bg-surface-subtle)]  rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                        className="h-full bg-[var(--studio-navy)] rounded-full"
                         style={{ width: `${isTargetInProbation || wfhQuota === 0 ? 0 : Math.min(100, (wfhLeft / wfhQuota) * 100)}%` }}
                       />
                     </div>
@@ -4852,12 +4835,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             </div>
 
             {/* Past Leaves History Section */}
-            <div className="rounded-xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] overflow-hidden space-y-3 p-4 shadow-2xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-[#282830] pb-3">
+            <div className="rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  overflow-hidden space-y-3 p-4 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)]  pb-3">
                 <div className="flex items-center gap-2">
-                  <CalendarIcon className="h-4 w-4 text-blue-500" />
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">History of Past Leaves & Requests</h3>
-                  <span className="text-xs text-slate-500 dark:text-[#9e9ea7]">
+                  <h3 className={ATT_SECTION_TITLE}>Leave history</h3>
+                  <span className="text-xs text-[var(--text-muted)] dark:text-[#9e9ea7]">
                     ({targetEmpLeaves.length} records)
                   </span>
                 </div>
@@ -4866,7 +4848,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   <select
                     value={leaveFilterStatus}
                     onChange={(e) => setLeaveFilterStatus(e.target.value)}
-                    className="bg-slate-50 dark:bg-[#18181d] border border-slate-200 dark:border-[#282830] text-xs font-semibold text-slate-700 dark:text-[#9e9ea7] hover:text-slate-900 dark:hover:text-white px-3 py-1.5 rounded-lg outline-none cursor-pointer"
+                    className="bg-[var(--bg-surface-subtle)]  border border-[var(--border-color)]  text-xs font-semibold text-[var(--text-secondary)] dark:text-[#9e9ea7] hover:text-[var(--text-primary)] dark:hover:text-white px-3 py-1.5 rounded-lg outline-none cursor-pointer"
                   >
                     <option value="All">All Status</option>
                     <option value="Pending">Pending Approval</option>
@@ -4881,27 +4863,27 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 {targetEmpLeaves
                   .filter((l) => leaveFilterStatus === 'All' || l.status === leaveFilterStatus)
                   .length === 0 ? (
-                  <div className="p-8 text-center text-xs text-slate-400">
+                  <div className="p-8 text-center text-xs text-[var(--text-muted)]">
                     No leave applications found matching the selected filter. Click &ldquo;+ Apply for Leave&rdquo; to submit a new request.
                   </div>
                 ) : (
                   targetEmpLeaves
                     .filter((l) => leaveFilterStatus === 'All' || l.status === leaveFilterStatus)
                     .map((leave) => (
-                      <div key={leave.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2.5">
+                      <div key={leave.id} className="p-3.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 space-y-2.5">
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-white border border-slate-200 text-slate-800">
+                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-primary)]">
                               {leave.leaveType}
                             </span>
-                            <p className="text-xs font-bold text-slate-900 mt-1">
+                            <p className="text-xs font-bold text-[var(--text-primary)] mt-1">
                               {leave.startDate} to {leave.endDate} <span className="text-blue-600 font-semibold">({leave.daysCount}d)</span>
                             </p>
                           </div>
                           <span
                             className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold border shrink-0 ${
                               leave.status === 'Approved'
-                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border-blue-200'
                                 : leave.status === 'Pending'
                                 ? 'bg-amber-50 text-amber-700 border-amber-200'
                                 : 'bg-rose-50 text-rose-700 border-rose-200'
@@ -4912,18 +4894,18 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         </div>
 
                         {leave.reason && (
-                          <p className="text-[11px] text-slate-500 bg-white p-2 rounded-lg border border-slate-100">
+                          <p className="text-[11px] text-[var(--text-muted)] bg-[var(--bg-surface)] p-2 rounded-lg border border-[var(--border-color)]">
                             {leave.reason}
                           </p>
                         )}
 
-                        <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60">
-                          <span className="text-[10px] text-slate-400">Applied: {leave.appliedOn || leave.startDate || new Date().toISOString().substring(0, 10)}</span>
+                        <div className="flex items-center justify-between text-xs pt-1 border-t border-[var(--border-color)]">
+                          <span className="text-[10px] text-[var(--text-muted)]">Applied: {leave.appliedOn || leave.startDate || new Date().toISOString().substring(0, 10)}</span>
                           {leave.status === 'Pending' && (
                             <button
                               type="button"
                               onClick={() => handleCancelLeave(leave.id)}
-                              className="text-xs font-bold text-rose-600 hover:underline cursor-pointer"
+                              className="text-xs font-bold text-[var(--studio-error)] hover:underline cursor-pointer"
                             >
                               Cancel Request
                             </button>
@@ -4937,9 +4919,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               {/* Desktop Leaves Table */}
               <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-50 dark:bg-[#18181d] text-slate-500 dark:text-[#9e9ea7] border-b border-slate-200/80 dark:border-[#282830] font-bold uppercase text-[10px]">
+                  <thead className="bg-[var(--bg-surface-subtle)]  text-[var(--text-muted)] dark:text-[#9e9ea7] border-b border-[var(--border-color)]  font-bold uppercase text-[10px]">
                     <tr>
-                      <th className="p-3 text-slate-900 dark:text-white">Leave Type</th>
+                      <th className="p-3 text-[var(--text-primary)] dark:text-white">Leave Type</th>
                       <th className="p-3">Dates & Duration</th>
                       <th className="p-3">Reason</th>
                       <th className="p-3">Applied On</th>
@@ -4947,12 +4929,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       <th className="p-3 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="font-medium text-slate-700 dark:text-slate-300 divide-y divide-slate-100 dark:divide-[#282830]">
+                  <tbody className="font-medium text-[var(--text-secondary)] dark:text-slate-300 divide-y divide-[var(--border-color)] dark:divide-[#282830]">
                     {targetEmpLeaves
                       .filter((l) => leaveFilterStatus === 'All' || l.status === leaveFilterStatus)
                       .length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-8 text-center text-xs text-slate-400 dark:text-[#686873]">
+                        <td colSpan={6} className="p-8 text-center text-xs text-[var(--text-muted)] dark:text-[#686873]">
                           No leave applications found matching the selected filter. Click &ldquo;+ Apply for Leave&rdquo; to submit a new request.
                         </td>
                       </tr>
@@ -4960,27 +4942,27 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       targetEmpLeaves
                         .filter((l) => leaveFilterStatus === 'All' || l.status === leaveFilterStatus)
                         .map((leave) => (
-                          <tr key={leave.id} className="hover:bg-slate-50 dark:hover:bg-[#18181d] transition-colors">
+                          <tr key={leave.id} className="hover:bg-[var(--bg-surface-subtle)] dark:hover:bg-[#18181d] transition-colors">
                             <td className="p-3">
-                              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 dark:bg-[#18181d] border border-slate-200 dark:border-[#282830] text-slate-800 dark:text-slate-200">
+                              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-[var(--bg-surface-subtle)]  border border-[var(--border-color)]  text-[var(--text-primary)] dark:text-slate-200">
                                 {leave.leaveType}
                               </span>
                             </td>
                             <td className="p-3 whitespace-nowrap">
-                              <span className="font-semibold text-slate-900 dark:text-white tabular-nums">{leave.startDate} to {leave.endDate}</span>
+                              <span className="font-semibold text-[var(--text-primary)] dark:text-white tabular-nums">{leave.startDate} to {leave.endDate}</span>
                               <span className="ml-2 text-[11px] text-blue-500 font-semibold">({leave.daysCount}d)</span>
                             </td>
-                            <td className="p-3 text-slate-500 dark:text-[#9e9ea7] max-w-sm truncate" title={leave.reason}>
+                            <td className="p-3 text-[var(--text-muted)] dark:text-[#9e9ea7] max-w-sm truncate" title={leave.reason}>
                               {leave.reason}
                             </td>
-                            <td className="p-3 text-slate-500 dark:text-[#9e9ea7] text-[11px] whitespace-nowrap tabular-nums">
+                            <td className="p-3 text-[var(--text-muted)] dark:text-[#9e9ea7] text-[11px] whitespace-nowrap tabular-nums">
                               {leave.appliedOn || leave.startDate || new Date().toISOString().substring(0, 10)}
                             </td>
                             <td className="p-3 whitespace-nowrap">
                               <span
                                 className={`rounded-md px-2.5 py-0.5 text-[10px] font-semibold border ${
                                   leave.status === 'Approved'
-                                    ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800/40'
+                                    ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800/40'
                                     : leave.status === 'Pending'
                                     ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/40'
                                     : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/40'
@@ -4994,12 +4976,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleCancelLeave(leave.id)}
-                                  className="text-xs text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                                  className="text-xs text-[var(--studio-error)] dark:text-rose-400 hover:underline cursor-pointer"
                                 >
                                   Cancel Request
                                 </button>
                               ) : (
-                                <span className="text-[10px] text-slate-400 dark:text-[#686873]">Reviewed</span>
+                                <span className="text-[10px] text-[var(--text-muted)] dark:text-[#686873]">Reviewed</span>
                               )}
                             </td>
                           </tr>
@@ -5015,7 +4997,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             {/* HR Approvals View */}
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
               <div>
-                <h2 className={ATT_PAGE_TITLE}>Leave Approvals</h2>
+                <h2 className="work-title">Leave approvals</h2>
               </div>
 
               <div className="flex items-center gap-2">
@@ -5023,7 +5005,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   <button
                     type="button"
                     onClick={handleApproveAllPending}
-                    className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 text-xs font-bold text-white transition-[transform,background-color] duration-150 ease-out cursor-pointer shadow-sm active:scale-[0.97]"
+                    className="flex items-center gap-1.5 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] px-3.5 py-2 text-xs font-bold text-white transition-[transform,background-color] duration-150 ease-out cursor-pointer shadow-sm active:scale-[0.97]"
                   >
                     <CheckCircle2 className="h-4 w-4" /> Approve All
                   </button>
@@ -5104,17 +5086,17 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   {/* Mobile Pending Leave Cards */}
                   <div className="block md:hidden p-3.5 space-y-3">
                     {accessiblePendingLeaves.map((leave) => (
-                      <div key={leave.id} className="p-3.5 rounded-xl border border-amber-200/80 bg-white space-y-2.5 shadow-2xs">
+                      <div key={leave.id} className="p-3.5 rounded-xl border border-amber-200/80 bg-[var(--bg-surface)] space-y-2.5 shadow-2xs">
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <button
                               type="button"
                               onClick={() => handleEmployeeClick(leave.employeeId || leave.employeeName)}
-                              className="text-left font-bold text-slate-900 text-xs hover:text-blue-600 cursor-pointer"
+                              className="text-left font-bold text-[var(--text-primary)] text-xs hover:text-[var(--studio-navy)] cursor-pointer"
                             >
                               {leave.employeeName}
                             </button>
-                            <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                            <p className="text-[11px] text-[var(--text-muted)] font-mono mt-0.5">
                               {leave.startDate} to {leave.endDate} ({leave.daysCount}d)
                             </p>
                           </div>
@@ -5124,13 +5106,13 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         </div>
 
                         {leave.reason && (
-                          <p className="text-[11px] text-slate-600 bg-amber-50/50 p-2 rounded-lg border border-amber-100">
+                          <p className="text-[11px] text-[var(--text-secondary)] bg-amber-50/50 p-2 rounded-lg border border-amber-100">
                             {leave.reason}
                           </p>
                         )}
 
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                          <span className="text-[10px] text-slate-400">Applied: {leave.appliedOn}</span>
+                        <div className="flex items-center justify-between pt-2 border-t border-[var(--border-color)] text-xs">
+                          <span className="text-[10px] text-[var(--text-muted)]">Applied: {leave.appliedOn}</span>
                           {(() => {
                             const emp = state.employees.find(
                               (e) => e.id === leave.employeeId || (e.name && e.name.toLowerCase() === leave.employeeName.toLowerCase())
@@ -5153,7 +5135,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => handleApproveLeave(leave.id, true)}
-                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold cursor-pointer transition-colors shadow-xs"
+                                    className="px-3 py-1.5 bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white rounded-xl text-[11px] font-bold cursor-pointer transition-colors shadow-xs"
                                   >
                                     Approve
                                   </button>
@@ -5161,7 +5143,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleApproveLeave(leave.id, false)}
-                                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-[11px] font-bold cursor-pointer transition-colors"
+                                  className="px-3 py-1.5 bg-[var(--studio-error-surface)] hover:bg-[var(--studio-error-surface)] text-[var(--studio-error)] border border-[var(--border-color)] rounded-xl text-[11px] font-bold cursor-pointer transition-colors"
                                 >
                                   Reject
                                 </button>
@@ -5196,11 +5178,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
                           return (
                             <tr key={leave.id} className="hover:bg-amber-100/20 dark:hover:bg-amber-950/20 transition-colors">
-                              <td className="p-3 font-bold text-slate-900 dark:text-white">
+                              <td className="p-3 font-bold text-[var(--text-primary)] dark:text-white">
                                 <button
                                   type="button"
                                   onClick={() => handleEmployeeClick(leave.employeeId || leave.employeeName)}
-                                  className="text-left font-bold text-slate-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer"
+                                  className="text-left font-bold text-[var(--text-primary)] dark:text-white hover:text-[var(--studio-navy)] dark:hover:text-blue-400 hover:underline cursor-pointer"
                                 >
                                   {leave.employeeName}
                                 </button>
@@ -5210,16 +5192,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                   </span>
                                 )}
                               </td>
-                              <td className="p-3 text-slate-500 dark:text-[#9e9ea7]">{leave.department || 'Operations'}</td>
+                              <td className="p-3 text-[var(--text-muted)] dark:text-[#9e9ea7]">{leave.department || 'Operations'}</td>
                               <td className="p-3">
-                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-white dark:bg-[#18181d] border border-amber-200 dark:border-amber-900/40 text-amber-900 dark:text-amber-200">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[var(--bg-surface)]  border border-amber-200 dark:border-amber-900/40 text-amber-900 dark:text-amber-200">
                                   {leave.leaveType}
                                 </span>
                               </td>
                               <td className="p-3 whitespace-nowrap font-mono">
                                 {leave.startDate} to {leave.endDate} <span className="text-amber-700 dark:text-amber-300 font-bold">({leave.daysCount}d)</span>
                               </td>
-                              <td className="p-3 text-slate-600 dark:text-slate-300 max-w-xs truncate" title={leave.reason}>
+                              <td className="p-3 text-[var(--text-secondary)] dark:text-slate-300 max-w-xs truncate" title={leave.reason}>
                                 {leave.reason}
                               </td>
                               <td className="p-3 text-right">
@@ -5237,7 +5219,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => handleApproveLeave(leave.id, true)}
-                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold cursor-pointer transition-colors shadow-xs"
+                                      className="px-2.5 py-1 bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white rounded-lg text-[11px] font-bold cursor-pointer transition-colors shadow-xs"
                                     >
                                       Approve
                                     </button>
@@ -5245,7 +5227,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => handleApproveLeave(leave.id, false)}
-                                    className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-bold cursor-pointer transition-colors"
+                                    className="px-2.5 py-1 bg-[var(--bg-surface)] hover:bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-bold cursor-pointer transition-colors"
                                   >
                                     Reject
                                   </button>
@@ -5262,14 +5244,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             })()}
 
             {/* All Leave Requests Table */}
-            <div className="rounded-xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#121214] overflow-hidden shadow-2xs">
-              <div className="p-3.5 border-b border-slate-100 dark:border-[#282830]">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-[#9e9ea7]">All Workforce Leave Records</h3>
+            <div className="rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  overflow-hidden shadow-2xs">
+              <div className="p-3.5 border-b border-[var(--border-color)] ">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] dark:text-[#9e9ea7]">All Workforce Leave Records</h3>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-50 dark:bg-[#18181d] text-slate-500 dark:text-[#9e9ea7] font-bold uppercase text-[10px] border-b border-slate-200/80 dark:border-[#282830]">
+                  <thead className="bg-[var(--bg-surface-subtle)]  text-[var(--text-muted)] dark:text-[#9e9ea7] font-bold uppercase text-[10px] border-b border-[var(--border-color)] ">
                     <tr>
                       <th className="p-3">Employee</th>
                       <th className="p-3">Department</th>
@@ -5280,7 +5262,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       <th className="p-3 text-right">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-[#282830] font-medium text-slate-800 dark:text-slate-200">
+                  <tbody className="divide-y divide-[var(--border-color)] dark:divide-[#282830] font-medium text-[var(--text-primary)] dark:text-slate-200">
                     {(isSuperAdmin || isHR ? (state.leaves || []) : getTeamLeaves(state.currentPersona, state.leaves || [], state.employees))
                       .filter((l) => {
                         const matchesQuery =
@@ -5294,34 +5276,34 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         const hasApprovalPermission = canApproveLeave(state.currentPersona, leave, state.employees);
 
                         return (
-                          <tr key={leave.id} className="hover:bg-slate-50 dark:hover:bg-[#18181d]">
-                            <td className="p-3 font-bold text-slate-900 dark:text-white">
+                          <tr key={leave.id} className="hover:bg-[var(--bg-surface-subtle)] dark:hover:bg-[#18181d]">
+                            <td className="p-3 font-bold text-[var(--text-primary)] dark:text-white">
                               <button
                                 type="button"
                                 onClick={() => handleEmployeeClick(leave.employeeId || leave.employeeName)}
-                                className="text-left font-bold text-slate-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer transition-colors"
+                                className="text-left font-bold text-[var(--text-primary)] dark:text-white hover:text-[var(--studio-navy)] dark:hover:text-blue-400 hover:underline cursor-pointer transition-colors"
                                 title={`View profile for ${leave.employeeName}`}
                               >
                                 {leave.employeeName}
                               </button>
                             </td>
-                            <td className="p-3 text-slate-500 dark:text-[#9e9ea7]">{leave.department || 'Operations'}</td>
+                            <td className="p-3 text-[var(--text-muted)] dark:text-[#9e9ea7]">{leave.department || 'Operations'}</td>
                             <td className="p-3">
-                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-[#18181d] border border-slate-200 dark:border-[#282830] text-slate-800 dark:text-slate-200">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[var(--bg-surface-subtle)]  border border-[var(--border-color)]  text-[var(--text-primary)] dark:text-slate-200">
                                 {leave.leaveType}
                               </span>
                             </td>
                             <td className="p-3 whitespace-nowrap font-mono">
                               {leave.startDate} to {leave.endDate} <span className="text-blue-600 dark:text-blue-400 font-bold">({leave.daysCount}d)</span>
                             </td>
-                            <td className="p-3 text-slate-500 dark:text-[#9e9ea7] max-w-xs truncate" title={leave.reason}>
+                            <td className="p-3 text-[var(--text-muted)] dark:text-[#9e9ea7] max-w-xs truncate" title={leave.reason}>
                               {leave.reason}
                             </td>
                             <td className="p-3">
                               <span
                                 className={`rounded-md px-2.5 py-0.5 text-[10px] font-semibold border ${
                                   leave.status === 'Approved'
-                                    ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800/40'
+                                    ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800/40'
                                     : leave.status === 'Pending'
                                     ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/40'
                                     : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/40'
@@ -5345,7 +5327,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => handleApproveLeave(leave.id, false)}
-                                      className="text-xs text-rose-600 hover:underline cursor-pointer font-bold"
+                                      className="text-xs text-[var(--studio-error)] hover:underline cursor-pointer font-bold"
                                     >
                                       Reject
                                     </button>
@@ -5355,16 +5337,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => handleApproveLeave(leave.id, leave.status !== 'Approved')}
-                                      className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+                                      className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:hover:text-white cursor-pointer"
                                     >
                                       Toggle
                                     </button>
                                   ) : (
-                                    <span className="text-slate-400 text-xs">—</span>
+                                    <span className="text-[var(--text-muted)] text-xs">—</span>
                                   )
                                 )
                               ) : (
-                                <span className="text-slate-400 text-xs">—</span>
+                                <span className="text-[var(--text-muted)] text-xs">—</span>
                               )}
                             </td>
                           </tr>
@@ -5378,76 +5360,46 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         )
       )}
 
-      {/* VIEW: ATTENDANCE / CAMPUS SETTINGS (Strictly Admin / HR Only) */}
-      {subTab === 'settings' && (isSuperAdmin || isHR) && (
-        <div className="pt-2">
-          <AttendanceSettingsView state={state} onUpdateState={onUpdateState} />
-        </div>
-      )}
-
       {/* VIEW: HOLIDAY CALENDAR */}
       {subTab === 'holidays' && (
         <div className="pt-2">
           <HolidayCalendarView
             holidays={state.customOptions?.holidays}
             onUpdateHolidays={(updated) => {
-              if (onUpdateState) {
-                onUpdateState((prev) => ({
-                  ...prev,
-                  customOptions: {
-                    ...prev.customOptions,
-                    holidays: updated,
-                  },
-                }));
-              }
-              void api.attendance.saveHolidays({ holidays: updated }).then((res) => {
-                if (!res.success) {
-                  console.warn('[Holidays] Failed to persist:', res.error?.message || res);
-                }
-              });
+              applyHolidaysToState(updated);
+              return persistHolidays(updated);
             }}
             isHR={isSuperAdmin || isHR}
           />
         </div>
       )}
 
-      {/* CLOCK OUT POPUP MODAL */}
       {showClockOutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl text-slate-900 space-y-4">
+        <div className="dash-clock-modal" role="presentation" onClick={() => setShowClockOutModal(false)}>
+          <div
+            className="dash-clock-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="att-clock-out-title"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div>
-              <h3 className="text-base font-bold text-slate-900">
-                Clock out at {currentTimeFormatted}
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Your total working time for today is {formatTimer(currentElapsedSeconds)}
-              </p>
+              <h2 id="att-clock-out-title">Clock out at {currentTimeFormatted}</h2>
+              <p>Time on shift: {formatTimer(currentElapsedSeconds)}</p>
             </div>
-
-            <div>
-              <textarea
-                value={clockOutNotes}
-                onChange={(e) => setClockOutNotes(e.target.value)}
-                placeholder="Notes (optional)..."
-                rows={3}
-                className="w-full rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-blue-600 transition-colors"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowClockOutModal(false)}
-                className="rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-700 cursor-pointer transition-all"
-              >
+            <textarea
+              className="dash-clock-notes"
+              value={clockOutNotes}
+              onChange={(e) => setClockOutNotes(e.target.value)}
+              placeholder="Notes (optional)"
+              rows={3}
+            />
+            <div className="dash-clock-dialog-actions">
+              <button type="button" className="dash-clock-secondary" onClick={() => setShowClockOutModal(false)}>
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={handleConfirmClockOut}
-                className="rounded-lg bg-rose-600 hover:bg-rose-700 px-5 py-2 text-xs font-bold text-white cursor-pointer transition-all shadow-xs active:scale-98"
-              >
-                Clock Out
+              <button type="button" className="dash-clock-punch dash-clock-punch--out" onClick={handleConfirmClockOut}>
+                Punch out
               </button>
             </div>
           </div>
@@ -5457,24 +5409,24 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       {/* APPLY REGULARIZATION SLIDE-OVER DRAWER (MATCHING ADD TASK UI) */}
       {showRegModal && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="relative w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-slate-900">
+          <div className="relative w-full sm:max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)] border-l border-[var(--border-color)] shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-[var(--text-primary)]">
             {/* Drawer Header */}
-            <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-              <h3 className="text-xl sm:text-2xl font-bold text-slate-900">Apply for Regularization</h3>
+            <div className="p-4 sm:p-6 sm:px-8 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
+              <h3 className="text-xl sm:text-2xl font-bold text-[var(--text-primary)]">Apply for Regularization</h3>
               <button
                 type="button"
                 onClick={() => setShowRegModal(false)}
-                className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors duration-150 active:scale-[0.97]"
+                className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] p-2 cursor-pointer rounded-xl hover:bg-[var(--bg-surface-subtle)] transition-colors duration-150 active:scale-[0.97]"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             {/* Drawer Form Body */}
-            <form onSubmit={handleApplyRegularizationSubmit} autoComplete="off" className="flex-1 flex flex-col justify-between overflow-hidden bg-white">
+            <form onSubmit={handleApplyRegularizationSubmit} autoComplete="off" className="flex-1 flex flex-col justify-between overflow-hidden bg-[var(--bg-surface)]">
               <div className="p-8 space-y-5 overflow-y-auto custom-scrollbar text-xs">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-2">
                     Target Date <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -5483,14 +5435,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     value={regDate}
                     onChange={(e) => setRegDate(e.target.value)}
                     max={toLocalISODate()}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
+                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--text-primary)] font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
                     required
                   />
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-2">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-2">
                       Requested In-Time <span className="text-rose-500">*</span>
                     </label>
                     <input
@@ -5499,12 +5451,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       autoComplete="off"
                       value={to24HourTime(regInTime)}
                       onChange={(e) => setRegInTime(to12HourClockTime(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--text-primary)] font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-2">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-2">
                       Requested Out-Time <span className="text-rose-500">*</span>
                     </label>
                     <input
@@ -5513,20 +5465,20 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       autoComplete="off"
                       value={to24HourTime(regOutTime)}
                       onChange={(e) => setRegOutTime(to12HourClockTime(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--text-primary)] font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer"
                       required
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-2">
                     Reason for Regularization <span className="text-rose-500">*</span>
                   </label>
                   <select
                     value={regReason}
                     onChange={(e) => setRegReason(e.target.value as any)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
+                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--text-primary)] font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
                   >
                     <option value="Client Visit">Client Visit / Offsite Meeting</option>
                     <option value="Network / GPS Error">GPS Accuracy / Technical Glitch</option>
@@ -5536,7 +5488,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-2">
                     Detailed Remarks / Explanation <span className="text-rose-500">*</span>
                   </label>
                   <textarea
@@ -5544,24 +5496,24 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     onChange={(e) => setRegRemarks(e.target.value)}
                     placeholder="Provide detailed context for manager approval..."
                     rows={3}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all resize-none"
+                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all resize-none"
                     required
                   />
                 </div>
               </div>
 
               {/* Drawer Form Footer */}
-              <div className="p-4 sm:p-6 sm:px-8 border-t border-slate-100 bg-white flex items-center justify-end gap-3 shrink-0">
+              <div className="p-4 sm:p-6 sm:px-8 border-t border-[var(--border-color)] bg-[var(--bg-surface)] flex items-center justify-end gap-3 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowRegModal(false)}
-                  className="flex-1 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 cursor-pointer transition-colors duration-150 shadow-2xs active:scale-[0.97]"
+                  className="flex-1 py-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-sm font-semibold text-[var(--text-secondary)] cursor-pointer transition-colors duration-150 shadow-2xs active:scale-[0.97]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-[transform,background-color] duration-150 ease-out active:scale-[0.97]"
+                  className="flex-1 py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-[transform,background-color] duration-150 ease-out active:scale-[0.97]"
                 >
                   Submit Request
                 </button>
@@ -5570,50 +5522,81 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           </div>
         </div>
       )}
-      {/* CONFIRM PUNCH LOCATION FULL-SCREEN / EXPANDED MODAL (WHITE THEME) */}
       {showPunchLocationModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="att-overlay" role="presentation" onClick={() => setShowPunchLocationModal(false)}>
           <div
-            className="relative w-full max-w-5xl h-[92vh] max-h-[850px] rounded-2xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
-            style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+            className="att-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="att-punch-title"
+            onClick={(e) => e.stopPropagation()}
           >
-            {/* Symmetrical Refined Header Bar */}
-            <div
-              className="relative px-6 py-3.5 border-b border-slate-100 flex items-center justify-between shrink-0"
-              style={{ backgroundColor: '#ffffff' }}
-            >
-              <button
-                type="button"
-                onClick={() => setShowPunchLocationModal(false)}
-                className="h-9 w-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition-colors duration-150 cursor-pointer active:scale-[0.97]"
-                title="Go back"
-              >
-                <ChevronLeft className="h-5 w-5 stroke-[2]" />
-              </button>
-
-              <h2
-                className="absolute left-1/2 -translate-x-1/2 text-sm sm:text-base font-semibold tracking-tight select-none"
-                style={{ color: '#0f172a' }}
-              >
-                {punchStep === 'map' ? 'Confirm Punch Location' : 'Outside Authorized Geofence'}
+            <div className="att-dialog-head">
+              <h2 id="att-punch-title">
+                {punchStep === 'map' ? 'Confirm location' : 'Outside the office'}
               </h2>
-
               <button
                 type="button"
+                className="att-dialog-close"
                 onClick={() => setShowPunchLocationModal(false)}
-                className="h-9 w-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
-                title="Close modal"
+                aria-label="Close"
               >
-                <X className="h-4 w-4 stroke-[2]" />
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            {/* Main Interactive Leaflet Map View (or out-of-geofence warning) */}
-            {punchStep === 'map' ? (
-              <div
-                className="flex-1 relative overflow-hidden flex flex-col justify-between"
-                style={{ backgroundColor: '#f1f5f9' }}
-              >
+            {punchStep === 'map' && allowQrAttendance && (
+              <div className="att-dialog-modes" role="tablist" aria-label="Punch method">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={punchMode === 'gps'}
+                  className="work-tab"
+                  onClick={() => setPunchMode('gps')}
+                >
+                  GPS
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={punchMode === 'qr'}
+                  className="work-tab"
+                  onClick={() => setPunchMode('qr')}
+                >
+                  Office QR
+                </button>
+              </div>
+            )}
+
+            {/* Main interactive map view (or out-of-geofence warning) */}
+            {punchStep === 'map' && punchMode === 'qr' ? (
+              <div className="att-dialog-qr">
+                {(isSuperAdmin || isHR || isManager || state.currentPersona.role === 'faculty') && officeQr?.token && (
+                  <div className="text-center space-y-2">
+                    <p className="text-[11px] font-semibold text-[var(--text-secondary)]">
+                      Kiosk code for {officeQr.officeName || activeOfficeDisplayName}
+                    </p>
+                    <img
+                      alt="Office attendance QR"
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(officeQr.token)}`}
+                    />
+                    <p className="text-[11px] text-[var(--text-muted)]">Refreshes automatically. Enter this code to punch.</p>
+                  </div>
+                )}
+                <div className="w-full max-w-sm">
+                  <label htmlFor="att-qr-token">Office QR code</label>
+                  <input
+                    id="att-qr-token"
+                    value={qrTokenInput}
+                    onChange={(e) => setQrTokenInput(e.target.value)}
+                    placeholder="Paste the rotating office token"
+                    className="work-field"
+                  />
+                  {qrError && <p className="mt-2 text-xs text-[var(--studio-error)]">{qrError}</p>}
+                </div>
+              </div>
+            ) : punchStep === 'map' ? (
+              <div className="att-dialog-body">
                 <PunchLocationLeafletMap
                   latitude={currentLat}
                   longitude={currentLng}
@@ -5622,47 +5605,48 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 />
               </div>
             ) : (
-              /* OUT-OF-RADIUS WARNING STEP */
-              <div
-                className="flex-1 p-8 sm:p-12 flex flex-col items-center justify-center text-center space-y-6 bg-white text-slate-900"
-              >
-                <div className="max-w-md space-y-1.5">
-                  <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-rose-600">
-                    Outside Authorized Geofence
-                  </h3>
-                  <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
-                    You are <strong className="text-slate-900">{geofenceDistanceMeters > 1000 ? `${(geofenceDistanceMeters / 1000).toFixed(1)} km` : `${geofenceDistanceMeters} meters`}</strong> away from <strong>{activeOfficeDisplayName}</strong>. Maximum boundary is <strong>{configuredGeofenceRadius} meters</strong>.
-                  </p>
+              <div className="att-dialog-warn">
+                <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed m-0">
+                  You are{' '}
+                  <strong className="text-[var(--text-primary)]">
+                    {geofenceDistanceMeters > 1000
+                      ? `${(geofenceDistanceMeters / 1000).toFixed(1)} km`
+                      : `${geofenceDistanceMeters} meters`}
+                  </strong>{' '}
+                  from {activeOfficeDisplayName}. The boundary is {configuredGeofenceRadius} meters.
+                </p>
+                <div className="att-dialog-alert">
+                  {isInstitution || isStudentMode || isStudentLogin
+                    ? 'Campus attendance is blocked outside the campus boundary. You need to be on campus to punch.'
+                    : 'Office attendance is blocked outside the radius. Be at the workplace, or punch as work from home.'}
                 </div>
-
-                <div
-                  className="w-full max-w-md p-4 rounded-xl border border-rose-200 bg-rose-50/60 text-left text-xs leading-relaxed shadow-xs text-rose-700"
-                >
-                  <p>
-                    {isInstitution || isStudentMode || isStudentLogin
-                      ? 'Campus attendance is blocked because you are outside the authorized campus boundary. You must be physically present on campus to punch attendance.'
-                      : 'Physical office attendance is blocked because you are not within the office radius. You must be physically at the location or switch to Work From Home (WFH).'}
-                  </p>
-                </div>
-
-                <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-2 w-full max-w-md">
-                  <button
-                    type="button"
-                    onClick={() => setPunchStep('map')}
-                    className="w-full sm:flex-1 py-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
-                  >
-                    Back to Map
+                <div className="dash-clock-dialog-actions" style={{ justifyContent: 'stretch' }}>
+                  <button type="button" className="work-btn-secondary flex-1" onClick={() => setPunchStep('map')}>
+                    Back to map
                   </button>
-                  {!isInstitution && !isStudentMode && !isStudentLogin && (
+                  {outOfRadiusAction === 'Warn' && (
                     <button
                       type="button"
+                      className="work-btn-primary flex-1"
+                      onClick={() => {
+                        if (requireSelfieNow) handleOpenSelfieCamera(true);
+                        else void handleFinalConfirmPunch(true, null);
+                      }}
+                    >
+                      Punch as remote
+                    </button>
+                  )}
+                  {!isInstitution && !isStudentMode && !isStudentLogin && outOfRadiusAction === 'Block' && (
+                    <button
+                      type="button"
+                      className="work-btn-primary flex-1"
                       onClick={() => {
                         setSelectedLocation('wfh');
-                        handleOpenSelfieCamera(true);
+                        if (requireSelfieNow) handleOpenSelfieCamera(true);
+                        else void handleFinalConfirmPunch(true, null);
                       }}
-                      className="w-full sm:flex-1 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs font-bold text-white shadow-xs transition-all cursor-pointer active:scale-98"
                     >
-                      Switch to WFH & Proceed
+                      Switch to WFH
                     </button>
                   )}
                 </div>
@@ -5671,61 +5655,48 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
             {/* Bottom Bar: Live Address Header & Time with Punch Button */}
             {punchStep === 'map' && (
-              <div
-                className="border-t border-slate-200 shrink-0 bg-white"
-              >
+              <div className="shrink-0">
                 {isGeofenceOptional && selectedLocation !== 'wfh' && (
-                  <div className="px-6 py-2 bg-amber-50 border-b border-amber-100 text-[11px] font-medium text-amber-800">
-                    Geofence is optional or disabled in Attendance Settings — office radius is not enforced for this punch.
+                  <div className="att-dialog-notice">
+                    Geofence is off for this punch — office radius is not enforced.
                   </div>
                 )}
                 {!isGeofenceOptional && selectedLocation !== 'wfh' && !hasConfiguredOfficeCoords && (
-                  <div className="px-6 py-2 bg-rose-50 border-b border-rose-100 text-[11px] font-medium text-rose-700">
-                    Office GPS coordinates are not configured. Set latitude/longitude in Settings, or switch to WFH to punch remotely.
+                  <div className="att-dialog-notice att-dialog-notice--error">
+                    Office GPS is not set. Add coordinates in Settings, or punch as work from home.
                   </div>
                 )}
-                {/* SECTION 1: Live Resolved Address */}
-                <div className="px-6 py-3 border-b border-slate-100 flex items-center justify-between gap-4">
-                  <p
-                    className={`text-xs font-medium leading-relaxed truncate ${gpsStatus === 'denied' && selectedLocation !== 'wfh' ? 'text-rose-600' : 'text-slate-800'
-                      }`}
-                  >
+                <div
+                  className={`att-dialog-status flex items-center justify-between gap-3 ${
+                    gpsStatus === 'denied' && selectedLocation !== 'wfh' ? 'att-dialog-status--error' : ''
+                  }`}
+                >
+                  <p className="truncate m-0 text-[12px]">
                     {isLocating
-                      ? 'Acquiring device GPS location...'
+                      ? 'Finding your location…'
                       : selectedLocation === 'wfh' && gpsStatus === 'denied'
-                        ? 'Remote / Work From Home — Location unrestricted'
+                        ? 'Work from home — location not required'
                         : selectedLocation === 'wfh'
                           ? `${punchAddress} (WFH)`
                           : punchAddress}
                   </p>
                   {gpsStatus === 'denied' && selectedLocation !== 'wfh' && (
-                    <button
-                      type="button"
-                      onClick={fetchCurrentLocation}
-                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors cursor-pointer shrink-0"
-                    >
+                    <button type="button" className="work-btn-secondary h-8 px-3 text-xs" onClick={fetchCurrentLocation}>
                       Retry GPS
                     </button>
                   )}
                 </div>
 
-                {/* SECTION 2: Real-time Clock & Punch Location Action Button */}
-                <div className="px-6 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-0.5">
-                    <span
-                      className="text-xl sm:text-2xl font-bold tracking-tight leading-none block tabular-nums text-slate-900"
-                      suppressHydrationWarning
-                    >
-                      {currentTimeFormatted}
-                    </span>
-                    <span
-                      className="text-xs text-slate-500 font-medium block"
-                    >
-                      {isMounted ? now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }) : 'Monday, 24 Aug 2026'}
+                <div className="att-dialog-foot">
+                  <div className="att-dialog-meta">
+                    <strong suppressHydrationWarning>{currentTimeFormatted}</strong>
+                    <span>
+                      {isMounted
+                        ? now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })
+                        : 'Monday, 24 Aug'}
                     </span>
                   </div>
 
-                  {/* Punch Location Button — opens camera directly (skips Location Verified confirm) */}
                   {(() => {
                     const officeCoordsMissing =
                       !isGeofenceOptional && selectedLocation !== 'wfh' && !hasConfiguredOfficeCoords;
@@ -5736,11 +5707,15 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       hasDeviceGpsLocation &&
                       !isInsideRadius;
                     const gpsRequiredMissing =
+                      punchMode !== 'qr' &&
                       !isGeofenceOptional &&
                       selectedLocation !== 'wfh' &&
                       hasConfiguredOfficeCoords &&
                       (!hasDeviceGpsLocation || gpsStatus !== 'granted');
-                    const isPunchDisabled = isLocating || officeCoordsMissing || gpsRequiredMissing;
+                    const qrMissing = punchMode === 'qr' && !qrTokenInput.trim();
+                    const isPunchDisabled =
+                      (punchMode === 'gps' && (isLocating || officeCoordsMissing || gpsRequiredMissing)) ||
+                      qrMissing;
                     const punchHoverTitle = officeCoordsMissing
                       ? 'Configure office latitude/longitude in Settings, or switch to WFH'
                       : isOutsideOffice
@@ -5756,20 +5731,26 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       : 'Proceed to face verification';
 
                     return (
-                      <div title={punchHoverTitle} className={isPunchDisabled ? 'cursor-not-allowed' : ''}>
-                        <button
-                          type="button"
-                          onClick={handleProceedFromMap}
-                          disabled={isPunchDisabled}
-                          title={punchHoverTitle}
-                          className={`px-5 py-2.5 rounded-lg text-xs font-bold transition-all duration-150 shrink-0 ${isPunchDisabled
-                              ? 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                              : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-[0.98] text-white shadow-xs cursor-pointer'
-                            }`}
-                        >
-                          Punch Location
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (punchMode === 'qr') {
+                            if (!qrTokenInput.trim()) {
+                              setQrError('Paste the office QR code to continue.');
+                              return;
+                            }
+                            if (requireSelfieNow) handleOpenSelfieCamera(false);
+                            else void handleFinalConfirmPunch(false, null);
+                            return;
+                          }
+                          handleProceedFromMap();
+                        }}
+                        disabled={isPunchDisabled}
+                        title={punchHoverTitle}
+                        className={`work-btn-primary ${isPunchDisabled ? 'opacity-55 cursor-not-allowed' : ''}`}
+                      >
+                        Confirm location
+                      </button>
                     );
                   })()}
                 </div>
@@ -5781,283 +5762,193 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     </div>
   );
 
-  // ─── SELFIE CAMERA MODAL ───────────────────────────────────────────────────
   const selfieModal = showSelfieModal && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div
-        className="relative w-full max-w-5xl h-[92vh] max-h-[850px] rounded-2xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
-        style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
-      >
-        {/* Symmetrical Header Bar */}
-        <div
-          className="relative px-6 py-3.5 border-b border-slate-100 flex items-center justify-between shrink-0"
-          style={{ backgroundColor: '#ffffff' }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              stopCameraStream();
-              setShowSelfieModal(false);
-              setShowPunchLocationModal(true);
-              setPunchStep('map');
-            }}
-            className="h-9 w-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
-            title="Back to location map"
-          >
-            <ChevronLeft className="h-5 w-5 stroke-[2]" />
-          </button>
-
-          <h2
-            className="absolute left-1/2 -translate-x-1/2 text-sm sm:text-base font-semibold tracking-tight select-none"
-            style={{ color: '#0f172a' }}
-          >
-            Face Verification
-          </h2>
-
-          <button
-            type="button"
-            onClick={() => {
-              stopCameraStream();
-              setShowSelfieModal(false);
-            }}
-            className="h-9 w-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
-            title="Close modal"
-          >
-            <X className="h-4 w-4 stroke-[2]" />
-          </button>
+    <div className="att-overlay" role="presentation">
+      <div className="att-dialog" role="dialog" aria-modal="true" aria-labelledby="att-selfie-title">
+        <div className="att-dialog-head">
+          <h2 id="att-selfie-title">Take photo</h2>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="work-btn-secondary h-9 px-3 text-xs"
+              onClick={() => {
+                stopCameraStream();
+                setShowSelfieModal(false);
+                setShowPunchLocationModal(true);
+                setPunchStep('map');
+              }}
+            >
+              Location
+            </button>
+            <button
+              type="button"
+              className="att-dialog-close"
+              aria-label="Close"
+              onClick={() => {
+                stopCameraStream();
+                setShowSelfieModal(false);
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Camera / Photo Viewport Area */}
-        <div className="flex-1 relative overflow-hidden flex flex-col justify-center items-center bg-slate-950 select-none min-h-[360px]">
-          {/* Flash Effect on capture */}
+        <div className="att-dialog-camera">
           {isFlashing && (
-            <div className="absolute inset-0 bg-white z-50 pointer-events-none animate-camera-flash" />
+            <div className="absolute inset-0 bg-[var(--bg-surface)] z-50 pointer-events-none animate-camera-flash" />
           )}
 
           {cameraError ? (
-            /* Redesigned Camera Permission / Offline State */
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-slate-950 text-center animate-in fade-in duration-200 z-30 select-none">
-              <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-2xl flex flex-col items-center space-y-4">
-                <div className="space-y-1.5">
-                  <h3 className="text-base font-bold text-white tracking-tight">
-                    Camera Access Required
-                  </h3>
-                  <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">
-                    {cameraError}
-                  </p>
-                </div>
-
-                <div className="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-3 text-xs text-slate-400 space-y-1 text-left leading-relaxed">
-                  <p>1. Allow camera permissions when prompted.</p>
-                  <p>2. Click Retry Camera below to reconnect.</p>
-                  {isNativePlatform() && <p>3. Or use Use Device Camera to open the system camera.</p>}
-                </div>
-
-                <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full pt-1">
-                  <button
-                    type="button"
-                    onClick={handleRetryCamera}
-                    disabled={isCameraLoading}
-                    className="w-full py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-xs font-bold text-white transition-all shadow-xs cursor-pointer disabled:opacity-50"
-                  >
-                    {isCameraLoading ? 'Connecting Camera...' : 'Retry Camera'}
-                  </button>
-                  {isNativePlatform() && (
-                    <button
-                      type="button"
-                      onClick={() => void handleNativeCameraCapture()}
-                      disabled={isCameraLoading}
-                      className="w-full py-2.5 px-4 rounded-lg bg-slate-700 hover:bg-slate-600 active:bg-slate-800 text-xs font-bold text-white transition-all cursor-pointer disabled:opacity-50 border border-slate-600"
-                    >
-                      Use Device Camera
-                    </button>
-                  )}
+            <div className="att-dialog-camera-empty">
+              <p>{cameraError}</p>
+              <p>Allow the camera in the address bar, then retry.</p>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRetryCamera}
+                  disabled={isCameraLoading}
+                  className="work-btn-primary"
+                >
+                  {isCameraLoading ? 'Connecting…' : 'Retry camera'}
+                </button>
+                {!requireSelfieNow && (
                   <button
                     type="button"
                     onClick={() => handleFinalConfirmPunch(selfieAsRemote, null)}
-                    className="w-full py-2.5 px-4 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-xs font-semibold text-slate-300 transition-colors cursor-pointer border border-slate-700/60"
+                    className="work-btn-secondary"
                   >
-                    Skip & Punch
+                    Skip and punch
                   </button>
-                </div>
+                )}
               </div>
             </div>
           ) : capturedSelfie ? (
-            /* Captured Selfie Preview */
-            <div className="relative w-full h-full">
-              <img
-                src={capturedSelfie}
-                alt="Captured selfie preview"
-                className="w-full h-full object-cover"
-              />
-            </div>
+            <img src={capturedSelfie} alt="Captured punch photo" />
           ) : (
-            /* Clean Live Camera Feed */
-            <div className="relative w-full h-full bg-slate-950 flex items-center justify-center">
+            <>
               {isCameraLoading && (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-950 z-20">
-                  <div className="flex flex-col items-center gap-3 p-6 rounded-2xl bg-slate-900/60 border border-slate-800/60">
-                    <div className="h-9 w-9 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-                    <p className="text-xs font-semibold text-slate-300">Connecting live camera...</p>
-                    <span className="text-[10px] text-slate-500 font-medium">Requesting video stream</span>
-                  </div>
+                <div className="att-dialog-camera-empty">
+                  <p>Connecting camera…</p>
                 </div>
               )}
-
-              {/* Video element - Clean Mirrored Live Feed */}
               <video
                 ref={videoRef}
-                className={`w-full h-full object-cover scale-x-[-1] transition-opacity duration-300 ${
-                  isCameraReady ? 'opacity-100' : 'opacity-0'
-                }`}
+                className={`scale-x-[-1] transition-opacity duration-300 ${isCameraReady ? 'opacity-100' : 'opacity-0'}`}
                 autoPlay
                 playsInline
                 muted
               />
-            </div>
+            </>
           )}
         </div>
 
-        {/* Hidden Canvas for High-Res Capture */}
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* Bottom Bar: Clock on Left & Action Buttons on Right */}
-        <div
-          className="border-t border-slate-200 shrink-0 bg-white"
-        >
-          <div className="px-6 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <span
-                className="text-xl sm:text-2xl font-bold tracking-tight leading-none block tabular-nums text-slate-900"
-                suppressHydrationWarning
-              >
-                {currentTimeFormatted}
-              </span>
-              <span
-                className="text-xs text-slate-500 font-medium block"
-              >
-                {isMounted ? now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }) : 'Monday, 24 Aug 2026'}
-              </span>
-            </div>
-
-            {/* Action Buttons */}
-            {capturedSelfie ? (
-              /* Review Mode Actions: Retake + Submit */
-              <div className="flex items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={handleRetake}
-                  className="px-4 py-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 transition-colors cursor-pointer"
-                >
-                  Retake
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleFinalConfirmPunch(selfieAsRemote, capturedSelfie)}
-                  className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-[0.98] text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-                >
-                  Confirm Punch
-                </button>
-              </div>
-            ) : (
-              /* Live Camera Shutter Action */
+        <div className="att-dialog-foot">
+          <div className="att-dialog-meta">
+            <strong suppressHydrationWarning>{currentTimeFormatted}</strong>
+            <span>
+              {isMounted
+                ? now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' })
+                : 'Monday, 24 Aug'}
+            </span>
+          </div>
+          {capturedSelfie ? (
+            <div className="flex items-center gap-2">
+              <button type="button" className="work-btn-secondary" onClick={handleRetake}>
+                Retake
+              </button>
               <button
                 type="button"
-                onClick={handleTakePhoto}
-                disabled={isCameraLoading || !isCameraReady || !!cameraError}
-                className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-[0.98] text-white text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                className="work-btn-primary"
+                onClick={() => handleFinalConfirmPunch(selfieAsRemote, capturedSelfie)}
               >
-                {cameraError ? 'Camera Offline' : isCameraLoading || !isCameraReady ? 'Connecting...' : 'Take Photo'}
+                Confirm punch
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="work-btn-primary"
+              onClick={handleTakePhoto}
+              disabled={isCameraLoading || !isCameraReady || !!cameraError}
+            >
+              {cameraError ? 'Camera offline' : isCameraLoading || !isCameraReady ? 'Connecting…' : 'Take photo'}
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 
-  // ─── DUAL PHOTO INSPECTION MODAL (CHECK IN & CHECK OUT) ─────────────────
   const photoInspectionModal = selectedAttendancePhotoRecord && (
     <div
-      className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/80 backdrop-blur-xs animate-in fade-in duration-150 cursor-pointer p-4"
+      className="att-overlay"
+      style={{ zIndex: 90 }}
+      role="presentation"
       onClick={() => setSelectedAttendancePhotoRecord(null)}
     >
       <div
-        className="relative max-w-2xl w-full bg-[#121214] border border-[#282830] rounded-2xl p-6 shadow-2xl text-white space-y-5 animate-in zoom-in-95 duration-150 cursor-default"
+        className="att-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="att-photos-title"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-[#282830] pb-4">
-          <div>
-            <h3 className="text-base font-bold text-white">
-              Attendance Verification Photos
-            </h3>
-            <p className="text-xs text-[#9e9ea7] mt-0.5">
-              {selectedAttendancePhotoRecord.employeeName} • {selectedAttendancePhotoRecord.date}
-            </p>
-          </div>
+        <div className="att-dialog-head">
+          <h2 id="att-photos-title">{selectedAttendancePhotoRecord.employeeName}</h2>
           <button
             type="button"
+            className="att-dialog-close"
+            aria-label="Close"
             onClick={() => setSelectedAttendancePhotoRecord(null)}
-            className="h-8 w-8 rounded-full bg-[#18181d] hover:bg-[#25252c] border border-[#282830] text-[#9e9ea7] hover:text-white flex items-center justify-center transition-colors cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-
-        {/* Grid of Two Photo Cards (Check In & Check Out) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Card 1: Check In Photo */}
-          <div className="rounded-xl border border-[#282830] bg-[#18181d] p-4 flex flex-col space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white">Check In Photo</span>
-              <span className="text-[11px] font-mono font-semibold text-blue-400 bg-blue-950/40 border border-blue-800/40 px-2 py-0.5 rounded">
-                {selectedAttendancePhotoRecord.checkIn ? selectedAttendancePhotoRecord.checkIn.replace(/\s*\(GMT[^\)]*\)/gi, '').trim() : 'Logged'}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-[var(--text-secondary)]">Punch in</span>
+              <span className="text-[11px] tabular-nums text-[var(--text-muted)]">
+                {selectedAttendancePhotoRecord.checkIn
+                  ? selectedAttendancePhotoRecord.checkIn.replace(/\s*\(GMT[^\)]*\)/gi, '').trim()
+                  : '—'}
               </span>
             </div>
-
-            <div className="rounded-xl overflow-hidden border border-[#282830] aspect-[4/3] bg-black flex items-center justify-center">
-              {(selectedAttendancePhotoRecord.checkInPhoto || selectedAttendancePhotoRecord.selfiePhoto) ? (
+            <div className="rounded-[var(--list-radius)] overflow-hidden border border-[var(--border-color)] aspect-[4/3] bg-[var(--bg-app)] flex items-center justify-center">
+              {selectedAttendancePhotoRecord.checkInPhoto || selectedAttendancePhotoRecord.selfiePhoto ? (
                 <img
                   src={selectedAttendancePhotoRecord.checkInPhoto || selectedAttendancePhotoRecord.selfiePhoto}
-                  alt="Check In Selfie"
+                  alt={`Punch in photo for ${selectedAttendancePhotoRecord.employeeName}`}
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="text-center p-4 space-y-1.5 text-[#9e9ea7]">
-                  <Camera className="h-6 w-6 mx-auto text-[#686873]" />
-                  <p className="text-xs font-medium">No check-in photo recorded</p>
-                </div>
+                <p className="text-xs text-[var(--text-muted)] px-4 text-center">No punch-in photo</p>
               )}
             </div>
           </div>
-
-          {/* Card 2: Check Out Photo */}
-          <div className="rounded-xl border border-[#282830] bg-[#18181d] p-4 flex flex-col space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white">Check Out Photo</span>
-              <span className="text-[11px] font-mono font-semibold text-blue-400 bg-blue-950/40 border border-blue-800/40 px-2 py-0.5 rounded">
-                {selectedAttendancePhotoRecord.checkOut ? selectedAttendancePhotoRecord.checkOut.replace(/\s*\(GMT[^\)]*\)/gi, '').trim() : 'Pending'}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-[var(--text-secondary)]">Punch out</span>
+              <span className="text-[11px] tabular-nums text-[var(--text-muted)]">
+                {selectedAttendancePhotoRecord.checkOut
+                  ? selectedAttendancePhotoRecord.checkOut.replace(/\s*\(GMT[^\)]*\)/gi, '').trim()
+                  : 'Pending'}
               </span>
             </div>
-
-            <div className="rounded-xl overflow-hidden border border-[#282830] aspect-[4/3] bg-black flex items-center justify-center">
+            <div className="rounded-[var(--list-radius)] overflow-hidden border border-[var(--border-color)] aspect-[4/3] bg-[var(--bg-app)] flex items-center justify-center">
               {selectedAttendancePhotoRecord.checkOutPhoto ? (
                 <img
                   src={selectedAttendancePhotoRecord.checkOutPhoto}
-                  alt="Check Out Selfie"
+                  alt={`Punch out photo for ${selectedAttendancePhotoRecord.employeeName}`}
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="text-center p-4 space-y-1.5 text-[#9e9ea7]">
-                  <ImageOff className="h-6 w-6 mx-auto text-[#686873]" />
-                  <p className="text-xs font-medium">
-                    {!selectedAttendancePhotoRecord.checkOut ? 'No photo yet' : 'No photo uploaded'}
-                  </p>
-                  {!selectedAttendancePhotoRecord.checkOut && (
-                    <p className="text-[10px] text-[#686873]">Check out hasn't happened yet</p>
-                  )}
-                </div>
+                <p className="text-xs text-[var(--text-muted)] px-4 text-center">
+                  {!selectedAttendancePhotoRecord.checkOut ? 'Not punched out yet' : 'No punch-out photo'}
+                </p>
               )}
             </div>
           </div>
@@ -6073,32 +5964,32 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       onClick={() => setEditingAttendanceRecord(null)}
     >
       <div
-        className="relative w-full max-w-lg md:max-w-xl h-full bg-white dark:bg-[#121214] border-l border-slate-100 dark:border-[#282830] shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-slate-900 dark:text-white"
+        className="relative w-full max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)]  border-l border-[var(--border-color)]  shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-[var(--text-primary)] dark:text-white"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Drawer Header */}
-        <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 dark:border-[#282830] flex items-center justify-between bg-white dark:bg-[#121214] shrink-0">
+        <div className="p-4 sm:p-6 sm:px-8 border-b border-[var(--border-color)]  flex items-center justify-between bg-[var(--bg-surface)]  shrink-0">
           <div>
-            <h3 className="text-2xl font-bold text-slate-900 dark:text-white">Edit Attendance Times</h3>
-            <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1 font-medium">
+            <h3 className="text-2xl font-bold text-[var(--text-primary)] dark:text-white">Edit Attendance Times</h3>
+            <p className="text-xs text-[var(--text-muted)] dark:text-[#9e9ea7] mt-1 font-medium">
               {editingAttendanceRecord.employeeName} • {editingAttendanceRecord.date}
             </p>
           </div>
           <button
             type="button"
             onClick={() => setEditingAttendanceRecord(null)}
-            className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-2 cursor-pointer rounded-xl hover:bg-slate-100 dark:hover:bg-[#18181d] transition-colors"
+            className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:hover:text-white p-2 cursor-pointer rounded-xl hover:bg-[var(--bg-surface-subtle)] dark:hover:bg-[#18181d] transition-colors"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Drawer Form Body */}
-        <form onSubmit={handleSaveAttendanceRecord} className="flex-1 flex flex-col justify-between overflow-hidden bg-white dark:bg-[#121214]">
+        <form onSubmit={handleSaveAttendanceRecord} className="flex-1 flex flex-col justify-between overflow-hidden bg-[var(--bg-surface)] ">
           <div className="p-8 space-y-6 overflow-y-auto custom-scrollbar text-xs">
             {/* Quick Shift Presets */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                 Quick Shift Presets
               </label>
               <div className="flex flex-wrap gap-2">
@@ -6116,8 +6007,8 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         onClick={() => handleTimeChange('09:00:00 AM', '06:00:00 PM')}
                         className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                           isGeneral
-                            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/40'
-                            : 'bg-slate-100 dark:bg-[#1f1f26] text-slate-700 dark:text-slate-300 border border-transparent hover:bg-slate-200 dark:hover:bg-[#282830]'
+                            ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/40'
+                            : 'bg-[var(--bg-surface-subtle)]  text-[var(--text-secondary)] dark:text-slate-300 border border-transparent hover:bg-[var(--bg-surface-hover)] dark:hover:bg-[#282830]'
                         }`}
                       >
                         General (9 AM - 6 PM)
@@ -6127,8 +6018,8 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         onClick={() => handleTimeChange('08:00:00 AM', '05:00:00 PM')}
                         className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                           isMorning
-                            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/40'
-                            : 'bg-slate-100 dark:bg-[#1f1f26] text-slate-700 dark:text-slate-300 border border-transparent hover:bg-slate-200 dark:hover:bg-[#282830]'
+                            ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/40'
+                            : 'bg-[var(--bg-surface-subtle)]  text-[var(--text-secondary)] dark:text-slate-300 border border-transparent hover:bg-[var(--bg-surface-hover)] dark:hover:bg-[#282830]'
                         }`}
                       >
                         Morning (8 AM - 5 PM)
@@ -6138,8 +6029,8 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         onClick={() => handleTimeChange('09:00:00 AM', '01:30:00 PM')}
                         className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                           isHalfDay
-                            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/40'
-                            : 'bg-slate-100 dark:bg-[#1f1f26] text-slate-700 dark:text-slate-300 border border-transparent hover:bg-slate-200 dark:hover:bg-[#282830]'
+                            ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/40'
+                            : 'bg-[var(--bg-surface-subtle)]  text-[var(--text-secondary)] dark:text-slate-300 border border-transparent hover:bg-[var(--bg-surface-hover)] dark:hover:bg-[#282830]'
                         }`}
                       >
                         Half Day (9 AM - 1:30 PM)
@@ -6153,7 +6044,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             {/* Check In / Check Out Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                   Check In Time <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -6164,13 +6055,13 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     const val12 = to12HourTime(val24);
                     handleTimeChange(val12, editCheckOut);
                   }}
-                  className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm text-slate-800 dark:text-white font-mono font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer"
+                  className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm text-[var(--text-primary)] dark:text-white font-mono font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                   Check Out Time
                 </label>
                 <input
@@ -6181,7 +6072,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     const val12 = to12HourTime(val24);
                     handleTimeChange(editCheckIn, val12);
                   }}
-                  className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm text-slate-800 dark:text-white font-mono font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer"
+                  className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm text-[var(--text-primary)] dark:text-white font-mono font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer"
                 />
               </div>
             </div>
@@ -6190,7 +6081,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300">
                     Logged Hours <span className="text-rose-500">*</span>
                   </label>
                   {editCheckIn && editCheckOut && (
@@ -6206,19 +6097,19 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                   max="24"
                   value={editWorkingHours}
                   onChange={(e) => setEditWorkingHours(parseFloat(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm text-slate-800 dark:text-white font-mono font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
+                  className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm text-[var(--text-primary)] dark:text-white font-mono font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                   Attendance Status <span className="text-rose-500">*</span>
                 </label>
                 <select
                   value={editStatus}
                   onChange={(e) => setEditStatus(e.target.value as any)}
-                  className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm text-slate-800 dark:text-white font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
+                  className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm text-[var(--text-primary)] dark:text-white font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
                 >
                   <option value="Present">Present</option>
                   <option value="Late">Late</option>
@@ -6232,17 +6123,17 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           </div>
 
           {/* Drawer Form Footer */}
-          <div className="p-6 px-8 border-t border-slate-100 dark:border-[#282830] bg-white dark:bg-[#121214] flex items-center justify-end gap-3 shrink-0">
+          <div className="p-6 px-8 border-t border-[var(--border-color)]  bg-[var(--bg-surface)]  flex items-center justify-end gap-3 shrink-0">
             <button
               type="button"
               onClick={() => setEditingAttendanceRecord(null)}
-              className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] hover:bg-slate-50 dark:hover:bg-[#202028] text-sm font-semibold text-slate-700 dark:text-slate-300 cursor-pointer transition-colors shadow-2xs"
+              className="flex-1 py-3 rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  hover:bg-[var(--bg-surface-subtle)] dark:hover:bg-[#202028] text-sm font-semibold text-[var(--text-secondary)] dark:text-slate-300 cursor-pointer transition-colors shadow-2xs"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
+              className="flex-1 py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
             >
               Save Changes
             </button>
@@ -6255,15 +6146,15 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   {/* APPLY LEAVE / LOG LEAVE MODAL (Simplified Modern Slide-over Drawer) */}
   const applyLeaveModal = showApplyLeaveModal && (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg md:max-w-xl h-full bg-white dark:bg-[#121214] border-l border-slate-100 dark:border-[#282830] shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-slate-900 dark:text-white">
+      <div className="relative w-full max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)]  border-l border-[var(--border-color)]  shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-[var(--text-primary)] dark:text-white">
         
         {/* Drawer Header */}
-        <div className="p-4 sm:p-7 sm:px-8 border-b border-slate-100 dark:border-[#282830] flex items-center justify-between bg-white dark:bg-[#121214] shrink-0">
+        <div className="p-4 sm:p-7 sm:px-8 border-b border-[var(--border-color)]  flex items-center justify-between bg-[var(--bg-surface)]  shrink-0">
           <div>
-            <h3 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+            <h3 className="text-xl sm:text-2xl font-bold text-[var(--text-primary)] dark:text-white tracking-tight">
               {isSuperAdmin || isHR ? 'Log Leave for Employee' : 'Apply for Leave'}
             </h3>
-            <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-0.5">
+            <p className="text-xs text-[var(--text-muted)] dark:text-[#9e9ea7] mt-0.5">
               {isSuperAdmin || isHR
                 ? 'Submit time-off request with duration, balance quota, and reason.'
                 : 'Submit time-off request for approval with duration and reason.'}
@@ -6272,7 +6163,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           <button
             type="button"
             onClick={() => setShowApplyLeaveModal(false)}
-            className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-[#1f1f26] cursor-pointer transition-colors shrink-0"
+            className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:hover:text-white p-2 rounded-xl hover:bg-[var(--bg-surface-subtle)] dark:hover:bg-[#1f1f26] cursor-pointer transition-colors shrink-0"
             title="Close"
           >
             <X className="h-5 w-5" />
@@ -6280,7 +6171,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         </div>
 
         {/* Drawer Form Body */}
-        <form onSubmit={handleApplyLeaveSubmit} className="flex-1 flex flex-col justify-between overflow-hidden bg-white dark:bg-[#121214]">
+        <form onSubmit={handleApplyLeaveSubmit} className="flex-1 flex flex-col justify-between overflow-hidden bg-[var(--bg-surface)] ">
           <div className="p-4 sm:p-8 space-y-4 sm:space-y-5 overflow-y-auto custom-scrollbar text-xs">
 
             {/* Probation Notice Banner if Target is in Probation */}
@@ -6299,21 +6190,21 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             {/* 1. Assignee Member or Requester */}
             {isSuperAdmin || isHR ? (
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                   Assignee Member <span className="text-rose-500">*</span>
                 </label>
                 <select
                   value={selectedLeaveEmpId}
                   onChange={(e) => setSelectedLeaveEmpId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm font-medium text-slate-800 dark:text-white outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all shadow-2xs"
+                  className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm font-medium text-[var(--text-primary)] dark:text-white outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all shadow-2xs"
                 >
-                  <option value={state.currentPersona.id} className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white font-bold">
+                  <option value={state.currentPersona.id} className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white font-bold">
                     Myself ({state.currentPersona.name}) — {state.currentPersona.role.replace('_', ' ')}
                   </option>
                   {state.employees
                     .filter((e) => e.id !== state.currentPersona.id)
                     .map((e) => (
-                      <option key={e.id} value={e.id} className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white">
+                      <option key={e.id} value={e.id} className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
                         {e.name} ({e.employeeId || e.id}) • {e.designation || 'Staff'} — {e.department}
                       </option>
                     ))}
@@ -6321,19 +6212,19 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               </div>
             ) : isManagerUser && managerDirectReports.length > 0 ? (
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                   Leave For <span className="text-rose-500">*</span>
                 </label>
                 <select
                   value={selectedLeaveEmpId}
                   onChange={(e) => setSelectedLeaveEmpId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm font-medium text-slate-800 dark:text-white outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all shadow-2xs"
+                  className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm font-medium text-[var(--text-primary)] dark:text-white outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all shadow-2xs"
                 >
-                  <option value={state.currentPersona.id} className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white font-bold">
+                  <option value={state.currentPersona.id} className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white font-bold">
                     Myself ({state.currentPersona.name})
                   </option>
                   {managerDirectReports.map((e) => (
-                    <option key={e.id} value={e.id} className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white">
+                    <option key={e.id} value={e.id} className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
                       {e.name} ({e.employeeId || e.id}) • Direct Report — {e.designation || 'Staff'}
                     </option>
                   ))}
@@ -6341,58 +6232,58 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               </div>
             ) : (
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                   Requester
                 </label>
-                <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-[#282830] bg-slate-50/70 dark:bg-[#18181d] text-xs text-slate-800 dark:text-white font-medium flex items-center justify-between">
+                <div className="p-3.5 rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface-subtle)]/70  text-xs text-[var(--text-primary)] dark:text-white font-medium flex items-center justify-between">
                   <span>{state.currentPersona.name} ({state.currentPersona.role.replace('_', ' ')})</span>
-                  <span className="text-slate-500 font-semibold">{state.currentPersona.department}</span>
+                  <span className="text-[var(--text-muted)] font-semibold">{state.currentPersona.department}</span>
                 </div>
               </div>
             )}
 
             {/* 2. Leave Category (Respecting Probation Restrictions) */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                 Leave Category <span className="text-rose-500">*</span>
               </label>
               <select
                 value={leaveType}
                 onChange={(e) => setLeaveType(e.target.value as any)}
-                className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm font-medium text-slate-800 dark:text-white outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all shadow-2xs"
+                className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm font-medium text-[var(--text-primary)] dark:text-white outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all shadow-2xs"
               >
                 {modalIsProbation ? (
                   <>
-                    <option value="Unpaid Leave" className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white font-bold">
+                    <option value="Unpaid Leave" className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white font-bold">
                       Loss of Pay (LOP) / Unpaid Leave (Standard for Probation)
                     </option>
-                    <option value="Casual Leave" disabled className="bg-slate-100 text-slate-400">
+                    <option value="Casual Leave" disabled className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)]">
                       Casual Leave (0 Days Available • Restricted in Probation)
                     </option>
-                    <option value="Sick Leave" disabled className="bg-slate-100 text-slate-400">
+                    <option value="Sick Leave" disabled className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)]">
                       Sick Leave (0 Days Available • Restricted in Probation)
                     </option>
-                    <option value="Earned Leave" disabled className="bg-slate-100 text-slate-400">
+                    <option value="Earned Leave" disabled className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)]">
                       Earned / Privilege Leave (0 Days Available • Restricted in Probation)
                     </option>
                   </>
                 ) : (
                   <>
-                    <option value="Casual Leave" className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white">
-                      Casual Leave ({modalCasualLeft}/{modalTargetQuotas.annualQuotas.casualLeave} Days Remaining)
+                    <option value="Casual Leave" className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
+                      Casual Leave ({modalCasualLeft}/{Math.max(modalCasualLeft, modalTargetQuotas.annualQuotas.casualLeave)} Days Remaining)
                     </option>
-                    <option value="Sick Leave" className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white">
-                      Sick Leave ({modalSickLeft}/{modalTargetQuotas.annualQuotas.sickLeave} Days Remaining)
+                    <option value="Sick Leave" className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
+                      Sick Leave ({modalSickLeft}/{Math.max(modalSickLeft, modalTargetQuotas.annualQuotas.sickLeave)} Days Remaining)
                     </option>
-                    <option value="Earned Leave" className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white">
-                      Earned / Privilege Leave ({modalEarnedLeft}/{modalTargetQuotas.annualQuotas.earnedLeave} Days Remaining)
+                    <option value="Earned Leave" className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
+                      Earned / Privilege Leave ({modalEarnedLeft}/{Math.max(modalEarnedLeft, modalTargetQuotas.annualQuotas.earnedLeave)} Days Remaining)
                     </option>
                     {!isInstitution && (
-                      <option value="Work From Home" className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white">
-                        Work From Home ({modalWfhLeft}/{modalTargetQuotas.annualQuotas.compOff} Days Remaining)
+                      <option value="Work From Home" className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
+                        Work From Home ({modalWfhLeft}/{Math.max(modalWfhLeft, modalTargetQuotas.annualQuotas.compOff)} Days Remaining)
                       </option>
                     )}
-                    <option value="Unpaid Leave" className="bg-white dark:bg-[#18181d] text-slate-800 dark:text-white">
+                    <option value="Unpaid Leave" className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
                       Unpaid Leave / Loss of Pay
                     </option>
                   </>
@@ -6402,10 +6293,10 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
             {/* 3. Duration Scope (Clean 3-Tab Segmented Control) */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                 Duration Scope <span className="text-rose-500">*</span>
               </label>
-              <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 dark:bg-[#18181d] rounded-xl border border-slate-200 dark:border-[#282830]">
+              <div className="grid grid-cols-3 gap-1.5 p-1 bg-[var(--bg-surface-subtle)]  rounded-xl border border-[var(--border-color)] ">
                 {[
                   { key: 'single', label: 'Single Day' },
                   { key: 'half', label: 'Half Day (0.5d)' },
@@ -6417,8 +6308,8 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     onClick={() => setDayMode(tab.key as any)}
                     className={`py-2 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-center ${
                       dayMode === tab.key
-                        ? 'bg-white dark:bg-[#25252e] text-slate-900 dark:text-white font-bold shadow-xs'
-                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
+                        ? 'bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white font-bold shadow-xs'
+                        : 'text-[var(--text-muted)] dark:text-[var(--text-muted)] hover:text-[var(--text-primary)] dark:hover:text-white'
                     }`}
                   >
                     {tab.label}
@@ -6434,8 +6325,8 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     onClick={() => setHalfSession('First Half (Morning)')}
                     className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer text-center ${
                       halfSession === 'First Half (Morning)'
-                        ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold'
-                        : 'border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] text-slate-600 dark:text-slate-400'
+                        ? 'border-blue-600 bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold'
+                        : 'border-[var(--border-color)]  bg-[var(--bg-surface)]  text-[var(--text-secondary)] dark:text-[var(--text-muted)]'
                     }`}
                   >
                     First Half (Morning)
@@ -6445,8 +6336,8 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     onClick={() => setHalfSession('Second Half (Afternoon)')}
                     className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer text-center ${
                       halfSession === 'Second Half (Afternoon)'
-                        ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold'
-                        : 'border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] text-slate-600 dark:text-slate-400'
+                        ? 'border-blue-600 bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold'
+                        : 'border-[var(--border-color)]  bg-[var(--bg-surface)]  text-[var(--text-secondary)] dark:text-[var(--text-muted)]'
                     }`}
                   >
                     Second Half (Afternoon)
@@ -6458,14 +6349,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             {/* 4. Date Input */}
             {dayMode !== 'multi' ? (
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                   Date of Time Off <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="date"
                   value={singleDate}
                   onChange={(e) => setSingleDate(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm text-slate-800 dark:text-white font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer shadow-2xs"
+                  className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm text-[var(--text-primary)] dark:text-white font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer shadow-2xs"
                   required
                 />
               </div>
@@ -6473,19 +6364,19 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               <div className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                       Start Date <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="date"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm text-slate-800 dark:text-white font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer shadow-2xs"
+                      className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm text-[var(--text-primary)] dark:text-white font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer shadow-2xs"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                       End Date <span className="text-rose-500">*</span>
                     </label>
                     <input
@@ -6493,14 +6384,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       min={startDate}
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm text-slate-800 dark:text-white font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer shadow-2xs"
+                      className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm text-[var(--text-primary)] dark:text-white font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all cursor-pointer shadow-2xs"
                       required
                     />
                   </div>
                 </div>
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#18181d] border border-slate-200/80 dark:border-[#282830] flex items-center justify-between text-xs">
-                  <span className="text-slate-500 font-medium">Total Duration:</span>
-                  <span className="font-bold text-slate-900 dark:text-white">
+                <div className="p-3 rounded-xl bg-[var(--bg-surface-subtle)]  border border-[var(--border-color)]  flex items-center justify-between text-xs">
+                  <span className="text-[var(--text-muted)] font-medium">Total Duration:</span>
+                  <span className="font-bold text-[var(--text-primary)] dark:text-white">
                     {computedLeaveDays} {computedLeaveDays === 1 ? 'Business Day' : 'Business Days'}
                   </span>
                 </div>
@@ -6509,13 +6400,13 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
             {/* 5. Work Handover Colleague */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                Work Handover Colleague <span className="text-slate-400 font-normal">(Optional)</span>
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
+                Work Handover Colleague <span className="text-[var(--text-muted)] font-normal">(Optional)</span>
               </label>
               <select
                 value={leaveHandover}
                 onChange={(e) => setLeaveHandover(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4 py-3 text-sm font-medium text-slate-800 dark:text-white outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all shadow-2xs"
+                className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  px-4 py-3 text-sm font-medium text-[var(--text-primary)] dark:text-white outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all shadow-2xs"
               >
                 <option value="">(None - Self Managed)</option>
                 {state.employees
@@ -6530,7 +6421,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
             {/* 6. Reason & Handover Notes */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+              <label className="block text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-300 mb-2">
                 Reason & Handover Notes <span className="text-rose-500">*</span>
               </label>
               <textarea
@@ -6538,7 +6429,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 onChange={(e) => setLeaveReason(e.target.value)}
                 placeholder="Provide a feasible reason or deliverables handover notes..."
                 rows={3}
-                className="w-full rounded-xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] p-3.5 text-sm text-slate-800 dark:text-white placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all resize-none shadow-2xs"
+                className="w-full rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  p-3.5 text-sm text-[var(--text-primary)] dark:text-white placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all resize-none shadow-2xs"
                 required
               />
             </div>
@@ -6546,8 +6437,8 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           </div>
 
           {/* Drawer Form Footer */}
-          <div className="p-4 sm:p-6 sm:px-8 border-t border-slate-100 dark:border-[#282830] bg-white dark:bg-[#121214] flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100 dark:border-[#282830]">
-            <span className="text-xs text-slate-500 dark:text-[#9e9ea7]">
+          <div className="p-4 sm:p-6 sm:px-8 border-t border-[var(--border-color)]  bg-[var(--bg-surface)]  flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[var(--border-color)] ">
+            <span className="text-xs text-[var(--text-muted)] dark:text-[#9e9ea7]">
               {modalIsProbation
                 ? `Logs ${computedLeaveDays} day(s) as Loss of Pay (Probation)`
                 : `Deducts ${computedLeaveDays} day(s) from ${leaveType}`}
@@ -6556,13 +6447,13 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               <button
                 type="button"
                 onClick={() => setShowApplyLeaveModal(false)}
-                className="px-5 py-2.5 sm:py-3 rounded-xl border border-slate-200 dark:border-[#282830] text-slate-600 dark:text-slate-300 text-xs sm:text-sm font-semibold hover:bg-slate-50 dark:hover:bg-[#18181d] cursor-pointer transition-all"
+                className="px-5 py-2.5 sm:py-3 rounded-xl border border-[var(--border-color)]  text-[var(--text-secondary)] dark:text-slate-300 text-xs sm:text-sm font-semibold hover:bg-[var(--bg-surface-subtle)] dark:hover:bg-[#18181d] cursor-pointer transition-all"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-6 py-2.5 sm:py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
+                className="px-6 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-xs sm:text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
                 style={{ color: '#ffffff' }}
               >
                 {isSuperAdmin || isHR ? 'Log Leave Request' : 'Submit Application'}
@@ -6583,32 +6474,32 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       {applyLeaveModal}
       {probationBlockModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-[#18181d] rounded-2xl border border-slate-200 dark:border-[#282830] max-w-md w-full p-6 space-y-4 shadow-2xl">
+          <div className="bg-[var(--bg-surface)]  rounded-xl border border-[var(--border-color)]  max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div className="flex items-center gap-3 text-amber-600 dark:text-amber-500">
               <div className="h-10 w-10 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 flex items-center justify-center shrink-0">
                 <AlertCircle className="h-5 w-5 text-amber-600" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                <h3 className="text-sm font-bold text-[var(--text-primary)] dark:text-white">
                   Probation Policy: Paid Leave Restricted
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-[var(--text-muted)]">
                   {probationBlockModal.leave.employeeName} is currently in probation
                 </p>
               </div>
             </div>
 
-            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed bg-amber-50/60 dark:bg-amber-500/5 p-3 rounded-xl border border-amber-200/80">
+            <p className="text-xs text-[var(--text-secondary)] dark:text-slate-300 leading-relaxed bg-amber-50/60 dark:bg-amber-500/5 p-3 rounded-xl border border-amber-200/80">
               In accordance with company probation policy, employees in probation are not eligible for paid leaves (
               <span className="font-bold">{probationBlockModal.leave.leaveType}</span>). Paid leaves cannot be approved.
-              You can approve this request as <span className="font-bold text-slate-900 dark:text-white">Loss of Pay (Unpaid Leave)</span> or reject it.
+              You can approve this request as <span className="font-bold text-[var(--text-primary)] dark:text-white">Loss of Pay (Unpaid Leave)</span> or reject it.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setProbationBlockModal(null)}
-                className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#282830] cursor-pointer"
+                className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-semibold text-[var(--text-secondary)] dark:text-[var(--text-muted)] hover:bg-[var(--bg-surface-subtle)] dark:hover:bg-[#282830] cursor-pointer"
               >
                 Cancel
               </button>
@@ -6633,12 +6524,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           </div>
         </div>
       )}
+      {canAccessReports && (
       <AttendanceReportsModal
         isOpen={showReportsModal}
         onClose={() => setShowReportsModal(false)}
         state={state}
         initialReportType={reportsModalInitialType}
       />
+      )}
     </>
   );
 };

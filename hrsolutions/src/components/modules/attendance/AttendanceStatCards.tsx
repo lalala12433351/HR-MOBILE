@@ -52,47 +52,33 @@ export function AttendanceStatCards({
             key={item.id}
             type={interactive ? 'button' : undefined}
             onClick={item.onClick}
-            className={[
-              'h-full rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-2xs',
-              'flex flex-col gap-2.5 transition-[transform,border-color,box-shadow] duration-150 ease-out',
-              interactive ? 'cursor-pointer hover:border-slate-300 active:scale-[0.98]' : '',
-              item.active ? 'border-blue-500 ring-2 ring-blue-500/15' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
+            className={`att-stat${item.active ? ' is-active' : ''}`}
           >
-            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-              {item.label}
-            </div>
-
+            <div className="att-stat-label">{item.label}</div>
             <div className="flex items-baseline gap-1.5 min-w-0">
-              <span className="text-2xl font-bold tracking-tight tabular-nums text-slate-900 leading-none">
-                {item.value}
-              </span>
+              <span className="att-stat-value">{item.value}</span>
               {item.unit && (
-                <span className="text-xs font-medium text-slate-400 truncate">{item.unit}</span>
+                <span className="text-[12px] text-[var(--text-muted)] truncate">{item.unit}</span>
               )}
             </div>
-
             {item.delta && (
               <p
                 className={`text-[11px] font-medium ${
                   item.deltaTone === 'down'
-                    ? 'text-rose-600'
+                    ? 'text-[var(--studio-error)]'
                     : item.deltaTone === 'up'
-                      ? 'text-emerald-600'
-                      : 'text-slate-500'
+                      ? 'text-[#2f5d45]'
+                      : 'text-[var(--text-muted)]'
                 }`}
               >
                 {item.delta}
               </p>
             )}
-
             {hasBreakdown && (
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-medium text-slate-500">
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-medium text-[var(--text-muted)]">
                 {item.breakdown!.map((b) => (
                   <span key={b.label}>
-                    <span className="font-semibold tabular-nums text-slate-700">{b.value}</span>{' '}
+                    <span className="tabular-nums text-[var(--text-secondary)]">{b.value}</span>{' '}
                     {b.label}
                   </span>
                 ))}

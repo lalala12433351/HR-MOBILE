@@ -6,6 +6,7 @@ import {
   Mail,
   Phone,
   GraduationCap,
+  CreditCard,
   CalendarCheck,
   UserCheck,
   Shield,
@@ -16,9 +17,10 @@ import {
   Users,
   ChevronDown,
 } from 'lucide-react';
-import { Student, AttendanceRecord } from '@/types';
+import { Student, AttendanceRecord, Organization } from '@/types';
 import { StudentAttendanceLogModal } from './StudentAttendanceLogModal';
 import { compressAvatarImage } from '@/utils/imageUtils';
+import { buildStudentIdCardDraft, IdCardStudio } from '../../print/IdCardStudio';
 
 interface StudentProfileCardModalProps {
   isOpen: boolean;
@@ -34,6 +36,7 @@ interface StudentProfileCardModalProps {
     endTime?: string;
     graceMinutes?: number;
   }[];
+  organization?: Organization | null;
 }
 
 export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = ({
@@ -43,8 +46,10 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
   attendanceRecords = [],
   onUpdateStudent,
   academicBatches = [],
+  organization,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
+  const [showIdCard, setShowIdCard] = useState(false);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
@@ -96,6 +101,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
       setGuardianPhone(student.guardianPhone && student.guardianPhone !== '—' ? student.guardianPhone : '');
       setStatus(student.status || 'Active');
       setIsEditing(false);
+      setShowIdCard(false);
     }
   }, [student, isOpen]);
 
@@ -167,20 +173,20 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
         onClick={onClose}
       >
         <div
-          className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900 cursor-default"
+          className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)] border-l border-[var(--border-color)] shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-[var(--text-primary)] cursor-default"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header Bar */}
-          <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 gap-2">
+          <div className="p-4 sm:p-6 sm:px-8 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0 gap-2">
             <div className="flex items-center gap-2.5 min-w-0 flex-1">
-              <div className="h-9 w-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+              <div className="h-9 w-9 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                 <GraduationCap className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <h3 className="text-lg sm:text-xl font-bold text-slate-900 truncate">
+                <h3 className="text-lg sm:text-xl font-bold text-[var(--text-primary)] truncate">
                   {isEditing ? 'Edit Student Profile' : 'Student Profile'}
                 </h3>
-                <span className="text-[11px] font-mono font-semibold text-slate-400 block truncate">
+                <span className="text-[11px] font-mono font-semibold text-[var(--text-muted)] block truncate">
                   {student.studentId || `STU-${student.rollNumber}`}
                 </span>
               </div>
@@ -188,19 +194,29 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
 
             <div className="flex items-center gap-1.5 shrink-0">
               {!isEditing && (
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(true)}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
-                >
-                  <Edit2 className="h-3.5 w-3.5 text-slate-500" />
-                  <span>Edit</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowIdCard(true)}
+                    className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                  >
+                    <CreditCard className="h-3.5 w-3.5 text-blue-600" />
+                    <span>ID card</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                  >
+                    <Edit2 className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                    <span>Edit</span>
+                  </button>
+                </>
               )}
               <button
                 type="button"
                 onClick={onClose}
-                className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors shrink-0"
+                className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] p-2 cursor-pointer rounded-lg hover:bg-[var(--bg-surface-subtle)] transition-colors shrink-0"
                 title="Close"
               >
                 <X className="h-5 w-5" />
@@ -244,7 +260,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                   </div>
 
                   <div className="pt-1">
-                    <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+                    <h2 className="text-lg font-bold text-[var(--text-primary)] tracking-tight">
                       {student.name}
                     </h2>
                     <p className="text-xs text-blue-600 font-semibold mt-0.5">
@@ -269,29 +285,29 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                 </div>
 
                 {/* 2. Contact Meta Details */}
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-3">
+                <div className="p-4 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5 text-slate-600">
-                      <Mail className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span className="font-semibold text-slate-800 truncate">
+                    <div className="flex items-center gap-2.5 text-[var(--text-secondary)]">
+                      <Mail className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+                      <span className="font-semibold text-[var(--text-primary)] truncate">
                         {student.email || '—'}
                       </span>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5 text-slate-600">
-                      <Phone className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span className="font-semibold text-slate-800 font-mono">
+                    <div className="flex items-center gap-2.5 text-[var(--text-secondary)]">
+                      <Phone className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+                      <span className="font-semibold text-[var(--text-primary)] font-mono">
                         {student.phone && student.phone !== '—' ? student.phone : 'No Mobile Added'}
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
-                    <div className="flex items-center gap-2.5 text-slate-600">
-                      <BookOpen className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span className="text-slate-500 font-medium">Roll Number:</span>
+                  <div className="flex items-center justify-between pt-1 border-t border-[var(--border-color)]/60">
+                    <div className="flex items-center gap-2.5 text-[var(--text-secondary)]">
+                      <BookOpen className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+                      <span className="text-[var(--text-muted)] font-medium">Roll Number:</span>
                     </div>
                     <span className="font-bold font-mono text-blue-600 bg-blue-100/60 px-2.5 py-0.5 rounded-lg border border-blue-200/80">
                       {student.rollNumber}
@@ -300,8 +316,8 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                 </div>
 
                 {/* 3. Parent / Guardian Details */}
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-2">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <div className="p-4 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
                     Parent / Guardian Contact
                   </div>
                   <div className="flex items-center justify-between">
@@ -310,10 +326,10 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                         {(student.guardianName || student.name || 'S').charAt(0)}
                       </div>
                       <div>
-                        <div className="font-bold text-slate-900 text-xs">
+                        <div className="font-bold text-[var(--text-primary)] text-xs">
                           {student.guardianName || '—'}
                         </div>
-                        <div className="text-[11px] text-slate-500 font-mono">
+                        <div className="text-[11px] text-[var(--text-muted)] font-mono">
                           {student.guardianPhone || '—'}
                         </div>
                       </div>
@@ -326,7 +342,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
               <form id="edit-student-form" onSubmit={handleSaveStudent} className="space-y-4 text-xs">
                 {/* Full Name */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                  <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                     Student Full Name <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -335,14 +351,14 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Aarav Sharma"
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-900 placeholder-slate-400 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-2.5 text-xs font-semibold text-[var(--text-primary)] placeholder-slate-400 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                   />
                 </div>
 
                 {/* Roll Number & Status Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       Roll Number <span className="text-rose-500">*</span>
                     </label>
                     <input
@@ -351,25 +367,25 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                       value={rollNumber}
                       onChange={(e) => setRollNumber(e.target.value)}
                       placeholder="e.g. 10A-01"
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-mono font-bold text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-2.5 text-xs font-mono font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       Enrollment Status
                     </label>
                     <div className="relative">
                       <select
                         value={status}
                         onChange={(e) => setStatus(e.target.value as any)}
-                        className="w-full appearance-none rounded-2xl border border-slate-200 bg-white px-4 py-2.5 pr-8 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer"
+                        className="w-full appearance-none rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-2.5 pr-8 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer"
                       >
                         <option value="Active">Active</option>
                         <option value="On Leave">On Leave</option>
                         <option value="Suspended">Suspended</option>
                       </select>
-                      <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+                      <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-[var(--text-muted)] pointer-events-none" />
                     </div>
                   </div>
                 </div>
@@ -378,7 +394,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                 {academicBatches.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                      <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                         Grade / Class
                       </label>
                       <div className="relative">
@@ -392,7 +408,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                               setSection(matching[0].section || '');
                             }
                           }}
-                          className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 pr-9 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer"
+                          className="w-full appearance-none rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 pr-9 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer"
                           required
                         >
                           <option value="">Select Grade</option>
@@ -402,11 +418,11 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                             </option>
                           ))}
                         </select>
-                        <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+                        <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-[var(--text-muted)] pointer-events-none" />
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                      <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                         Section
                       </label>
                       <div className="relative">
@@ -414,7 +430,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                           value={section}
                           onChange={(e) => setSection(e.target.value)}
                           disabled={!grade}
-                          className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 pr-9 text-xs font-bold text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer disabled:bg-slate-50 disabled:text-slate-400"
+                          className="w-full appearance-none rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 pr-9 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all cursor-pointer disabled:bg-[var(--bg-surface-subtle)] disabled:text-[var(--text-muted)]"
                           required
                         >
                           <option value="">Select Section</option>
@@ -424,12 +440,12 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                             </option>
                           ))}
                         </select>
-                        <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+                        <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-[var(--text-muted)] pointer-events-none" />
                       </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-800 font-medium">
+                  <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800 font-medium">
                     No academic batches configured. Please set up batches in Attendance Settings to reassign student grade and section.
                   </div>
                 )}
@@ -437,7 +453,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                 {/* Email & Student Phone Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       School Email
                     </label>
                     <input
@@ -445,11 +461,11 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="student@school.edu"
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-2.5 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       Student Phone (10 Digits)
                     </label>
                     <input
@@ -458,7 +474,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                       value={phone}
                       onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                       placeholder="e.g. 9876543210"
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-mono font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-2.5 text-xs font-mono font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                     />
                   </div>
                 </div>
@@ -466,7 +482,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                 {/* Guardian Name & Phone Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       Parent / Guardian Name
                     </label>
                     <input
@@ -474,11 +490,11 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                       value={guardianName}
                       onChange={(e) => setGuardianName(e.target.value)}
                       placeholder="e.g. Rajesh Sharma"
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-2.5 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    <label className="block text-xs font-bold text-[var(--text-primary)] mb-1.5">
                       Guardian Phone (10 Digits)
                     </label>
                     <input
@@ -487,7 +503,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                       value={guardianPhone}
                       onChange={(e) => setGuardianPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                       placeholder="e.g. 9845012345"
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-mono font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-2.5 text-xs font-mono font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600/20 transition-all"
                     />
                   </div>
                 </div>
@@ -496,13 +512,13 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
           </div>
 
           {/* Footer Actions */}
-          <div className="p-4 sm:p-5 sm:px-8 border-t border-slate-100 bg-slate-50/70 flex items-center justify-end gap-2.5 shrink-0 pb-7 sm:pb-5">
+          <div className="p-4 sm:p-5 sm:px-8 border-t border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/70 flex items-center justify-end gap-2.5 shrink-0 pb-7 sm:pb-5">
             {!isEditing ? (
               <>
                 <button
                   type="button"
                   onClick={() => setShowAttendanceModal(true)}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-all shadow-sm active:scale-98 cursor-pointer"
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-all shadow-sm active:scale-98 cursor-pointer"
                 >
                   <CalendarCheck className="w-4 h-4" />
                   <span>View Attendance Log</span>
@@ -510,7 +526,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                 <button
                   type="button"
                   onClick={onClose}
-                  className="py-2.5 px-5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs transition-all cursor-pointer"
+                  className="py-2.5 px-5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-bold text-xs transition-all cursor-pointer"
                 >
                   Close
                 </button>
@@ -520,14 +536,14 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                 <button
                   type="button"
                   onClick={() => setIsEditing(false)}
-                  className="px-5 py-2.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs cursor-pointer transition-all"
+                  className="px-5 py-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-bold text-xs cursor-pointer transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   form="edit-student-form"
-                  className="px-6 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs cursor-pointer shadow-md shadow-blue-600/20 transition-all"
+                  className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs cursor-pointer shadow-md shadow-blue-600/20 transition-all"
                 >
                   Save Changes
                 </button>
@@ -544,6 +560,16 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
           onClose={() => setShowAttendanceModal(false)}
           student={student}
           attendanceRecords={attendanceRecords}
+        />
+      )}
+      {showIdCard && (
+        <IdCardStudio
+          key={student.id}
+          title="Student ID card"
+          roleFieldLabel="Grade & section"
+          audience="student"
+          initial={buildStudentIdCardDraft(student, organization)}
+          onClose={() => setShowIdCard(false)}
         />
       )}
     </>

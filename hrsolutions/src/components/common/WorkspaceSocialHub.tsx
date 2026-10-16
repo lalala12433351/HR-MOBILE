@@ -186,9 +186,9 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
             router.push('/attendance?tab=leaves&apply=true');
             onNavigateModule('attendance');
           }}
-          className="group flex flex-col items-center justify-center p-4 rounded-2xl border border-[#232d44] bg-[#161d2e] hover:bg-[#1b2337] hover:border-[#fb923c]/50 transition-all text-center shadow-md cursor-pointer"
+          className="group flex flex-col items-center justify-center p-4 rounded-xl border border-[#232d44] bg-[#161d2e] hover:bg-[#1b2337] hover:border-[#fb923c]/50 transition-all text-center shadow-md cursor-pointer"
         >
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#fb923c]/20 text-[#fb923c] group-hover:scale-110 transition-transform mb-2">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#fb923c]/20 text-[#fb923c] group-hover:scale-110 transition-transform mb-2">
             <Calendar className="h-5 w-5" />
           </div>
           <span className="text-xs font-bold text-white">Apply Leave</span>
@@ -199,9 +199,9 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
             router.push('/documents');
             onNavigateModule('documents');
           }}
-          className="group flex flex-col items-center justify-center p-4 rounded-2xl border border-[#232d44] bg-[#161d2e] hover:bg-[#1b2337] hover:border-[#a78bfa]/50 transition-all text-center shadow-md cursor-pointer"
+          className="group flex flex-col items-center justify-center p-4 rounded-xl border border-[#232d44] bg-[#161d2e] hover:bg-[#1b2337] hover:border-[#a78bfa]/50 transition-all text-center shadow-md cursor-pointer"
         >
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#7c5cfc]/20 text-[#a78bfa] group-hover:scale-110 transition-transform mb-2">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#7c5cfc]/20 text-[#a78bfa] group-hover:scale-110 transition-transform mb-2">
             <FileText className="h-5 w-5" />
           </div>
           <span className="text-xs font-bold text-white">View Payslip</span>
@@ -212,9 +212,9 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
             router.push('/attendance?tab=leaves');
             onNavigateModule('attendance');
           }}
-          className="group flex flex-col items-center justify-center p-4 rounded-2xl border border-[#232d44] bg-[#161d2e] hover:bg-[#1b2337] hover:border-[#e879f9]/50 transition-all text-center shadow-md cursor-pointer"
+          className="group flex flex-col items-center justify-center p-4 rounded-xl border border-[#232d44] bg-[#161d2e] hover:bg-[#1b2337] hover:border-[#e879f9]/50 transition-all text-center shadow-md cursor-pointer"
         >
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#e879f9]/20 text-[#e879f9] group-hover:scale-110 transition-transform mb-2">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#e879f9]/20 text-[#e879f9] group-hover:scale-110 transition-transform mb-2">
             <Gift className="h-5 w-5" />
           </div>
           <span className="text-xs font-bold text-white">Leave Balance</span>
@@ -222,9 +222,9 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
 
         <button
           onClick={() => onNavigateModule('timesheets')}
-          className="group flex flex-col items-center justify-center p-4 rounded-2xl border border-[#232d44] bg-[#161d2e] hover:bg-[#1b2337] hover:border-[#38bdf8]/50 transition-all text-center shadow-md"
+          className="group flex flex-col items-center justify-center p-4 rounded-xl border border-[#232d44] bg-[#161d2e] hover:bg-[#1b2337] hover:border-[#38bdf8]/50 transition-all text-center shadow-md"
         >
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#38bdf8]/20 text-[#38bdf8] group-hover:scale-110 transition-transform mb-2">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#38bdf8]/20 text-[#38bdf8] group-hover:scale-110 transition-transform mb-2">
             <Layers className="h-5 w-5" />
           </div>
           <span className="text-xs font-bold text-white">Logs & Shifts</span>
@@ -232,7 +232,7 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
       </div>
 
       {/* 2. Featured Ganesh Chaturthi Holiday Banner Card (From Image 5) */}
-      <div className="relative overflow-hidden rounded-2xl border border-[#ff5e62]/40 bg-gradient-to-r from-[#ff5e62] to-[#ff7675] p-5 text-white shadow-xl">
+      <div className="relative overflow-hidden rounded-xl border border-[#ff5e62]/40 bg-gradient-to-r from-[#ff5e62] to-[#ff7675] p-5 text-white shadow-lg">
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <span className="inline-flex items-center gap-1 rounded-full bg-black/30 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-widest text-white">
@@ -248,7 +248,7 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
 
           <button
             onClick={() => onNavigateModule('hr')}
-            className="flex items-center gap-1.5 self-start sm:self-auto rounded-xl bg-white text-[#ff5e62] font-bold text-xs px-4 py-2.5 shadow-md hover:bg-white/90 active:scale-95 transition-all"
+            className="flex items-center gap-1.5 self-start sm:self-auto rounded-lg bg-[var(--bg-surface)] text-[#ff5e62] font-bold text-xs px-4 py-2.5 shadow-md hover:bg-[var(--bg-surface)]/90 active:scale-95 transition-all"
           >
             <span>View 2026 Calendar</span>
             <ArrowRight className="h-3.5 w-3.5" />
@@ -259,10 +259,10 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
       {/* 3. Wish Them & Off This Week Grid (From Image 1, 3, 4) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card A: Wish Them (Birthdays & Anniversaries) */}
-        <div className="rounded-2xl border border-[#232d44] bg-[#161d2e] p-5 shadow-md space-y-4">
+        <div className="rounded-xl border border-[#232d44] bg-[#161d2e] p-5 shadow-md space-y-4">
           <div className="flex items-center justify-between border-b border-[#232d44] pb-3">
             <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#e879f9]/20 text-[#e879f9]">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#e879f9]/20 text-[#e879f9]">
                 <Gift className="h-4 w-4" />
               </span>
               <div>
@@ -271,7 +271,7 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-1 bg-[#131929] p-1 rounded-xl border border-[#232d44]">
+            <div className="flex items-center gap-1 bg-[#131929] p-1 rounded-lg border border-[#232d44]">
               <button
                 onClick={() => setActiveTab('all')}
                 className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all ${
@@ -314,7 +314,7 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
                     {anniversaries.map((person, idx) => (
                       <div
                         key={idx}
-                        className="flex items-center gap-2.5 p-2.5 rounded-xl bg-[#131929] border border-[#232d44] hover:border-[#38bdf8]/40 transition-all"
+                        className="flex items-center gap-2.5 p-2.5 rounded-lg bg-[#131929] border border-[#232d44] hover:border-[#38bdf8]/40 transition-all"
                       >
                         <div className="relative shrink-0">
                           <UserAvatar
@@ -351,7 +351,7 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
                     {birthdays.map((person, idx) => (
                       <div
                         key={idx}
-                        className="flex items-center gap-2.5 p-2.5 rounded-xl bg-[#131929] border border-[#232d44] hover:border-[#e879f9]/40 transition-all"
+                        className="flex items-center gap-2.5 p-2.5 rounded-lg bg-[#131929] border border-[#232d44] hover:border-[#e879f9]/40 transition-all"
                       >
                         <div className="relative shrink-0">
                           <UserAvatar
@@ -377,10 +377,10 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
         </div>
 
         {/* Card B: Off This Week & Upcoming Leaves (From Image 1 & 3) */}
-        <div className="rounded-2xl border border-[#232d44] bg-[#161d2e] p-5 shadow-md space-y-4">
+        <div className="rounded-xl border border-[#232d44] bg-[#161d2e] p-5 shadow-md space-y-4">
           <div className="flex items-center justify-between border-b border-[#232d44] pb-3">
             <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#38bdf8]/20 text-[#38bdf8]">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#38bdf8]/20 text-[#38bdf8]">
                 <Umbrella className="h-4 w-4" />
               </span>
               <div>
@@ -410,7 +410,7 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
                 leavesThisWeek.map((item, idx) => (
                   <div
                     key={idx}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-[#131929] border border-[#232d44]"
+                    className="flex items-center justify-between p-2.5 rounded-lg bg-[#131929] border border-[#232d44]"
                   >
                     <div className="flex items-center gap-3">
                       <UserAvatar
@@ -437,10 +437,10 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
       </div>
 
       {/* 4. Holidays in 2026 Interactive Badge Grid (From Image 2) */}
-      <div className="rounded-2xl border border-[#232d44] bg-[#161d2e] p-5 shadow-md space-y-4">
+      <div className="rounded-xl border border-[#232d44] bg-[#161d2e] p-5 shadow-md space-y-4">
         <div className="flex items-center justify-between border-b border-[#232d44] pb-3">
           <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#fb923c]/20 text-[#fb923c]">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#fb923c]/20 text-[#fb923c]">
               <Calendar className="h-4 w-4" />
             </span>
             <div>
@@ -458,12 +458,12 @@ export const WorkspaceSocialHub: React.FC<WorkspaceSocialHubProps> = ({
           {holidays.map((h) => (
             <div
               key={h.id}
-              className={`flex items-center gap-3 p-3 rounded-xl bg-[#131929] border ${
+              className={`flex items-center gap-3 p-3 rounded-lg bg-[#131929] border ${
                 h.isFeatured ? 'border-[#ff5e62]/60 ring-1 ring-[#ff5e62]/30' : 'border-[#232d44]'
               } hover:border-[#7c5cfc]/50 transition-all group`}
             >
               {/* Left Date Block */}
-              <div className={`flex flex-col items-center justify-center rounded-xl px-2.5 py-1.5 ${h.color} shrink-0 shadow-xs`}>
+              <div className={`flex flex-col items-center justify-center rounded-lg px-2.5 py-1.5 ${h.color} shrink-0 `}>
                 <span className="text-[9px] font-bold tracking-wider uppercase leading-none">{h.month}</span>
                 <span className="text-sm font-bold leading-none mt-0.5">{h.dayNum}</span>
               </div>

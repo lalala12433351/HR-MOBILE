@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { downloadBlob } from '@/lib/native';
 import Link from 'next/link';
 import { AppState } from '../../services/store';
 import {
@@ -872,18 +871,18 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
   return (
     <div className={`w-full flex-1 flex flex-col lg:flex-row items-stretch font-sans ${isFullBleed ? 'min-h-[calc(100vh-1rem)]' : 'pt-1 sm:pt-2'}`}>
       {/* ─── CATEGORY SELECTOR: Left Sidebar on Desktop / Horizontal Tab on Mobile ─── */}
-      <aside className="w-full lg:w-64 shrink-0 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white p-3 sm:p-4 lg:py-6 lg:px-5">
+      <aside className="w-full lg:w-64 shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-color)] bg-[var(--bg-surface)] p-3 sm:p-4 lg:py-6 lg:px-5">
         <div className="space-y-3 lg:space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+            <h2 className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
               Report Category
             </h2>
-            <span className="lg:hidden text-[10px] font-medium text-slate-400">Swipe &rarr;</span>
+            <span className="lg:hidden text-[10px] font-medium text-[var(--text-muted)]">Swipe &rarr;</span>
           </div>
 
-          <nav className="flex lg:flex-col overflow-x-auto lg:overflow-x-visible no-scrollbar touch-pan-x gap-1.5 lg:gap-1 lg:border-l lg:border-slate-200 lg:pl-3">
+          <nav className="flex lg:flex-col overflow-x-auto lg:overflow-x-visible no-scrollbar touch-pan-x gap-1.5 lg:gap-1 lg:border-l lg:border-[var(--border-color)] lg:pl-3">
             {visibleReportItems.length === 0 ? (
-              <div className="py-2 text-xs text-slate-400 italic">No reports enabled</div>
+              <div className="py-2 text-xs text-[var(--text-muted)] italic">No reports enabled</div>
             ) : (
               visibleReportItems.map((item) => {
                 const isSelected = selectedReport === item.id;
@@ -897,8 +896,8 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     }}
                     className={`text-left py-2 px-3 lg:px-3 rounded-lg text-xs transition-all cursor-pointer block relative select-none whitespace-nowrap lg:whitespace-normal shrink-0 ${
                       isSelected
-                        ? 'text-blue-600 font-bold bg-blue-50 border border-blue-200 lg:border-0 lg:border-l-2 lg:border-blue-600 lg:rounded-r-lg lg:rounded-l-none'
-                        : 'text-slate-600 hover:text-slate-900 font-medium hover:bg-slate-50 border border-slate-200/60 lg:border-0'
+                        ? 'text-blue-600 font-bold bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] border border-blue-200 lg:border-0 lg:border-l-2 lg:border-blue-600 lg:rounded-r-lg lg:rounded-l-none'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-medium hover:bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] lg:border-0'
                     }`}
                   >
                     {item.title}
@@ -911,11 +910,11 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       </aside>
 
       {/* ─── MAIN REPORT VIEW ─── */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-7 space-y-5 overflow-y-auto bg-slate-50/60">
+      <main className="flex-1 p-4 sm:p-6 lg:p-7 space-y-5 overflow-y-auto bg-[var(--bg-surface-subtle)]/60">
         {visibleReportItems.length === 0 ? (
-          <div className="p-12 text-center rounded-xl border border-slate-200 bg-white shadow-xs max-w-md mx-auto my-12 space-y-2">
-            <h3 className="text-base font-bold text-slate-900">All Reports Disabled</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
+          <div className="p-12 text-center rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs max-w-md mx-auto my-12 space-y-2">
+            <h3 className="text-base font-bold text-[var(--text-primary)]">All Reports Disabled</h3>
+            <p className="text-xs text-[var(--text-muted)] leading-relaxed">
               All report categories are currently disabled. Re-enable them in{' '}
               <Link href="/reports/settings" className="text-blue-600 font-semibold hover:underline">
                 Reports Settings
@@ -928,10 +927,10 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
             {/* Header & Global Actions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+            <h1 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">
               {REPORT_ITEMS.find((r) => r.id === selectedReport)?.title || 'Attendance Reports'}
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
               Live organizational metrics, shift tracking & compliance for {selectedMonth}
             </p>
           </div>
@@ -940,7 +939,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
             {isExecutive && (
               <Link
                 href="/reports/settings"
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 shadow-xs transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] text-xs font-semibold hover:bg-[var(--bg-surface-subtle)] shadow-xs transition-colors"
               >
                 <Settings className="h-3.5 w-3.5" />
                 Settings
@@ -960,16 +959,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
         </div>
 
         {/* Filters Bar */}
-        <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-xs flex flex-wrap items-center gap-3 text-xs">
+        <div className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs flex flex-wrap items-center gap-3 text-xs">
           {/* Search */}
           <div className="relative flex-1 min-w-[180px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-muted)]" />
             <input
               type="text"
               placeholder="Search staff..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3.5 py-2 rounded-lg border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:border-blue-600 outline-none text-xs"
+              className="w-full pl-9 pr-3.5 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-600 outline-none text-xs"
             />
           </div>
 
@@ -978,7 +977,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
             <select
               value={selectedDepartment}
               onChange={(e) => setSelectedDepartment(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium focus:border-blue-600 outline-none text-xs cursor-pointer"
+              className="px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] font-medium focus:border-blue-600 outline-none text-xs cursor-pointer"
             >
               {departments.map((d) => (
                 <option key={d} value={d}>
@@ -993,7 +992,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
             <select
               value={selectedBranch}
               onChange={(e) => setSelectedBranch(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium focus:border-blue-600 outline-none text-xs cursor-pointer"
+              className="px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] font-medium focus:border-blue-600 outline-none text-xs cursor-pointer"
             >
               {branches.map((b) => (
                 <option key={b} value={b}>
@@ -1008,7 +1007,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
             <select
               value={selectedShift}
               onChange={(e) => setSelectedShift(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium focus:border-blue-600 outline-none text-xs cursor-pointer"
+              className="px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] font-medium focus:border-blue-600 outline-none text-xs cursor-pointer"
             >
               {shifts.map((s) => (
                 <option key={s} value={s}>
@@ -1023,7 +1022,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
             type="month"
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium focus:border-blue-600 outline-none text-xs cursor-pointer font-mono"
+            className="px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] font-medium focus:border-blue-600 outline-none text-xs cursor-pointer font-mono"
           />
         </div>
 
@@ -1033,12 +1032,12 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
             {categoryMetrics.map((kpi, idx) => (
               <div
                 key={idx}
-                className="p-4 rounded-xl border border-slate-200 bg-white shadow-xs space-y-1"
+                className="p-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-1"
               >
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">
                   {kpi.title}
                 </span>
-                <p className="text-2xl font-bold tracking-tight text-slate-900 font-mono">{kpi.value}</p>
+                <p className="text-2xl font-bold tracking-tight text-[var(--text-primary)] font-mono">{kpi.value}</p>
               </div>
             ))}
           </div>
@@ -1050,16 +1049,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
             {/* 1. ATTENDANCE MASTER CHARTS */}
             {selectedReport === 'attendance_master' && (
               <>
-                <div className="lg:col-span-8 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3">
+                <div className="lg:col-span-8 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Department Attendance Rate (%)
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Scheduled vs Present across business units</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Scheduled vs Present across business units</p>
                 </div>
                 <div className="h-56 w-full pt-1">
                   {departmentAttendanceData.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                       No department data available
                     </div>
                   ) : (
@@ -1077,16 +1076,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                 </div>
               </div>
 
-              <div className="lg:col-span-4 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3 flex flex-col justify-between">
+              <div className="lg:col-span-4 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3 flex flex-col justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Attendance Status Share
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Punctuality vs Leaves distribution</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Punctuality vs Leaves distribution</p>
                 </div>
                 <div className="h-44 w-full">
                   {attendanceStatusShare.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                       No attendance activity recorded
                     </div>
                   ) : (
@@ -1098,7 +1097,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     />
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
                   {attendanceStatusShare.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-1.5 truncate">
                       <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
@@ -1115,16 +1114,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {/* 2. SHIFT WISE CHARTS */}
           {selectedReport === 'shift_wise' && (
             <>
-              <div className="lg:col-span-7 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3">
+              <div className="lg:col-span-7 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Shift Punctuality Compliance (%)
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">On-time check-in rate by shift schedule</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">On-time check-in rate by shift schedule</p>
                 </div>
                 <div className="h-56 w-full pt-1">
                   {shiftComplianceData.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                       No shift records
                     </div>
                   ) : (
@@ -1142,16 +1141,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                 </div>
               </div>
 
-              <div className="lg:col-span-5 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3 flex flex-col justify-between">
+              <div className="lg:col-span-5 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3 flex flex-col justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Shift Staff Allocation
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Headcount density by shift schedule</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Headcount density by shift schedule</p>
                 </div>
                 <div className="h-44 w-full">
                   {shiftDistributionShare.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                       No staff assigned
                     </div>
                   ) : (
@@ -1163,7 +1162,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     />
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
                   {shiftDistributionShare.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-1.5 truncate">
                       <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
@@ -1180,12 +1179,12 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {/* 3. DAILY PUNCH CHARTS */}
           {selectedReport === 'daily_punch' && (
             <>
-              <div className="lg:col-span-8 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3">
+              <div className="lg:col-span-8 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Hourly Punch Volume & Flow
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Clock-in and clock-out traffic across operating hours</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Clock-in and clock-out traffic across operating hours</p>
                 </div>
                 <div className="h-56 w-full pt-1">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1218,16 +1217,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                 </div>
               </div>
 
-              <div className="lg:col-span-4 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3 flex flex-col justify-between">
+              <div className="lg:col-span-4 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3 flex flex-col justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Punch Verification Types
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Geofence vs Biometrics vs Mobile</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Geofence vs Biometrics vs Mobile</p>
                 </div>
                 <div className="h-44 w-full">
                   {punchMethodShare.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                       No punches logged
                     </div>
                   ) : (
@@ -1239,7 +1238,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     />
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
                   {punchMethodShare.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-1.5 truncate">
                       <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
@@ -1256,16 +1255,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {/* 4. WORKING HOURS CHARTS */}
           {selectedReport === 'working_hours' && (
             <>
-              <div className="lg:col-span-7 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3">
+              <div className="lg:col-span-7 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Productive Hours vs Baseline
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Monthly total hours logged across departments</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Monthly total hours logged across departments</p>
                 </div>
                 <div className="h-56 w-full pt-1">
                   {workingHoursDeptData.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                       No hours logged
                     </div>
                   ) : (
@@ -1284,12 +1283,12 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                 </div>
               </div>
 
-              <div className="lg:col-span-5 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3">
+              <div className="lg:col-span-5 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Daily Hours Average
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Weekly day-by-day average per staff</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Weekly day-by-day average per staff</p>
                 </div>
                 <div className="h-56 w-full pt-1">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1318,12 +1317,12 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {/* 5. MUSTER REPORT CHARTS */}
           {selectedReport === 'muster_report' && (
             <>
-              <div className="lg:col-span-8 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3">
+              <div className="lg:col-span-8 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Daily Workforce Attendance Wave (%)
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Day 1 to Day {daysInMonth} presence consistency</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Day 1 to Day {daysInMonth} presence consistency</p>
                 </div>
                 <div className="h-56 w-full pt-1">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1347,16 +1346,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                 </div>
               </div>
 
-              <div className="lg:col-span-4 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3 flex flex-col justify-between">
+              <div className="lg:col-span-4 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3 flex flex-col justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Monthly Muster Mix
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Payable vs Non-Payable breakdown</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Payable vs Non-Payable breakdown</p>
                 </div>
                 <div className="h-44 w-full">
                   {attendanceStatusShare.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                       No muster records
                     </div>
                   ) : (
@@ -1368,7 +1367,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     />
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
                   {attendanceStatusShare.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-1.5 truncate">
                       <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
@@ -1385,16 +1384,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {/* 6. LEAVE TAKEN CHARTS */}
           {selectedReport === 'leave_taken' && (
             <>
-              <div className="lg:col-span-7 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3">
+              <div className="lg:col-span-7 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Leave Days Consumed by Department
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Total days of approved absence</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Total days of approved absence</p>
                 </div>
                 <div className="h-56 w-full pt-1">
                   {deptLeavesData.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                       No leave records recorded
                     </div>
                   ) : (
@@ -1412,16 +1411,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                 </div>
               </div>
 
-              <div className="lg:col-span-5 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3 flex flex-col justify-between">
+              <div className="lg:col-span-5 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3 flex flex-col justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Leave Category Mix
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Casual vs Medical vs Earned time off</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Casual vs Medical vs Earned time off</p>
                 </div>
                 <div className="h-44 w-full">
                   {leaveCategoryShare.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    <div className="h-full flex items-center justify-center text-xs text-[var(--text-muted)]">
                       No leave applications
                     </div>
                   ) : (
@@ -1433,7 +1432,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     />
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
                   {leaveCategoryShare.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-1.5 truncate">
                       <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
@@ -1449,19 +1448,19 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
 
           {/* 7. EMPLOYEE DAY-WISE MASTER CHARTS */}
           {selectedReport === 'day_wise_master' && (
-            <div className="lg:col-span-12 p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3">
+            <div className="lg:col-span-12 p-5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-xs space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
                     Daily Gross Hours Logged — {activeEmp?.name || 'Selected Staff'}
                   </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Day-by-day recorded time against 8.0h standard work day</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Day-by-day recorded time against 8.0h standard work day</p>
                 </div>
 
                 <select
                   value={activeEmpId}
                   onChange={(e) => setSelectedEmployeeId(e.target.value)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium focus:border-blue-600 outline-none text-xs cursor-pointer max-w-xs"
+                  className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] font-medium focus:border-blue-600 outline-none text-xs cursor-pointer max-w-xs"
                 >
                   {filteredEmployees.map((e) => (
                     <option key={e.id} value={e.id}>
@@ -1490,12 +1489,12 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
         )}
 
         {/* ─── DYNAMIC DATA TABLES ─── */}
-        <div className="rounded-xl border border-slate-200 shadow-xs overflow-hidden w-full bg-white">
+        <div className="rounded-xl border border-[var(--border-color)] shadow-xs overflow-hidden w-full bg-[var(--bg-surface)]">
           {/* 1. ATTENDANCE MASTER */}
           {selectedReport === 'attendance_master' && (
             <div className="overflow-x-auto w-full">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200 select-none">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-bold uppercase text-[10px] border-b border-[var(--border-color)] select-none">
                   <tr>
                     {(isFieldVisible('attendance_master', 'name') || isFieldVisible('attendance_master', 'employeeId')) && (
                       <th className="p-3.5">Employee</th>
@@ -1509,10 +1508,10 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     {isFieldVisible('attendance_master', 'rate') && <th className="p-3.5 text-right">Attendance %</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
                   {filteredEmployees.length === 0 ? (
                     <tr>
-                      <td colSpan={20} className="p-8 text-center text-slate-400">
+                      <td colSpan={20} className="p-8 text-center text-[var(--text-muted)]">
                         No employees found matching the active filters.
                       </td>
                     </tr>
@@ -1520,13 +1519,13 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     paginatedEmployees.map((emp) => {
                       const stats = employeeStatsMap.get(emp.id);
                       return (
-                        <tr key={emp.id} className="hover:bg-slate-50/70 transition-colors">
+                        <tr key={emp.id} className="hover:bg-[var(--bg-surface-subtle)]/70 transition-colors">
                           {(isFieldVisible('attendance_master', 'name') || isFieldVisible('attendance_master', 'employeeId')) && (
-                            <td className="p-3.5 font-bold text-slate-900">
+                            <td className="p-3.5 font-bold text-[var(--text-primary)]">
                               <div>
                                 {isFieldVisible('attendance_master', 'name') && <span>{emp.name}</span>}
                                 {isFieldVisible('attendance_master', 'employeeId') && (
-                                  <span className="block text-[10px] text-slate-400 font-normal">
+                                  <span className="block text-[10px] text-[var(--text-muted)] font-normal">
                                     {emp.employeeId || `EMP-${emp.id.slice(0, 4)}`}
                                   </span>
                                 )}
@@ -1534,10 +1533,10 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                             </td>
                           )}
                           {isFieldVisible('attendance_master', 'department') && (
-                            <td className="p-3.5 text-slate-600">{emp.department || '—'}</td>
+                            <td className="p-3.5 text-[var(--text-secondary)]">{emp.department || '—'}</td>
                           )}
                           {isFieldVisible('attendance_master', 'branch') && (
-                            <td className="p-3.5 text-slate-600">{emp.location || '—'}</td>
+                            <td className="p-3.5 text-[var(--text-secondary)]">{emp.location || '—'}</td>
                           )}
                           {isFieldVisible('attendance_master', 'scheduledDays') && (
                             <td className="p-3.5 text-center font-mono">{scheduledDays}</td>
@@ -1575,7 +1574,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {selectedReport === 'shift_wise' && (
             <div className="overflow-x-auto w-full">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200 select-none">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-bold uppercase text-[10px] border-b border-[var(--border-color)] select-none">
                   <tr>
                     {isFieldVisible('shift_wise', 'shift') && <th className="p-3.5">Shift Name</th>}
                     {isFieldVisible('shift_wise', 'assigned') && <th className="p-3.5 text-center">Assigned Staff</th>}
@@ -1583,18 +1582,18 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     {isFieldVisible('shift_wise', 'actions') && <th className="p-3.5 text-right">Status</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
                   {shiftComplianceData.length === 0 ? (
                     <tr>
-                      <td colSpan={20} className="p-8 text-center text-slate-400">
+                      <td colSpan={20} className="p-8 text-center text-[var(--text-muted)]">
                         No shifts configured.
                       </td>
                     </tr>
                   ) : (
                     paginatedShifts.map((s) => (
-                      <tr key={s.shift} className="hover:bg-slate-50/70">
+                      <tr key={s.shift} className="hover:bg-[var(--bg-surface-subtle)]/70">
                         {isFieldVisible('shift_wise', 'shift') && (
-                          <td className="p-3.5 font-bold text-slate-900">{s.shift}</td>
+                          <td className="p-3.5 font-bold text-[var(--text-primary)]">{s.shift}</td>
                         )}
                         {isFieldVisible('shift_wise', 'assigned') && (
                           <td className="p-3.5 text-center font-mono font-bold">{s.assigned}</td>
@@ -1623,7 +1622,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {selectedReport === 'daily_punch' && (
             <div className="overflow-x-auto w-full">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200 select-none">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-bold uppercase text-[10px] border-b border-[var(--border-color)] select-none">
                   <tr>
                     {isFieldVisible('daily_punch', 'date') && <th className="p-3.5">Date</th>}
                     {isFieldVisible('daily_punch', 'employee') && <th className="p-3.5">Employee</th>}
@@ -1634,21 +1633,21 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     {isFieldVisible('daily_punch', 'workingHours') && <th className="p-3.5 text-right">Gross Hours</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
                   {monthAttendance.length === 0 ? (
                     <tr>
-                      <td colSpan={20} className="p-8 text-center text-slate-400">
+                      <td colSpan={20} className="p-8 text-center text-[var(--text-muted)]">
                         No punch records recorded for this period.
                       </td>
                     </tr>
                   ) : (
                     paginatedAttendance.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/70">
+                      <tr key={p.id} className="hover:bg-[var(--bg-surface-subtle)]/70">
                         {isFieldVisible('daily_punch', 'date') && (
-                          <td className="p-3.5 font-mono text-slate-500">{p.date}</td>
+                          <td className="p-3.5 font-mono text-[var(--text-muted)]">{p.date}</td>
                         )}
                         {isFieldVisible('daily_punch', 'employee') && (
-                          <td className="p-3.5 font-bold text-slate-900">{p.employeeName}</td>
+                          <td className="p-3.5 font-bold text-[var(--text-primary)]">{p.employeeName}</td>
                         )}
                         {isFieldVisible('daily_punch', 'checkIn') && (
                           <td className="p-3.5 font-mono text-emerald-600 font-semibold">{p.checkIn || '—'}</td>
@@ -1657,7 +1656,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                           <td className="p-3.5 font-mono text-blue-600 font-semibold">{p.checkOut || '—'}</td>
                         )}
                         {isFieldVisible('daily_punch', 'location') && (
-                          <td className="p-3.5 text-slate-600">{p.locationName || '—'}</td>
+                          <td className="p-3.5 text-[var(--text-secondary)]">{p.locationName || '—'}</td>
                         )}
                         {isFieldVisible('daily_punch', 'status') && (
                           <td className="p-3.5">
@@ -1673,7 +1672,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                           </td>
                         )}
                         {isFieldVisible('daily_punch', 'workingHours') && (
-                          <td className="p-3.5 text-right font-mono font-bold text-slate-900">
+                          <td className="p-3.5 text-right font-mono font-bold text-[var(--text-primary)]">
                             {p.workingHours || 8}h
                           </td>
                         )}
@@ -1689,7 +1688,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {selectedReport === 'working_hours' && (
             <div className="overflow-x-auto w-full">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200 select-none">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-bold uppercase text-[10px] border-b border-[var(--border-color)] select-none">
                   <tr>
                     {isFieldVisible('working_hours', 'employee') && <th className="p-3.5">Employee</th>}
                     {isFieldVisible('working_hours', 'department') && <th className="p-3.5">Department</th>}
@@ -1700,10 +1699,10 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     {isFieldVisible('working_hours', 'status') && <th className="p-3.5 text-right">Status</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
                   {filteredEmployees.length === 0 ? (
                     <tr>
-                      <td colSpan={20} className="p-8 text-center text-slate-400">
+                      <td colSpan={20} className="p-8 text-center text-[var(--text-muted)]">
                         No employees found.
                       </td>
                     </tr>
@@ -1715,12 +1714,12 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                       const ot = Math.max(0, logged - exp);
                       const def = Math.max(0, exp - logged);
                       return (
-                        <tr key={emp.id} className="hover:bg-slate-50/70">
+                        <tr key={emp.id} className="hover:bg-[var(--bg-surface-subtle)]/70">
                           {isFieldVisible('working_hours', 'employee') && (
-                            <td className="p-3.5 font-bold text-slate-900">{emp.name}</td>
+                            <td className="p-3.5 font-bold text-[var(--text-primary)]">{emp.name}</td>
                           )}
                           {isFieldVisible('working_hours', 'department') && (
-                            <td className="p-3.5 text-slate-600">{emp.department || 'Operations'}</td>
+                            <td className="p-3.5 text-[var(--text-secondary)]">{emp.department || 'Operations'}</td>
                           )}
                           {isFieldVisible('working_hours', 'expected') && (
                             <td className="p-3.5 text-center font-mono">{exp.toFixed(1)}h</td>
@@ -1734,7 +1733,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                             </td>
                           )}
                           {isFieldVisible('working_hours', 'deficit') && (
-                            <td className="p-3.5 text-center font-mono text-slate-400">-{def}.0h</td>
+                            <td className="p-3.5 text-center font-mono text-[var(--text-muted)]">-{def}.0h</td>
                           )}
                           {isFieldVisible('working_hours', 'status') && (
                             <td className="p-3.5 text-right">
@@ -1743,8 +1742,8 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                                   stats?.status === 'Target Met'
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                     : stats?.status === 'In Progress'
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                    : 'bg-slate-100 text-slate-600 border-slate-200'
+                                    ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border-blue-200'
+                                    : 'bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] border-[var(--border-color)]'
                                 }`}
                               >
                                 {stats?.status || 'No Activity'}
@@ -1764,7 +1763,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {selectedReport === 'muster_report' && (
             <div className="overflow-x-auto w-full">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200 select-none">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-bold uppercase text-[10px] border-b border-[var(--border-color)] select-none">
                   <tr>
                     {isFieldVisible('muster_report', 'employee') && <th className="p-3.5">Employee</th>}
                     {isFieldVisible('muster_report', 'department') && <th className="p-3.5">Dept</th>}
@@ -1779,10 +1778,10 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     {isFieldVisible('muster_report', 'attendanceHealth') && <th className="p-3.5 text-right">Health</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
                   {filteredEmployees.length === 0 ? (
                     <tr>
-                      <td colSpan={25} className="p-8 text-center text-slate-400">
+                      <td colSpan={25} className="p-8 text-center text-[var(--text-muted)]">
                         No employees found.
                       </td>
                     </tr>
@@ -1796,12 +1795,12 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                       );
 
                       return (
-                        <tr key={emp.id} className="hover:bg-slate-50/70">
+                        <tr key={emp.id} className="hover:bg-[var(--bg-surface-subtle)]/70">
                           {isFieldVisible('muster_report', 'employee') && (
-                            <td className="p-3.5 font-bold text-slate-900 truncate max-w-[120px]">{emp.name}</td>
+                            <td className="p-3.5 font-bold text-[var(--text-primary)] truncate max-w-[120px]">{emp.name}</td>
                           )}
                           {isFieldVisible('muster_report', 'department') && (
-                            <td className="p-3.5 text-slate-500 text-[11px]">{emp.department || 'Gen'}</td>
+                            <td className="p-3.5 text-[var(--text-muted)] text-[11px]">{emp.department || 'Gen'}</td>
                           )}
                           {Array.from({ length: Math.min(15, daysInMonth) }, (_, i) => {
                             const dayNum = i + 1;
@@ -1823,10 +1822,10 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                                 <span
                                   className={`px-1.5 py-0.5 rounded font-bold border ${
                                     code === 'WO'
-                                      ? 'text-slate-500 bg-slate-100 border-slate-200'
+                                      ? 'text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] border-[var(--border-color)]'
                                       : code === 'P'
                                       ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                                      : 'text-slate-400 border-transparent'
+                                      : 'text-[var(--text-muted)] border-transparent'
                                   }`}
                                 >
                                   {code}
@@ -1841,7 +1840,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                             <td className="p-3.5 text-center font-mono text-blue-600">{lCount}</td>
                           )}
                           {isFieldVisible('muster_report', 'payableDays') && (
-                            <td className="p-3.5 text-right font-mono font-bold text-slate-900">
+                            <td className="p-3.5 text-right font-mono font-bold text-[var(--text-primary)]">
                               {pCount + lCount}
                             </td>
                           )}
@@ -1852,7 +1851,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                                   stats && stats.attendanceRate >= 90
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                     : stats && stats.attendanceRate >= 75
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border-blue-200'
                                     : 'bg-rose-50 text-rose-700 border-rose-200'
                                 }`}
                               >
@@ -1873,7 +1872,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {selectedReport === 'leave_taken' && (
             <div className="overflow-x-auto w-full">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200 select-none">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-bold uppercase text-[10px] border-b border-[var(--border-color)] select-none">
                   <tr>
                     {isFieldVisible('leave_taken', 'employee') && <th className="p-3.5">Employee Name</th>}
                     {isFieldVisible('leave_taken', 'leaveType') && <th className="p-3.5">Leave Category</th>}
@@ -1883,38 +1882,38 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     {isFieldVisible('leave_taken', 'status') && <th className="p-3.5 text-right">Status</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
                   {monthLeaves.length === 0 ? (
                     <tr>
-                      <td colSpan={20} className="p-8 text-center text-slate-400">
+                      <td colSpan={20} className="p-8 text-center text-[var(--text-muted)]">
                         No leave applications recorded for this period.
                       </td>
                     </tr>
                   ) : (
                     paginatedLeaves.map((l) => (
-                      <tr key={l.id} className="hover:bg-slate-50/70">
+                      <tr key={l.id} className="hover:bg-[var(--bg-surface-subtle)]/70">
                         {isFieldVisible('leave_taken', 'employee') && (
-                          <td className="p-3.5 font-bold text-slate-900">{l.employeeName}</td>
+                          <td className="p-3.5 font-bold text-[var(--text-primary)]">{l.employeeName}</td>
                         )}
                         {isFieldVisible('leave_taken', 'leaveType') && (
                           <td className="p-3.5">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border border-blue-200">
                               {l.leaveType}
                             </span>
                           </td>
                         )}
                         {isFieldVisible('leave_taken', 'duration') && (
-                          <td className="p-3.5 font-mono text-slate-500">
+                          <td className="p-3.5 font-mono text-[var(--text-muted)]">
                             {l.startDate} to {l.endDate}
                           </td>
                         )}
                         {isFieldVisible('leave_taken', 'days') && (
-                          <td className="p-3.5 text-center font-mono font-bold text-slate-800">
+                          <td className="p-3.5 text-center font-mono font-bold text-[var(--text-primary)]">
                             {l.daysCount || 1}
                           </td>
                         )}
                         {isFieldVisible('leave_taken', 'reason') && (
-                          <td className="p-3.5 text-slate-600 max-w-xs truncate">{l.reason}</td>
+                          <td className="p-3.5 text-[var(--text-secondary)] max-w-xs truncate">{l.reason}</td>
                         )}
                         {isFieldVisible('leave_taken', 'status') && (
                           <td className="p-3.5 text-right">
@@ -1943,7 +1942,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
           {selectedReport === 'day_wise_master' && (
             <div className="overflow-x-auto w-full">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200 select-none">
+                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] font-bold uppercase text-[10px] border-b border-[var(--border-color)] select-none">
                   <tr>
                     {isFieldVisible('day_wise_master', 'date') && <th className="p-3.5">Date</th>}
                     <th className="p-3.5">Day</th>
@@ -1954,10 +1953,10 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                     {isFieldVisible('day_wise_master', 'status') && <th className="p-3.5 text-right">Status</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
                   {!activeEmp ? (
                     <tr>
-                      <td colSpan={20} className="p-8 text-center text-slate-400">
+                      <td colSpan={20} className="p-8 text-center text-[var(--text-muted)]">
                         Please select an employee to view day-wise logs.
                       </td>
                     </tr>
@@ -1994,7 +1993,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
 
                       if (isWeekend) {
                         displayStatus = 'Weekly Off';
-                        statusBadgeClass = 'text-slate-600 bg-slate-100 border-slate-200';
+                        statusBadgeClass = 'text-[var(--text-secondary)] bg-[var(--bg-surface-subtle)] border-[var(--border-color)]';
                         hoursText = punch ? `${punch.workingHours || 8}h` : '—';
                       } else if (punch) {
                         displayStatus = punch.status || 'Present';
@@ -2004,16 +2003,16 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                             : punch.status === 'On Leave'
                             ? 'bg-purple-50 text-purple-700 border-purple-200'
                             : punch.status === 'Work From Home'
-                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border-blue-200'
                             : 'bg-emerald-50 text-emerald-700 border-emerald-200';
                         hoursText = `${punch.workingHours || 8}h`;
                       } else if (isBeforeJoining) {
                         displayStatus = 'Not Joined';
-                        statusBadgeClass = 'text-slate-500 bg-slate-100 border-slate-200';
+                        statusBadgeClass = 'text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] border-[var(--border-color)]';
                         hoursText = '—';
                       } else if (isFuture) {
                         displayStatus = 'Scheduled';
-                        statusBadgeClass = 'text-slate-500 bg-slate-100 border-slate-200';
+                        statusBadgeClass = 'text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] border-[var(--border-color)]';
                         hoursText = '—';
                       } else {
                         // Past weekday with no punch record
@@ -2023,21 +2022,21 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                       }
 
                       return (
-                        <tr key={dateStr} className="hover:bg-slate-50/70">
+                        <tr key={dateStr} className="hover:bg-[var(--bg-surface-subtle)]/70">
                           {isFieldVisible('day_wise_master', 'date') && (
-                            <td className="p-3.5 font-mono font-bold text-slate-900">{dateStr}</td>
+                            <td className="p-3.5 font-mono font-bold text-[var(--text-primary)]">{dateStr}</td>
                           )}
-                          <td className="p-3.5 text-slate-500">{dayName}</td>
-                          <td className="p-3.5 text-slate-600">
+                          <td className="p-3.5 text-[var(--text-muted)]">{dayName}</td>
+                          <td className="p-3.5 text-[var(--text-secondary)]">
                             {isWeekend ? 'Weekly Off' : activeEmp.workSchedule?.name || 'General Shift (9:00 - 18:00)'}
                           </td>
                           {isFieldVisible('day_wise_master', 'checkIn') && (
-                            <td className="p-3.5 font-mono text-slate-800">
+                            <td className="p-3.5 font-mono text-[var(--text-primary)]">
                               {punch?.checkIn || '—'}
                             </td>
                           )}
                           {isFieldVisible('day_wise_master', 'checkOut') && (
-                            <td className="p-3.5 font-mono text-slate-800">
+                            <td className="p-3.5 font-mono text-[var(--text-primary)]">
                               {punch?.checkOut || '—'}
                             </td>
                           )}
@@ -2064,17 +2063,17 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
         </div>
 
         {/* Table Pagination Footer */}
-        <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+        <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[var(--text-muted)]">
           <div>
             Showing{' '}
-            <span className="font-semibold text-slate-800">
+            <span className="font-semibold text-[var(--text-primary)]">
               {tableRowCount === 0
                 ? 0
                 : Math.min((currentPage - 1) * rowsPerPage + 1, tableRowCount)}
               –
               {Math.min(currentPage * rowsPerPage, tableRowCount)}
             </span>{' '}
-            of <span className="font-semibold text-slate-800">{tableRowCount}</span> entries
+            of <span className="font-semibold text-[var(--text-primary)]">{tableRowCount}</span> entries
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -2082,12 +2081,12 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
               type="button"
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               disabled={currentPage === 1}
-              className="h-8 w-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-600 hover:bg-slate-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shadow-xs"
+              className="h-8 w-8 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shadow-xs"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
 
-            <span className="px-3 py-1 text-xs font-semibold text-slate-700">
+            <span className="px-3 py-1 text-xs font-semibold text-[var(--text-secondary)]">
               Page {currentPage} of {totalPages}
             </span>
 
@@ -2095,7 +2094,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
               type="button"
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               disabled={currentPage >= totalPages}
-              className="h-8 w-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-600 hover:bg-slate-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shadow-xs"
+              className="h-8 w-8 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors shadow-xs"
             >
               <ChevronRight className="h-3.5 w-3.5" />
             </button>

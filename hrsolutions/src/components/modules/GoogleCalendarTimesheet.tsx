@@ -847,7 +847,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                 <select
                   value={selectedEmpId}
                   onChange={(e) => setSelectedEmpId(e.target.value)}
-                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 text-xs font-bold text-white outline-none focus:border-blue-500"
+                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 text-xs font-bold text-white outline-none focus:border-[var(--primary-blue)]"
                 >
                   <option value="All">👥 All Company Members ({state.employees.length})</option>
                   {state.employees.map((emp) => (
@@ -866,7 +866,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                 <select
                   value={selectedEmpId}
                   onChange={(e) => setSelectedEmpId(e.target.value)}
-                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 text-xs font-bold text-white outline-none focus:border-blue-500"
+                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 text-xs font-bold text-white outline-none focus:border-[var(--primary-blue)]"
                 >
                   <option value="All">👑 Organization-Wide ({state.employees.length} Members)</option>
                   {state.employees.map((emp) => (
@@ -884,7 +884,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
               <select
                 value={selectedProjId}
                 onChange={(e) => setSelectedProjId(e.target.value)}
-                className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 text-xs font-bold text-white outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 text-xs font-bold text-white outline-none focus:border-[var(--primary-blue)]"
               >
                 <option value="All">📁 All Projects</option>
                 {state.projects.map((p) => (
@@ -1114,7 +1114,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                       <div className="flex items-center gap-2 text-[11px] opacity-90 truncate mt-1 text-[#9e9ea7]">
                         <span className="font-semibold text-slate-200">{entry.projectName}</span> •{' '}
                         <span>{entry.employeeName}</span> •{' '}
-                        <span className="text-slate-400">{entry.description}</span>
+                        <span className="text-[var(--text-muted)]">{entry.description}</span>
                       </div>
                     </div>
                   );
@@ -1350,7 +1350,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                     placeholder="e.g. Ad-hoc Client Call, Late-Night Server Deploy, Architecture Review"
                     value={customTaskTitle}
                     onChange={(e) => setCustomTaskTitle(e.target.value)}
-                    className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-bold text-white outline-none focus:border-blue-500"
+                    className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-bold text-white outline-none focus:border-[var(--primary-blue)]"
                   />
                 </div>
               ) : (
@@ -1359,7 +1359,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                   <select
                     value={logTaskId}
                     onChange={(e) => setLogTaskId(e.target.value)}
-                    className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-semibold text-white outline-none focus:border-blue-500"
+                    className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-semibold text-white outline-none focus:border-[var(--primary-blue)]"
                   >
                     {state.tasks
                       .filter((t) => logProjId === 'All' || t.projectId === logProjId)
@@ -1382,7 +1382,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                     const pTasks = state.tasks.filter((t) => t.projectId === e.target.value);
                     if (pTasks[0]) setLogTaskId(pTasks[0].id);
                   }}
-                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-semibold text-white outline-none focus:border-blue-500"
+                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-semibold text-white outline-none focus:border-[var(--primary-blue)]"
                 >
                   {state.projects.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -1405,7 +1405,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                   required
                   value={logDate}
                   onChange={(e) => setLogDate(e.target.value)}
-                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-bold text-white outline-none focus:border-blue-500"
+                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-bold text-white outline-none focus:border-[var(--primary-blue)]"
                 />
 
                 {/* Quick Particular Day Selection Pills */}
@@ -1438,7 +1438,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                     required
                     value={logStartTime}
                     onChange={(e) => handleTimeChange(e.target.value, logEndTime)}
-                    className="w-full rounded-lg border border-[#282830] bg-[#121214] p-1.5 font-mono text-xs font-bold text-white outline-none focus:border-blue-500"
+                    className="w-full rounded-lg border border-[#282830] bg-[#121214] p-1.5 font-mono text-xs font-bold text-white outline-none focus:border-[var(--primary-blue)]"
                   />
                 </div>
 
@@ -1451,7 +1451,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                     required
                     value={logEndTime}
                     onChange={(e) => handleTimeChange(logStartTime, e.target.value)}
-                    className="w-full rounded-lg border border-[#282830] bg-[#121214] p-1.5 font-mono text-xs font-bold text-white outline-none focus:border-blue-500"
+                    className="w-full rounded-lg border border-[#282830] bg-[#121214] p-1.5 font-mono text-xs font-bold text-white outline-none focus:border-[var(--primary-blue)]"
                   />
                 </div>
 
@@ -1467,7 +1467,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                     required
                     value={logHours}
                     onChange={(e) => setLogHours(e.target.value)}
-                    className="w-full rounded-lg border border-[#282830] bg-[#121214] p-1.5 font-mono text-xs font-bold text-blue-400 outline-none focus:border-blue-500"
+                    className="w-full rounded-lg border border-[#282830] bg-[#121214] p-1.5 font-mono text-xs font-bold text-blue-400 outline-none focus:border-[var(--primary-blue)]"
                   />
                 </div>
               </div>
@@ -1480,7 +1480,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                   <select
                     value={logCategory}
                     onChange={(e) => setLogCategory(e.target.value as any)}
-                    className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-bold text-white outline-none focus:border-blue-500"
+                    className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-bold text-white outline-none focus:border-[var(--primary-blue)]"
                   >
                     {state.customOptions.timesheetCategories.map((tc) => (
                       <option key={tc.id} value={tc.name}>
@@ -1513,7 +1513,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                   placeholder="Describe code written, APIs tested, or client discussion..."
                   value={logDescription}
                   onChange={(e) => setLogDescription(e.target.value)}
-                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-medium text-white outline-none focus:border-blue-500"
+                  className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-medium text-white outline-none focus:border-[var(--primary-blue)]"
                 />
               </div>
 

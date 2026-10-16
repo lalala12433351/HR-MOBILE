@@ -167,14 +167,6 @@ export async function resolveOfficeIdsFromPayload(
       if (offCheck.rows[0]) {
         const oid = String(offCheck.rows[0].id);
         if (!ids.includes(oid)) ids.push(oid);
-      } else if (names.length === 1) {
-        // Auto-create only for a single unknown name (legacy behavior)
-        const code = n.slice(0, 4).toUpperCase() + Math.floor(10 + Math.random() * 90);
-        const newOff = await tenantQuery(
-          'INSERT INTO offices (name, code, address, latitude, longitude) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-          [n, code, n, 12.9279, 77.6271]
-        );
-        ids.push(String(newOff.rows[0].id));
       }
     }
   }

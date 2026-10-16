@@ -100,9 +100,18 @@ export function useAttendanceData() {
           newData.regularizations = regRes.data.map((r: any) => {
             const formatTime = (t: any) => {
               if (!t) return '';
+              if (t instanceof Date && !Number.isNaN(t.getTime())) {
+                const h24 = t.getHours();
+                const mins = String(t.getMinutes()).padStart(2, '0');
+                const period = h24 >= 12 ? 'PM' : 'AM';
+                const h = h24 % 12 || 12;
+                return `${String(h).padStart(2, '0')}:${mins} ${period}`;
+              }
               const s = String(t);
+              const iso = s.match(/T(\d{2}):(\d{2})/);
+              const clock = iso ? `${iso[1]}:${iso[2]}` : s;
               // TIME from PG may be "HH:MM:SS" — format to 12h for UI
-              const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+              const m = clock.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
               if (!m) return s;
               let h = parseInt(m[1], 10);
               const mins = m[2];
@@ -122,7 +131,11 @@ export function useAttendanceData() {
               requestedCheckOut: formatTime(r.requested_check_out),
               reason: r.reason || 'Forgot Punch In',
               remarks: '',
-              status: r.status === 'approved' ? 'Approved' : r.status === 'rejected' ? 'Rejected' : 'Pending',
+              status: String(r.status || '').toLowerCase() === 'approved'
+                ? 'Approved'
+                : String(r.status || '').toLowerCase() === 'rejected'
+                  ? 'Rejected'
+                  : 'Pending',
               appliedOn: r.created_at ? String(r.created_at).slice(0, 10) : '',
               approvedBy: r.approver_name || undefined,
             } as AttendanceRegularization;

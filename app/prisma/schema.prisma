@@ -132,6 +132,7 @@ model Department {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name           String   @db.VarChar(128)
   code           String   @unique @db.VarChar(32)
+  shortCode      String?  @map("short_code") @db.VarChar(8)
   leadEmployeeId String?  @map("lead_employee_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -198,6 +199,7 @@ model Employee {
   reportingManagerId  String?   @map("reporting_manager_id") @db.Uuid
   role                String    @default("employee") @db.VarChar(32)
   employmentStatus    String    @default("active") @map("employment_status") @db.VarChar(32)
+  employmentType      String    @default("Full-time") @map("employment_type") @db.VarChar(64)
   dateOfJoining       DateTime  @default(now()) @map("date_of_joining") @db.Date
   dateOfBirth         DateTime? @map("date_of_birth") @db.Date
   gender              String?   @db.VarChar(32)
@@ -366,11 +368,15 @@ model Project {
   startDate   DateTime? @map("start_date") @db.Date
   endDate     DateTime? @map("end_date") @db.Date
   managerId   String?   @map("manager_id") @db.Uuid
+  billingMode String    @default("deliverable") @map("billing_mode") @db.VarChar(16)
+  hourlyRate  Decimal?  @map("hourly_rate") @db.Decimal(12, 2)
+  currency    String    @default("INR") @db.VarChar(8)
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   manager    Employee?     @relation(fields: [managerId], references: [id])
   tasks      ProjectTask[]
   timesheets Timesheet[]
+  invoices   Invoice[]
 
   @@map("projects")
   @@schema("tenant_demo")
@@ -385,6 +391,18 @@ model ProjectTask {
   priority             String    @default("medium") @db.VarChar(16)
   status               String    @default("todo") @db.VarChar(32)
   dueDate              DateTime? @map("due_date") @db.Date
+  timerStartedAt       DateTime? @map("timer_started_at") @db.Timestamptz(6)
+  timeSpentSeconds     Int       @default(0) @map("time_spent_seconds")
+  recurrenceSeriesId   String?   @map("recurrence_series_id") @db.Uuid
+  recurrenceRule       Json?     @map("recurrence_rule")
+  recurrenceEnd        DateTime? @map("recurrence_end") @db.Date
+  isRecurrenceTemplate Boolean   @default(false) @map("is_recurrence_template")
+  occurrenceDate       DateTime? @map("occurrence_date") @db.Date
+  parentTaskId         String?   @map("parent_task_id") @db.Uuid
+  billable             Boolean   @default(true)
+  billingType          String    @default("deliverable") @map("billing_type") @db.VarChar(16)
+  unitPrice            Decimal   @default(0) @map("unit_price") @db.Decimal(12, 2)
+  invoiceId            String?   @map("invoice_id") @db.Uuid
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -405,6 +423,7 @@ model Timesheet {
   description String   @db.Text
   status      String   @default("approved") @db.VarChar(32)
   approverId  String?  @map("approver_id") @db.Uuid
+  invoiceId   String?  @map("invoice_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   employee Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
@@ -413,6 +432,43 @@ model Timesheet {
 
   @@index([employeeId, workDate])
   @@map("timesheets")
+  @@schema("tenant_demo")
+}
+
+model Invoice {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId     String    @map("project_id") @db.Uuid
+  invoiceNumber String    @map("invoice_number") @db.VarChar(32)
+  customerName  String?   @map("customer_name") @db.VarChar(128)
+  issueDate     DateTime  @map("issue_date") @db.Date
+  dueDate       DateTime? @map("due_date") @db.Date
+  subtotal      Decimal   @default(0) @db.Decimal(12, 2)
+  gstAmount     Decimal   @default(0) @map("gst_amount") @db.Decimal(12, 2)
+  totalAmount   Decimal   @default(0) @map("total_amount") @db.Decimal(12, 2)
+  paidAmount    Decimal   @default(0) @map("paid_amount") @db.Decimal(12, 2)
+  status        String    @default("draft") @db.VarChar(32)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lines   InvoiceLine[]
+
+  @@map("invoices")
+  @@schema("tenant_demo")
+}
+
+model InvoiceLine {
+  id                String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId         String  @map("invoice_id") @db.Uuid
+  description       String  @db.Text
+  quantity          Decimal @default(1) @db.Decimal(10, 2)
+  unitPrice         Decimal @default(0) @map("unit_price") @db.Decimal(12, 2)
+  total             Decimal @default(0) @db.Decimal(12, 2)
+  sourceTaskId      String? @map("source_task_id") @db.Uuid
+  sourceTimesheetId String? @map("source_timesheet_id") @db.Uuid
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_lines")
   @@schema("tenant_demo")
 }
 
@@ -522,6 +578,103 @@ model Notification {
 
   @@index([recipientEmployeeId, isRead])
   @@map("notifications")
+  @@schema("tenant_demo")
+}
+
+model ChatConversation {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type           String    @db.VarChar(16)
+  name           String?   @db.VarChar(255)
+  description    String?   @db.Text
+  avatar         String?   @db.Text
+  teamId         String?   @map("team_id") @db.Uuid
+  departmentId   String?   @map("department_id") @db.Uuid
+  createdBy      String?   @map("created_by") @db.Uuid
+  lastMessageAt  DateTime  @default(now()) @map("last_message_at") @db.Timestamptz(6)
+  isArchived     Boolean   @default(false) @map("is_archived")
+  ticketStatus   String?   @map("ticket_status") @db.VarChar(16)
+  ticketCategory String?   @map("ticket_category") @db.VarChar(64)
+  ticketPriority String?   @map("ticket_priority") @db.VarChar(16)
+  assignedHrId   String?   @map("assigned_hr_id") @db.Uuid
+  resolvedAt     DateTime? @map("resolved_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  participants ChatParticipant[]
+  messages     ChatMessage[]
+
+  @@index([type, lastMessageAt(sort: Desc)])
+  @@map("chat_conversations")
+  @@schema("tenant_demo")
+}
+
+model ChatParticipant {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId    String    @map("conversation_id") @db.Uuid
+  employeeId        String    @map("employee_id") @db.Uuid
+  role              String    @default("member") @db.VarChar(16)
+  joinedAt          DateTime  @default(now()) @map("joined_at") @db.Timestamptz(6)
+  lastReadMessageId String?   @map("last_read_message_id") @db.Uuid
+  lastReadAt        DateTime? @map("last_read_at") @db.Timestamptz(6)
+  muted             Boolean   @default(false)
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, employeeId], map: "uq_chat_participant")
+  @@index([employeeId])
+  @@map("chat_participants")
+  @@schema("tenant_demo")
+}
+
+model ChatMessage {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String    @map("conversation_id") @db.Uuid
+  senderId        String?   @map("sender_id") @db.Uuid
+  body            String    @default("") @db.Text
+  type            String    @default("text") @db.VarChar(16)
+  parentMessageId String?   @map("parent_message_id") @db.Uuid
+  editedAt        DateTime? @map("edited_at") @db.Timestamptz(6)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  parent       ChatMessage?     @relation("ChatMessageReplies", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  replies      ChatMessage[]    @relation("ChatMessageReplies")
+  attachments  ChatAttachment[]
+  reactions    ChatReaction[]
+
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@map("chat_messages")
+  @@schema("tenant_demo")
+}
+
+model ChatAttachment {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId String   @map("message_id") @db.Uuid
+  fileKey   String   @map("file_key") @db.Text
+  fileName  String   @map("file_name") @db.VarChar(255)
+  mimeType  String?  @map("mime_type") @db.VarChar(128)
+  sizeBytes BigInt   @default(0) @map("size_bytes")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("chat_attachments")
+  @@schema("tenant_demo")
+}
+
+model ChatReaction {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId  String   @map("message_id") @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  emoji      String   @db.VarChar(32)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, employeeId, emoji], map: "uq_chat_reaction")
+  @@map("chat_reactions")
   @@schema("tenant_demo")
 }
 

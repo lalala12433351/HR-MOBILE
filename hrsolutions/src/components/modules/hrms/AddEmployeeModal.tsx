@@ -12,7 +12,7 @@ import { normalizeRoleForLeaveQuotas } from '@/utils/leaveRules';
 interface AddEmployeeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (newEmp: Partial<Employee>, password: string) => void;
+  onSubmit: (newEmp: Partial<Employee>) => void;
   state: AppState;
   isInstitution: boolean;
   onOpenAddOffice?: () => void;
@@ -66,6 +66,7 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
   const [newEmpOffices, setNewEmpOffices] = useState<string[]>([]);
   const [newEmpPrimaryOffice, setNewEmpPrimaryOffice] = useState('');
   const [newEmpManagerId, setNewEmpManagerId] = useState('');
+  const [newEmpManagerIds, setNewEmpManagerIds] = useState<string[]>([]);
   const [newEmpJoinDate, setNewEmpJoinDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [newEmpEmploymentType, setNewEmpEmploymentType] = useState<string>('Full-time');
   const [newEmpShiftId, setNewEmpShiftId] = useState<string>(() => state.customOptions?.shifts?.[0]?.id || 'sh-1');
@@ -305,7 +306,8 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
         endTime: matchedShift?.endTime || '06:00 PM',
         graceMinutes: matchedShift?.gracePeriodMinutes || 15,
       },
-      managerId: newEmpManagerId || undefined,
+      managerId: newEmpManagerIds[0] || newEmpManagerId || undefined,
+      managerIds: newEmpManagerIds.length ? newEmpManagerIds : newEmpManagerId ? [newEmpManagerId] : undefined,
       managerName: managerObj ? managerObj.name : undefined,
       lineManager: managerObj
         ? {
@@ -391,12 +393,13 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
       },
     };
 
-    onSubmit(newEmp, 'Welcome@123');
+    onSubmit(newEmp);
     setNewEmpName('');
     setNewEmpEmail('');
     setNewEmpPhone('');
     setPhoneError('');
     setNewEmpManagerId('');
+    setNewEmpManagerIds([]);
     setNewEmpAllowanceItems([]);
     setNewAllowanceName('');
     setNewAllowanceAmount(0);
@@ -496,7 +499,7 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-xs font-semibold text-slate-700">
-                    {isInstitution ? 'Job Title / Designation' : 'Job Title / Designation'} <span className="text-rose-500">*</span>
+                    {isInstitution ? 'Job Role / Designation' : 'Job Role'} <span className="text-rose-500">*</span>
                   </label>
                   <button
                     type="button"
@@ -668,20 +671,38 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-2">
-                  {isInstitution ? 'Staff Lead / HOD' : 'Reporting Line Manager'}
+                  {isInstitution ? 'Staff leads / HODs' : 'Reporting managers'}
                 </label>
-                <select
-                  value={newEmpManagerId}
-                  onChange={(e) => setNewEmpManagerId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
-                >
-                  <option value="" className="bg-white text-slate-800">(None - Top Level)</option>
-                  {state.employees.map((emp) => (
-                    <option key={emp.id} value={emp.id} className="bg-white text-slate-800">
-                      {emp.name} ({emp.designation || 'Staff'})
-                    </option>
-                  ))}
-                </select>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 space-y-2 max-h-36 overflow-y-auto">
+                  {state.employees.length === 0 ? (
+                    <p className="text-sm text-slate-400">No managers yet — add this person as top level.</p>
+                  ) : (
+                    state.employees.map((emp) => {
+                      const checked = newEmpManagerIds.includes(emp.id);
+                      return (
+                        <label key={emp.id} className="flex items-center gap-2 text-sm font-medium text-slate-800 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setNewEmpManagerIds((prev) => {
+                                const next = checked ? prev.filter((id) => id !== emp.id) : [...prev, emp.id];
+                                setNewEmpManagerId(next[0] || '');
+                                return next;
+                              });
+                            }}
+                            className="rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                          />
+                          <span className="flex-1 truncate">{emp.name} ({emp.designation || 'Staff'})</span>
+                          {checked && newEmpManagerIds[0] === emp.id && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-white">Primary</span>
+                          )}
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">Select two or more managers if this person reports to more than one lead.</p>
               </div>
             </div>
 

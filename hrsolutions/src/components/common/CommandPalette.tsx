@@ -32,6 +32,7 @@ import {
   Users,
 } from 'lucide-react';
 import { AppState } from '../../services/store';
+import { isExecutiveOrAdmin } from '@/utils/teamAccess';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -259,7 +260,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       },
     ];
 
-    navigationList.forEach((nav) => {
+    const canAccessReports = isExecutiveOrAdmin(state.currentPersona);
+    navigationList
+      .filter((nav) => nav.moduleId !== 'reports' || canAccessReports)
+      .forEach((nav) => {
       items.push({
         id: nav.id,
         title: nav.title,
@@ -496,7 +500,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       case 'error':
         return 'bg-rose-50 text-rose-700 border-rose-200';
       default:
-        return 'bg-slate-100 text-slate-700 border-slate-200';
+        return 'bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] border-[var(--border-color)]';
     }
   };
 
@@ -506,12 +510,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-150 text-slate-900 cursor-default flex flex-col max-h-[85vh]"
+        className="relative w-full max-w-2xl overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xl animate-in fade-in zoom-in-95 duration-150 text-[var(--text-primary)] cursor-default flex flex-col max-h-[85vh]"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         {/* 1. Header Search Input Bar */}
-        <div className="flex items-center border-b border-slate-200 px-4 py-3 bg-white shrink-0 gap-3">
+        <div className="flex items-center border-b border-[var(--border-color)] px-4 py-3 bg-[var(--bg-surface)] shrink-0 gap-3">
           <Search className="h-5 w-5 text-blue-600 shrink-0 stroke-[2.2]" />
           <input
             ref={inputRef}
@@ -522,7 +526,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               setSelectedIndex(0);
             }}
             placeholder="Search tasks, employees, students, invoices, deliverables..."
-            className="flex-1 bg-transparent text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none"
+            className="flex-1 bg-transparent text-sm font-medium text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
           />
           {query && (
             <button
@@ -531,18 +535,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 setSelectedIndex(0);
                 inputRef.current?.focus();
               }}
-              className="p-1 text-slate-400 hover:text-slate-700 rounded-md hover:bg-slate-100 cursor-pointer transition-colors"
+              className="p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)] rounded-md hover:bg-[var(--bg-surface-subtle)] cursor-pointer transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
           )}
-          <kbd className="hidden sm:inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-500">
+          <kbd className="hidden sm:inline-flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] px-2 py-0.5 text-[10px] font-mono font-semibold text-[var(--text-muted)]">
             ESC
           </kbd>
         </div>
 
         {/* 2. Category Filter Tabs */}
-        <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-100 bg-slate-50/70 overflow-x-auto custom-scrollbar shrink-0 text-xs">
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/70 overflow-x-auto custom-scrollbar shrink-0 text-xs">
           {[
             { id: 'all', label: 'All Results' },
             { id: 'navigation', label: 'Navigation' },
@@ -560,7 +564,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                 selectedCategory === tab.id
                   ? 'bg-blue-600 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]/60'
               }`}
             >
               {tab.label}
@@ -571,7 +575,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         {/* 3. Results Container */}
         <div
           ref={listRef}
-          className="flex-1 overflow-y-auto p-2 divide-y divide-slate-100 custom-scrollbar bg-white"
+          className="flex-1 overflow-y-auto p-2 divide-y divide-[var(--border-color)] custom-scrollbar bg-[var(--bg-surface)]"
         >
           {/* Search Result Items */}
           {searchResults.length > 0 ? (
@@ -586,10 +590,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     data-index={idx}
                     onClick={item.action}
                     onMouseEnter={() => setSelectedIndex(idx)}
-                    className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition-all ${
+                    className={`flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-all ${
                       isSelected
-                        ? 'bg-blue-50/80 border border-blue-200 text-slate-900 shadow-2xs'
-                        : 'hover:bg-slate-50 border border-transparent text-slate-800'
+                        ? 'bg-blue-50/80 border border-blue-200 text-[var(--text-primary)] shadow-2xs'
+                        : 'hover:bg-[var(--bg-surface-subtle)] border border-transparent text-[var(--text-primary)]'
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -597,14 +601,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         className={`flex h-8 w-8 items-center justify-center rounded-lg shrink-0 transition-colors ${
                           isSelected
                             ? 'bg-blue-600 text-white shadow-2xs'
-                            : 'bg-slate-100 text-slate-600'
+                            : 'bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)]'
                         }`}
                       >
                         <Icon className="h-4 w-4 stroke-[1.8]" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-xs font-bold text-slate-900 truncate">
+                          <p className="text-xs font-bold text-[var(--text-primary)] truncate">
                             {item.title}
                           </p>
                           {item.badge && (
@@ -617,14 +621,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-500 truncate font-medium mt-0.5">
+                        <p className="text-[11px] text-[var(--text-muted)] truncate font-medium mt-0.5">
                           {item.subtitle}
                         </p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0 ml-2">
-                      <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider hidden sm:inline">
+                      <span className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider hidden sm:inline">
                         {item.category}
                       </span>
                       <ChevronRight
@@ -641,10 +645,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             <div className="py-12 px-4 text-center space-y-3">
               <Search className="h-8 w-8 text-slate-300 mx-auto stroke-[1.5]" />
               <div>
-                <p className="text-xs font-bold text-slate-800">
+                <p className="text-xs font-bold text-[var(--text-primary)]">
                   No matches found for &quot;{query}&quot;
                 </p>
-                <p className="text-[11px] text-slate-500 mt-1">
+                <p className="text-[11px] text-[var(--text-muted)] mt-1">
                   Try searching with different keywords, names, or module titles.
                 </p>
               </div>
@@ -653,19 +657,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         </div>
 
         {/* 4. Footer Help & Shortcut Bar */}
-        <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 flex items-center justify-between text-[11px] text-slate-500 shrink-0 font-medium">
+        <div className="px-4 py-2.5 border-t border-[var(--border-color)] bg-[var(--bg-surface-subtle)] flex items-center justify-between text-[11px] text-[var(--text-muted)] shrink-0 font-medium">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1">
-              <kbd className="rounded border border-slate-200 bg-white px-1 py-0.5 font-mono text-[10px] font-semibold shadow-2xs">
+              <kbd className="rounded border border-[var(--border-color)] bg-[var(--bg-surface)] px-1 py-0.5 font-mono text-[10px] font-semibold shadow-2xs">
                 ↑
               </kbd>
-              <kbd className="rounded border border-slate-200 bg-white px-1 py-0.5 font-mono text-[10px] font-semibold shadow-2xs">
+              <kbd className="rounded border border-[var(--border-color)] bg-[var(--bg-surface)] px-1 py-0.5 font-mono text-[10px] font-semibold shadow-2xs">
                 ↓
               </kbd>
               <span>Navigate</span>
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] font-semibold shadow-2xs">
+              <kbd className="rounded border border-[var(--border-color)] bg-[var(--bg-surface)] px-1.5 py-0.5 font-mono text-[10px] font-semibold shadow-2xs">
                 ↵
               </kbd>
               <span>Select</span>
@@ -673,8 +677,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-slate-400">Total index:</span>
-            <span className="font-bold text-slate-700 font-mono">
+            <span className="text-[var(--text-muted)]">Total index:</span>
+            <span className="font-bold text-[var(--text-secondary)] font-mono">
               {allSearchableItems.length} entities
             </span>
           </div>

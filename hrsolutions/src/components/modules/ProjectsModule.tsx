@@ -1,60 +1,87 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import {
-  FolderKanban,
   CheckCircle2,
   Clock,
   Plus,
   Search,
-  Filter,
   User,
   Calendar,
   AlertCircle,
   MessageSquare,
   CheckSquare,
+  Bookmark,
+  Bug,
+  ChevronUp,
+  ChevronsUp,
+  ChevronDown,
   MoreVertical,
   XCircle,
-  ListFilter,
   Layers,
   Paperclip,
   FileText,
   Upload,
   Download,
   Trash2,
-  Folder,
   ExternalLink,
   Briefcase,
-  FolderPlus,
   X,
   Check,
   ShieldCheck,
-  Bug,
-  BookOpen,
-  Sparkles,
-  Flame,
   Play,
   Pause,
   LogIn,
 } from 'lucide-react';
 import { AppState, isTestEntity, normalizeTaskStatus, normalizeTaskPriority } from '../../services/store';
-import { Task, Project, TimesheetEntry, AttendanceRecord } from '../../types';
+import { Task, TaskAttachment, Project, TimesheetEntry, AttendanceRecord, Invoice, DriveItem } from '../../types';
 import { api } from '../../services/apiClient';
+import { mapApiTask } from '../../services/backendSync';
+import { closeTaskTimesheet, isTaskOverdue, openTaskTimesheet, recurrenceLabel } from '../../utils/taskBoard';
+import { canManageProject, canManageTask, getManageableEmployees, taskAssigneeIds, taskAssigneeNames } from '../../utils/teamAccess';
 import { TimesheetsModule } from './TimesheetsModule';
-import { GanttChart } from './GanttChart';
+import {
+  SlideOverDrawer,
+  slideOverBodyClass,
+  slideOverCancelClass,
+  slideOverFooterClass,
+  slideOverPrimaryClass,
+} from '@/components/common/SlideOverDrawer';
 
 interface ProjectsModuleProps {
   state: AppState;
   onUpdateState: (updater: (prev: AppState) => AppState) => void;
 }
 
+const fileTypeFromName = (name: string): DriveItem['type'] => {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'image';
+  if (['xls', 'xlsx', 'csv'].includes(ext)) return 'sheet';
+  if (['zip', 'rar', '7z'].includes(ext)) return 'zip';
+  if (['doc', 'docx', 'txt'].includes(ext)) return 'doc';
+  return 'pdf';
+};
+
+const formatFileSize = (bytes: number) => {
+  if (!bytes) return undefined;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const driveItemToAttachment = (item: DriveItem): TaskAttachment => ({
+  id: item.id,
+  name: item.name,
+  size: item.size,
+  type: item.type,
+  s3Key: item.s3Key || (item.downloadUrl && !/^https?:|^#/.test(item.downloadUrl) ? item.downloadUrl : undefined),
+  owner: item.owner,
+});
+
 
 const AVATAR_COLORS = [
-  'bg-blue-950/50 text-blue-300 border-blue-800/40',
-  'bg-purple-950/50 text-purple-300 border-purple-800/40',
-  'bg-amber-950/50 text-amber-300 border-amber-800/40',
-  'bg-rose-950/50 text-rose-300 border-rose-800/40',
-  'bg-cyan-950/50 text-cyan-300 border-cyan-800/40',
+  'bg-[var(--bg-surface-subtle)] text-[var(--studio-navy)] border-[var(--border-color)]',
 ];
 
 export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateState }) => {
@@ -83,6 +110,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
   const handleAddSubtask = async (taskId: string) => {
     if (!newSubtaskTitle.trim()) return;
+    if (!ensureCanManageTask(taskId)) return;
     setIsSaving(true);
     try {
       const newSubtask = {
@@ -157,6 +185,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   const [newProjName, setNewProjName] = useState('');
   const [newProjCode, setNewProjCode] = useState('');
   const [newProjClient, setNewProjClient] = useState('');
+  const [newProjClientId, setNewProjClientId] = useState('');
   const [newProjManagerId, setNewProjManagerId] = useState(state.employees[0]?.id || '');
   const [newProjTeamMembers, setNewProjTeamMembers] = useState<string[]>([state.employees[0]?.id || '']);
   const [newProjCategory, setNewProjCategory] = useState('General');
@@ -206,17 +235,31 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   // Check if an employee or current persona is currently clocked in today
+  // Attendance rows may be keyed by local date (backend punches) or UTC date (local clock-in writes)
+  const isTodayAttendanceDate = (date: string) => {
+    const d = new Date();
+    const localToday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return date === localToday || date === d.toISOString().split('T')[0];
+  };
+
   const isEmployeeClockedIn = (empId?: string, empName?: string) => {
     const targetId = empId || state.currentPersona?.id;
     const targetName = empName || state.currentPersona?.name;
-    const todayStr = new Date().toISOString().split('T')[0];
     return state.attendance.some(
       (a) =>
-        (a.employeeId === targetId || (targetName && a.employeeName.toLowerCase() === targetName.toLowerCase())) &&
-        a.date === todayStr &&
+        (a.employeeId === targetId || (targetName && (a.employeeName || '').toLowerCase() === targetName.toLowerCase())) &&
+        isTodayAttendanceDate(a.date) &&
         !!a.checkIn &&
         !a.checkOut
     );
+  };
+
+  const isAnyAssigneeClockedIn = (task?: Task | null) => {
+    if (!task) return false;
+    const ids = taskAssigneeIds(task);
+    const names = taskAssigneeNames(task);
+    if (!ids.length && !names.length) return isEmployeeClockedIn(task.assigneeId, task.assigneeName);
+    return ids.some((id, index) => isEmployeeClockedIn(id, names[index] || names[0]));
   };
 
   // Project & Task Hours / Rejection States
@@ -230,8 +273,275 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskProj, setNewTaskProj] = useState('');
   const [newTaskAssignee, setNewTaskAssignee] = useState(state.employees[0]?.id || '');
-  const [newTaskPriority, setNewTaskPriority] = useState<'Low' | 'Medium' | 'High' | 'Urgent'>('High');
+  const [newTaskAssignees, setNewTaskAssignees] = useState<string[]>(state.employees[0]?.id ? [state.employees[0].id] : []);
+  const [newTaskPriority, setNewTaskPriority] = useState<Task['priority']>('High');
   const [newTaskDescription, setNewTaskDescription] = useState('');
+  const [newTaskDueDate, setNewTaskDueDate] = useState('');
+  const [newTaskRepeat, setNewTaskRepeat] = useState<'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly'>('none');
+  const [newTaskWeekday, setNewTaskWeekday] = useState(() => new Date().getDay());
+  const [newTaskRecurrenceEnd, setNewTaskRecurrenceEnd] = useState('');
+  const [newTaskBillable, setNewTaskBillable] = useState(true);
+  const [newTaskBillingType, setNewTaskBillingType] = useState<'deliverable' | 'hourly'>('deliverable');
+  const [newTaskPrice, setNewTaskPrice] = useState('');
+  const [newTaskClientId, setNewTaskClientId] = useState('');
+  const [billingClients, setBillingClients] = useState<Array<{ id: string; name: string; company_name?: string; companyName?: string }>>([]);
+  const [editDueScope, setEditDueScope] = useState<'occurrence' | 'future'>('occurrence');
+  const [billLines, setBillLines] = useState<Array<{
+    key: string;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    sourceTaskId?: string;
+    sourceTimesheetId?: string;
+    included: boolean;
+  }>>([]);
+  const [projectInvoices, setProjectInvoices] = useState<any[]>([]);
+  const [billingModeDraft, setBillingModeDraft] = useState<'deliverable' | 'hourly'>('deliverable');
+  const [hourlyRateDraft, setHourlyRateDraft] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.billing.getClients().then((res) => {
+      if (cancelled || !res.success || !Array.isArray(res.data)) return;
+      setBillingClients(res.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const proj = state.projects.find((p) => p.id === newTaskProj);
+    if (proj?.clientId) setNewTaskClientId(proj.clientId);
+  }, [newTaskProj, state.projects]);
+
+  const roleHourlyRate = (employeeId?: string) => {
+    const rates = state.customOptions?.hourlyBillingRatesByRole || {};
+    const emp = state.employees.find((e) => e.id === employeeId);
+    const role = String(emp?.role || 'employee').toLowerCase();
+    return Number(rates[role] ?? rates.employee ?? 0);
+  };
+
+  const loadProjectBilling = async (project: Project) => {
+    setBillingModeDraft(project.billingMode || 'deliverable');
+    setHourlyRateDraft(project.hourlyRate != null ? String(project.hourlyRate) : '');
+    const [unbilledRes, invoiceRes] = await Promise.all([
+      api.projects.getUnbilledWork(project.id),
+      api.projects.listProjectInvoices(project.id),
+    ]);
+    setProjectInvoices(invoiceRes.success && Array.isArray(invoiceRes.data) ? invoiceRes.data : []);
+    const mode = project.billingMode || 'deliverable';
+    const projectRate = project.hourlyRate;
+    const lines: typeof billLines = [];
+    if (unbilledRes.success && unbilledRes.data) {
+      if (mode === 'hourly') {
+        for (const ts of unbilledRes.data.timesheets || []) {
+          const when = ts.occurrence_date
+            ? String(ts.occurrence_date).slice(0, 10)
+            : String(ts.work_date || '').slice(0, 10);
+          lines.push({
+            key: `ts-${ts.id}`,
+            description: when ? `${ts.task_title} (${when})` : String(ts.task_title || 'Work'),
+            quantity: Number(ts.hours_spent) || 0,
+            unitPrice: projectRate != null && Number(projectRate) > 0 ? Number(projectRate) : roleHourlyRate(ts.employee_id),
+            sourceTimesheetId: ts.id,
+            included: true,
+          });
+        }
+      } else {
+        for (const task of unbilledRes.data.tasks || []) {
+          const when = task.occurrence_date ? String(task.occurrence_date).slice(0, 10) : '';
+          lines.push({
+            key: `task-${task.id}`,
+            description: when ? `${task.title} (${when})` : task.title,
+            quantity: 1,
+            unitPrice: Number(task.unit_price) || 0,
+            sourceTaskId: task.id,
+            included: true,
+          });
+        }
+      }
+    }
+    setBillLines(lines);
+  };
+
+  useEffect(() => {
+    if (!selectedProjectForDetails) return;
+    loadProjectBilling(selectedProjectForDetails).catch((err) => console.error(err));
+    // Reload when the open project changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProjectForDetails?.id]);
+
+  const saveTaskDueDate = async (task: Task, value: string) => {
+    if (!ensureCanManageTask(task.id)) return;
+    const dueDate = value || null;
+    const applyTo = task.recurrenceSeriesId ? editDueScope : 'occurrence';
+    try {
+      await api.projects.updateTask(task.id, { dueDate, applyTo });
+      if (applyTo === 'future') {
+        const refreshed = await api.projects.getTasks();
+        if (refreshed.success && Array.isArray(refreshed.data)) {
+          onUpdateState((prev) => ({ ...prev, tasks: refreshed.data.map(mapApiTask) }));
+        }
+      } else {
+        onUpdateState((prev) => ({
+          ...prev,
+          tasks: prev.tasks.map((t) => (t.id === task.id ? { ...t, dueDate: dueDate || undefined } : t)),
+        }));
+      }
+      setSelectedTask((prev) => (prev && prev.id === task.id ? { ...prev, dueDate: dueDate || undefined } : prev));
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Failed to save the due date.');
+    }
+  };
+
+  const saveTaskPriority = async (task: Task, priority: Task['priority']) => {
+    if (priority === task.priority) return;
+    if (!ensureCanManageTask(task.id)) return;
+    try {
+      await api.projects.updateTask(task.id, { priority: priority.toLowerCase() });
+      onUpdateState((prev) => ({
+        ...prev,
+        tasks: prev.tasks.map((t) => (t.id === task.id ? { ...t, priority } : t)),
+        auditLogs: [
+          {
+            id: `log_${Date.now()}`,
+            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+            user: prev.currentPersona.name,
+            action: 'TASK_PRIORITY_UPDATED',
+            entity: 'Task',
+            entityId: task.id,
+            ipAddress: '106.51.72.18',
+            details: `Changed priority of "${task.title}" from ${task.priority} to ${priority}`,
+          },
+          ...prev.auditLogs,
+        ],
+      }));
+      setSelectedTask((prev) => (prev && prev.id === task.id ? { ...prev, priority } : prev));
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Failed to save the priority.');
+    }
+  };
+
+  const saveTaskAssignees = async (task: Task, ids: string[]) => {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    if (
+      unique.join(',') === taskAssigneeIds(task).join(',') &&
+      unique.length === taskAssigneeIds(task).length
+    ) {
+      return;
+    }
+    if (!ensureCanManageTask(task.id)) return;
+    const people = unique
+      .map((id) => state.employees.find((emp) => emp.id === id))
+      .filter(Boolean) as typeof state.employees;
+    try {
+      await api.projects.updateTask(task.id, { assignedToEmployeeIds: unique });
+      const next = {
+        assigneeId: people[0]?.id || '',
+        assigneeName: people[0]?.name || (unique.length ? 'Team Member' : 'Unassigned'),
+        assigneeIds: unique,
+        assigneeNames: people.map((person) => person.name),
+      };
+      onUpdateState((prev) => ({
+        ...prev,
+        tasks: prev.tasks.map((t) => (t.id === task.id ? { ...t, ...next } : t)),
+      }));
+      setSelectedTask((prev) => (prev && prev.id === task.id ? { ...prev, ...next } : prev));
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Failed to save assignees.');
+    }
+  };
+
+  const saveProjectBilling = async () => {
+    if (!selectedProjectForDetails) return;
+    if (!ensureCanManageProject(selectedProjectForDetails.id)) return;
+    try {
+      await api.projects.updateProject(selectedProjectForDetails.id, {
+        billingMode: billingModeDraft,
+        hourlyRate: hourlyRateDraft === '' ? null : Number(hourlyRateDraft),
+      });
+      const next: Project = {
+        ...selectedProjectForDetails,
+        billingMode: billingModeDraft,
+        hourlyRate: hourlyRateDraft === '' ? undefined : Number(hourlyRateDraft),
+      };
+      setSelectedProjectForDetails(next);
+      onUpdateState((prev) => ({
+        ...prev,
+        projects: prev.projects.map((p) => (p.id === next.id ? { ...p, billingMode: next.billingMode, hourlyRate: next.hourlyRate } : p)),
+      }));
+      await loadProjectBilling(next);
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Failed to save billing settings.');
+    }
+  };
+
+  const createDraftInvoice = async () => {
+    const project = selectedProjectForDetails;
+    if (!project) return;
+    if (!ensureCanManageProject(project.id)) return;
+    const lines = billLines.filter((line) => line.included);
+    if (lines.length === 0) {
+      notifyApiError('Select at least one completed item to invoice.');
+      return;
+    }
+    try {
+      const res = await api.projects.createProjectInvoice(project.id, {
+        lines: lines.map((line) => ({
+          description: line.description,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          sourceTaskId: line.sourceTaskId,
+          sourceTimesheetId: line.sourceTimesheetId,
+        })),
+      });
+      if (!res.success || !res.data) {
+        throw new Error(res.error?.message || 'Could not create the invoice');
+      }
+      const inv = res.data;
+      const draft: Invoice = {
+        id: inv.id,
+        invoiceNumber: inv.invoice_number,
+        customerId: project.id,
+        customerName: inv.customer_name || project.clientName || project.name,
+        issueDate: String(inv.issue_date || '').slice(0, 10),
+        dueDate: String(inv.due_date || '').slice(0, 10),
+        subtotal: Number(inv.subtotal) || 0,
+        gstAmount: Number(inv.gst_amount) || 0,
+        totalAmount: Number(inv.total_amount) || 0,
+        paidAmount: Number(inv.paid_amount) || 0,
+        status: 'Draft',
+        items: (inv.lines || []).map((line: any) => ({
+          description: line.description,
+          quantity: Number(line.quantity) || 0,
+          unitPrice: Number(line.unit_price) || 0,
+          total: Number(line.total) || 0,
+        })),
+      };
+      onUpdateState((prev) => ({
+        ...prev,
+        invoices: [draft, ...(prev.invoices || [])],
+      }));
+      await loadProjectBilling(project);
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Could not create the invoice.');
+    }
+  };
+
+  const sendProjectInvoice = async (invoiceId: string) => {
+    if (!ensureCanManageProject(selectedProjectForDetails?.id)) return;
+    try {
+      await api.projects.updateInvoice(invoiceId, { status: 'sent' });
+      setProjectInvoices((prev) => prev.map((inv) => (inv.id === invoiceId ? { ...inv, status: 'sent' } : inv)));
+      onUpdateState((prev) => ({
+        ...prev,
+        invoices: (prev.invoices || []).map((inv: Invoice) => (inv.id === invoiceId ? { ...inv, status: 'Sent' } : inv)),
+      }));
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Could not send the invoice.');
+    }
+  };
 
   // Quick Log Time on Selected Task
   const [showTaskLogTimeModal, setShowTaskLogTimeModal] = useState(false);
@@ -245,9 +555,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   const [showAttachDriveModal, setShowAttachDriveModal] = useState(false);
   const [showUploadAttachModal, setShowUploadAttachModal] = useState(false);
   const [attachSearchQuery, setAttachSearchQuery] = useState('');
-  const [newDocName, setNewDocName] = useState('');
-  const [newDocType, setNewDocType] = useState<'pdf' | 'doc' | 'sheet' | 'image' | 'zip'>('pdf');
-  const [newDocSize, setNewDocSize] = useState('2.5 MB');
+  const [pendingAttachFile, setPendingAttachFile] = useState<File | null>(null);
+  const [isAttachingDoc, setIsAttachingDoc] = useState(false);
+  const attachFileInputRef = useRef<HTMLInputElement>(null);
 
   const userRole = (state.currentPersona?.role || '').toLowerCase();
   const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
@@ -261,31 +571,38 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   // Managers must be able to view/assign team tasks (setup assigns leads as "manager")
   const isAdmin = isSuperAdmin || isHR || isManagerRole;
 
-  const assignableEmployees = (() => {
-    const roster = state.employees || [];
-    if (isSuperAdmin || isHR) return roster;
+  const assignableEmployees = useMemo(
+    () => getManageableEmployees(state.currentPersona, state.employees || []),
+    [state.currentPersona, state.employees]
+  );
+  const priorityOptions = useMemo(() => {
+    const custom = (state.customOptions?.taskPriorities || []).map((p) => p.name).filter(Boolean);
+    return custom.length ? custom : ['Low', 'Medium', 'High', 'Urgent'];
+  }, [state.customOptions?.taskPriorities]);
 
-    const me = state.currentPersona;
-    const myEmp = roster.find(
-      (e) =>
-        (me?.id && e.id === me.id) ||
-        (me?.email && e.email?.toLowerCase() === me.email.toLowerCase())
-    );
-    const myId = myEmp?.id || me?.id || '';
-    const myTeamId = myEmp?.teamId;
-    const myDept = myEmp?.department || me?.department;
+  const canManageThisTask = (task?: Task | null) => canManageTask(state.currentPersona, task, state.employees || []);
+  const canManageThisProject = (project?: Project | null) =>
+    canManageProject(state.currentPersona, project, state.employees || []);
 
-    const teammates = roster.filter((e) => {
-      if (myId && e.id === myId) return true;
-      if (myId && (e.managerId === myId || (e as any).reportingManagerId === myId)) return true;
-      if (myTeamId && e.teamId && e.teamId === myTeamId) return true;
-      if (myDept && e.department && e.department === myDept) return true;
-      return false;
-    });
+  const flashPermissionNotice = (message: string) => {
+    setPermissionNotice(message);
+    setTimeout(() => setPermissionNotice(null), 4000);
+  };
 
-    // Fall back to full roster if team graph isn't populated yet
-    return teammates.length > 1 ? teammates : roster;
-  })();
+  /** Returns false (and shows a notice) when the current user may not modify this task. */
+  const ensureCanManageTask = (taskOrId?: Task | string | null): boolean => {
+    const task = typeof taskOrId === 'string' ? state.tasks.find((t) => t.id === taskOrId) : taskOrId;
+    if (task && canManageThisTask(task)) return true;
+    flashPermissionNotice("You can't modify tasks that belong to someone above you or outside your team.");
+    return false;
+  };
+
+  const ensureCanManageProject = (projectOrId?: Project | string | null): boolean => {
+    const project = typeof projectOrId === 'string' ? state.projects.find((p) => p.id === projectOrId) : projectOrId;
+    if (project && canManageThisProject(project)) return true;
+    flashPermissionNotice("You can't modify projects led by someone above you or outside your team.");
+    return false;
+  };
 
   const getAssigneeAvatarStyle = (name: string) => {
     let hash = 0;
@@ -303,124 +620,182 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     return parts[0].substring(0, 2).toUpperCase();
   };
 
-  const handleAttachExistingDoc = (docId: string) => {
-    if (!selectedTask) return;
-    const doc = state.driveItems.find((d) => d.id === docId);
-
-    onUpdateState((prev) => ({
-      ...prev,
-      driveItems: prev.driveItems.map((item) =>
-        item.id === docId
-          ? {
-            ...item,
-            taskId: selectedTask.id,
-            taskTitle: selectedTask.title,
-            projectId: selectedTask.projectId,
-            folderCategory: 'Projects',
-          }
-          : item
-      ),
-      tasks: prev.tasks.map((t) =>
-        t.id === selectedTask.id
-          ? {
-            ...t,
-            attachedDocIds: Array.from(new Set([...(t.attachedDocIds || []), docId])),
-          }
-          : t
-      ),
-      auditLogs: [
-        {
-          id: `log_${Date.now()}`,
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          user: state.currentPersona.name,
-          action: 'TASK_DOCUMENT_ATTACHED',
-          entity: 'Task',
-          entityId: selectedTask.id,
-          ipAddress: '106.51.72.18',
-          details: `Attached document "${doc?.name || docId}" to task "${selectedTask.title}"`,
-        },
-        ...prev.auditLogs,
-      ],
-    }));
-
-    setSelectedTask((prev) =>
-      prev ? { ...prev, attachedDocIds: Array.from(new Set([...(prev.attachedDocIds || []), docId])) } : null
+  const renderAssigneeStack = (task: Task, size = 'h-6 w-6 text-[10px]') => {
+    const names = taskAssigneeNames(task);
+    const label = names.length ? names : ['Unassigned'];
+    const shown = label.slice(0, 3);
+    return (
+      <div className="flex items-center min-w-0">
+        <div className="flex -space-x-1.5">
+          {shown.map((name, index) => (
+            <div
+              key={`${name}-${index}`}
+              title={name}
+              className={`${size} rounded-full border-2 border-white flex items-center justify-center font-bold shrink-0 ${getAssigneeAvatarStyle(name)}`}
+              style={{ zIndex: shown.length - index }}
+            >
+              {getInitials(name)}
+            </div>
+          ))}
+        </div>
+        <span className="ml-2 text-[11px] text-slate-600 font-medium truncate">
+          {label.length === 1 ? label[0] : `${label[0]} +${label.length - 1}`}
+        </span>
+      </div>
     );
-    setShowAttachDriveModal(false);
   };
 
-  const handleUploadAndAttach = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTask || !newDocName.trim()) return;
+  const resolveTaskAttachments = (task: Task): TaskAttachment[] => {
+    if (task.attachedDocs && task.attachedDocs.length) return task.attachedDocs;
+    return (task.attachedDocIds || []).map((id) => {
+      const item = state.driveItems.find((d) => d.id === id);
+      return item ? driveItemToAttachment(item) : { id, name: id };
+    });
+  };
 
-    const newDocId = `doc_${Date.now()}`;
-    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
-    const newDriveDoc = {
-      id: newDocId,
-      name: newDocName.trim(),
-      type: newDocType,
-      size: newDocSize,
-      owner: state.currentPersona.name,
-      uploadedAt: nowStr,
-      modifiedDate: nowStr,
-      folderCategory: 'Projects' as const,
-      tags: ['Deliverable', 'Attachment'],
-      projectId: selectedTask.projectId,
-      taskId: selectedTask.id,
-      taskTitle: selectedTask.title,
-      downloadUrl: '#',
-    };
-
+  const applyTaskAttachments = (
+    taskId: string,
+    docs: TaskAttachment[],
+    options?: { auditDetails?: string; driveItem?: DriveItem }
+  ) => {
+    const ids = docs.map((doc) => doc.id);
     onUpdateState((prev) => ({
       ...prev,
-      driveItems: [newDriveDoc, ...prev.driveItems],
+      driveItems: options?.driveItem
+        ? [options.driveItem, ...prev.driveItems.filter((item) => item.id !== options.driveItem!.id)]
+        : prev.driveItems,
       tasks: prev.tasks.map((t) =>
-        t.id === selectedTask.id
-          ? {
-            ...t,
-            attachedDocIds: Array.from(new Set([...(t.attachedDocIds || []), newDocId])),
-          }
-          : t
+        t.id === taskId ? { ...t, attachedDocs: docs, attachedDocIds: ids } : t
       ),
-      auditLogs: [
-        {
-          id: `log_${Date.now()}`,
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          user: state.currentPersona.name,
-          action: 'DOCUMENT_UPLOADED_AND_ATTACHED',
-          entity: 'DriveItem',
-          entityId: newDocId,
-          ipAddress: '106.51.72.18',
-          details: `Uploaded & attached "${newDocName}" to task "${selectedTask.title}"`,
-        },
-        ...prev.auditLogs,
-      ],
+      auditLogs: options?.auditDetails
+        ? [
+            {
+              id: `log_${Date.now()}`,
+              timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+              user: state.currentPersona.name,
+              action: 'TASK_DOCUMENT_ATTACHED',
+              entity: 'Task',
+              entityId: taskId,
+              ipAddress: '106.51.72.18',
+              details: options.auditDetails,
+            },
+            ...prev.auditLogs,
+          ]
+        : prev.auditLogs,
     }));
+    setSelectedTask((prev) => (prev && prev.id === taskId ? { ...prev, attachedDocs: docs, attachedDocIds: ids } : prev));
+    api.projects.updateTask(taskId, { attachedDocs: docs }).catch((err: any) => {
+      flashPermissionNotice(err?.message || 'Could not save the document attachment.');
+    });
+  };
 
-    setSelectedTask((prev) =>
-      prev ? { ...prev, attachedDocIds: Array.from(new Set([...(prev.attachedDocIds || []), newDocId])) } : null
-    );
-    setShowUploadAttachModal(false);
-    setNewDocName('');
+  const handleAttachExistingDoc = (doc: DriveItem | TaskAttachment) => {
+    if (!selectedTask) return;
+    if (!ensureCanManageTask(selectedTask.id)) return;
+    const attachment: TaskAttachment = 'folderCategory' in doc ? driveItemToAttachment(doc) : doc;
+    const next = [...resolveTaskAttachments(selectedTask).filter((item) => item.id !== attachment.id), attachment];
+    applyTaskAttachments(selectedTask.id, next, {
+      auditDetails: `Attached document "${attachment.name}" to task "${selectedTask.title}"`,
+    });
+    setShowAttachDriveModal(false);
+    setAttachSearchQuery('');
+  };
+
+  const handleUploadAndAttach = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTask || !pendingAttachFile) return;
+    if (!ensureCanManageTask(selectedTask.id)) return;
+
+    setIsAttachingDoc(true);
+    const file = pendingAttachFile;
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    let newDocId = `doc_${Date.now()}`;
+    let s3Key: string | undefined;
+
+    try {
+      try {
+        const presigned = await api.storage.getPresignedUploadUrl({
+          module: 'documents',
+          fileName: file.name,
+          contentType: file.type || 'application/octet-stream',
+          fileSizeBytes: file.size,
+        });
+        const uploadData = presigned.data as { uploadUrl: string; s3Key: string };
+        s3Key = uploadData.s3Key;
+        await api.storage.uploadFileToS3(uploadData.uploadUrl, file);
+        try {
+          const registered = await api.storage.registerDocument({
+            employeeId: state.currentPersona.id,
+            docType: 'Projects',
+            fileName: file.name,
+            s3Key: uploadData.s3Key,
+            fileSizeBytes: file.size,
+          });
+          if (registered?.data?.id) newDocId = String(registered.data.id);
+        } catch {
+          /* attachment still saved on the task if catalog registration fails */
+        }
+      } catch (err: any) {
+        flashPermissionNotice(err?.message || 'Could not upload the file. It will still be listed on this task.');
+      }
+
+      const newDriveDoc: DriveItem = {
+        id: newDocId,
+        name: file.name,
+        type: fileTypeFromName(file.name),
+        size: formatFileSize(file.size),
+        owner: state.currentPersona.name,
+        uploadedAt: nowStr,
+        modifiedDate: nowStr,
+        folderCategory: 'Projects',
+        tags: ['Deliverable', 'Attachment'],
+        projectId: selectedTask.projectId,
+        taskId: selectedTask.id,
+        taskTitle: selectedTask.title,
+        s3Key,
+        downloadUrl: s3Key,
+      };
+      const attachment: TaskAttachment = driveItemToAttachment(newDriveDoc);
+
+      applyTaskAttachments(
+        selectedTask.id,
+        [...resolveTaskAttachments(selectedTask).filter((item) => item.id !== attachment.id), attachment],
+        {
+          auditDetails: `Uploaded & attached "${file.name}" to task "${selectedTask.title}"`,
+          driveItem: newDriveDoc,
+        }
+      );
+
+      setShowUploadAttachModal(false);
+      setPendingAttachFile(null);
+      if (attachFileInputRef.current) attachFileInputRef.current.value = '';
+    } finally {
+      setIsAttachingDoc(false);
+    }
   };
 
   const handleRemoveAttachment = (docId: string) => {
     if (!selectedTask) return;
-    onUpdateState((prev) => ({
-      ...prev,
-      tasks: prev.tasks.map((t) =>
-        t.id === selectedTask.id
-          ? {
-            ...t,
-            attachedDocIds: (t.attachedDocIds || []).filter((id) => id !== docId),
-          }
-          : t
-      ),
-    }));
-
-    setSelectedTask((prev) =>
-      prev ? { ...prev, attachedDocIds: (prev.attachedDocIds || []).filter((id) => id !== docId) } : null
+    if (!ensureCanManageTask(selectedTask.id)) return;
+    applyTaskAttachments(
+      selectedTask.id,
+      resolveTaskAttachments(selectedTask).filter((doc) => doc.id !== docId)
     );
+  };
+
+  const handleDownloadAttachment = async (doc: TaskAttachment) => {
+    if (!doc.s3Key) {
+      flashPermissionNotice('This file is not available for download.');
+      return;
+    }
+    try {
+      const res = await api.storage.getPresignedDownloadUrl(doc.s3Key);
+      const url = (res.data as { downloadUrl?: string })?.downloadUrl;
+      if (!url) throw new Error('Download URL missing');
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      flashPermissionNotice(err?.message || 'Could not download the file.');
+    }
   };
 
   const activeProjects = state.projects.filter(
@@ -429,72 +804,37 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
   // Jira Issue Type Badge Helper
   const getIssueTypeBadge = (type?: Task['issueType']) => {
-    switch (type) {
-      case 'Bug':
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20" title="Bug / Issue">
-            <Bug className="h-3 w-3 text-rose-500 shrink-0" />
-            <span>BUG</span>
-          </span>
-        );
-      case 'Story':
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" title="User Story">
-            <BookOpen className="h-3 w-3 text-emerald-500 shrink-0" />
-            <span>STORY</span>
-          </span>
-        );
-      case 'Improvement':
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20" title="Improvement">
-            <Sparkles className="h-3 w-3 text-amber-500 shrink-0" />
-            <span>IMP</span>
-          </span>
-        );
-      case 'Task':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20" title="Task">
-            <CheckSquare className="h-3 w-3 text-blue-500 shrink-0" />
-            <span>TASK</span>
-          </span>
-        );
-    }
+    const label = type === 'Bug' ? 'Bug' : type === 'Story' ? 'Story' : type === 'Improvement' ? 'Improvement' : 'Task';
+    const mark =
+      type === 'Bug' ? 'work-type work-type-bug' : type === 'Story' ? 'work-type work-type-story' : type === 'Improvement' ? 'work-type work-type-improvement' : 'work-type work-type-task';
+    const Icon = type === 'Bug' ? Bug : type === 'Story' ? Bookmark : CheckSquare;
+    return (
+      <span className={mark} title={label} aria-label={label}>
+        <Icon className="h-3 w-3" strokeWidth={2.4} />
+      </span>
+    );
   };
 
-  // Jira Priority Badge Helper
   const getPriorityBadge = (priority: Task['priority']) => {
-    switch (priority) {
-      case 'Urgent':
-        return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600 dark:text-rose-400" title="Urgent Priority">
-            <Flame className="h-3.5 w-3.5 text-rose-500" />
-            <span className="text-[10px]">Urgent</span>
-          </span>
-        );
-      case 'High':
-        return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-600 dark:text-amber-400" title="High Priority">
-            <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-            <span className="text-[10px]">High</span>
-          </span>
-        );
-      case 'Medium':
-        return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400" title="Medium Priority">
-            <Clock className="h-3.5 w-3.5 text-blue-500" />
-            <span className="text-[10px]">Medium</span>
-          </span>
-        );
-      case 'Low':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400" title="Low Priority">
-            <Check className="h-3.5 w-3.5 text-slate-400" />
-            <span className="text-[10px]">Low</span>
-          </span>
-        );
-    }
+    const Icon = priority === 'Urgent' ? ChevronsUp : priority === 'Low' ? ChevronDown : ChevronUp;
+    const tone =
+      priority === 'Urgent' || priority === 'High'
+        ? 'work-prio work-prio-urgent'
+        : priority === 'Medium'
+          ? 'work-prio work-prio-medium'
+          : 'work-prio';
+    return (
+      <span className={tone} title={`${priority} priority`} aria-label={`${priority} priority`}>
+        <Icon className="h-4 w-4" strokeWidth={2.6} />
+      </span>
+    );
+  };
+
+  const taskStatusChip = (status: string) => {
+    const s = normalizeTaskStatus(status);
+    if (s === 'Completed') return 'work-chip work-chip-sage';
+    if (s === 'In Progress' || s === 'Review') return 'work-chip work-chip-navy';
+    return 'work-chip work-chip-muted';
   };
 
   const notifyApiError = (message: string) => {
@@ -505,9 +845,18 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   const persistTaskStatus = (
     taskId: string,
     nextStatus: Task['status'],
-    previousStatus: Task['status']
+    previousStatus: Task['status'],
+    extra?: { timeSpentSeconds?: number; timerStartedAt?: number | null }
   ) => {
-    api.projects.updateTask(taskId, { status: nextStatus }).catch((err: any) => {
+    api.projects.updateTask(taskId, { status: nextStatus, ...extra }).then((res: any) => {
+      const next = res?.nextTask;
+      if (!next) return;
+      const mapped = mapApiTask(next);
+      onUpdateState((prev) => ({
+        ...prev,
+        tasks: [mapped, ...prev.tasks.filter((t) => t.id !== mapped.id)],
+      }));
+    }).catch((err: any) => {
       notifyApiError(err?.message || 'Failed to update task status on the server.');
       onUpdateState((prev) => ({
         ...prev,
@@ -532,17 +881,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     const task = state.tasks.find((t) => t.id === taskId);
     if (!task) return;
 
-    // Regular employees can only drag their own tasks
-    if (!isAdmin) {
-      const isMyTask =
-        task.assigneeId === state.currentPersona?.id ||
-        (task.assigneeName || '').toLowerCase() === (state.currentPersona?.name || '').toLowerCase();
-      if (!isMyTask) {
-        e.preventDefault();
-        setPermissionNotice('You can only move tasks assigned to you.');
-        setTimeout(() => setPermissionNotice(null), 4000);
-        return;
-      }
+    if (!ensureCanManageTask(task)) {
+      e.preventDefault();
+      return;
     }
 
     e.dataTransfer.setData('text/plain', taskId);
@@ -564,7 +905,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
   };
 
-  const handleDrop = (e: React.DragEvent, targetStatus: Task['status']) => {
+  const handleDrop = async (e: React.DragEvent, targetStatus: Task['status']) => {
     e.preventDefault();
     setDragOverColumn(null);
     const taskId = e.dataTransfer.getData('text/plain') || draggedTaskId;
@@ -575,17 +916,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     const task = state.tasks.find((t) => t.id === taskId);
     if (!task || normalizeTaskStatus(task.status) === targetStatus) return;
 
-    // Regular employees can only move tasks assigned to them
-    if (!isAdmin) {
-      const isMyTask =
-        task.assigneeId === state.currentPersona?.id ||
-        (task.assigneeName || '').toLowerCase() === (state.currentPersona?.name || '').toLowerCase();
-      if (!isMyTask) {
-        setPermissionNotice('You can only move tasks assigned to you.');
-        setTimeout(() => setPermissionNotice(null), 4000);
-        return;
-      }
-    }
+    if (!ensureCanManageTask(task)) return;
 
     // Only Super Admin can drag a task in Review to Completed
     if (normalizeTaskStatus(task.status) === 'Review' && targetStatus === 'Completed') {
@@ -605,9 +936,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         return;
       }
 
-      const isAssigneeClockedIn = isEmployeeClockedIn(task.assigneeId, task.assigneeName);
+      const isAssigneeClockedIn = isAnyAssigneeClockedIn(task);
       if (!isAssigneeClockedIn) {
-        setPermissionNotice(`Cannot move task to In Progress: ${task.assigneeName || 'The assignee'} is not clocked in today.`);
+        setPermissionNotice(`Cannot move task to In Progress: none of the assignees are clocked in today.`);
         setTimeout(() => setPermissionNotice(null), 5000);
         return;
       }
@@ -617,45 +948,41 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
 
     const nowTime = Date.now();
+    let closedTimesheet: TimesheetEntry | null = null;
+    let closedSeconds: number | undefined;
+    if (normalizeTaskStatus(task.status) === 'In Progress') {
+      try {
+        const closed = await closeTaskTimesheet(task, state.timesheets, nowTime);
+        closedTimesheet = closed.timesheet;
+        closedSeconds = closed.timeSpentSeconds;
+      } catch (err: any) {
+        notifyApiError(err?.message || 'Failed to save the timesheet for this task.');
+        return;
+      }
+    }
 
     onUpdateState((prev) => {
       let updatedTimesheets = prev.timesheets;
       const updatedTasks = prev.tasks.map((t) => {
         if (t.id !== taskId) return t;
 
-        let timeSpentSeconds = t.timeSpentSeconds || (t.actualHours ? Math.round(t.actualHours * 3600) : 0);
+        let timeSpentSeconds = closedSeconds ?? (t.timeSpentSeconds || (t.actualHours ? Math.round(t.actualHours * 3600) : 0));
         let isTimerRunning = t.isTimerRunning;
         let timerStartedAt = t.timerStartedAt;
-        let elapsed = 0;
 
         if (normalizeTaskStatus(t.status) === 'In Progress') {
-          if (isTimerRunning && timerStartedAt) {
-            elapsed = Math.max(0, Math.floor((nowTime - timerStartedAt) / 1000));
-            timeSpentSeconds += elapsed;
-          }
           isTimerRunning = false;
           timerStartedAt = undefined;
         }
 
         const actualHours = Number((timeSpentSeconds / 3600).toFixed(2));
-        const elapsedHours = Number((elapsed / 3600).toFixed(2));
 
-        if (normalizeTaskStatus(t.status) === 'In Progress' && targetStatus !== 'In Progress') {
-          if (timeSpentSeconds < 600) {
-            // Active work under 10 minutes: remove open work log from timesheets only (keep task on Kanban board)
-            updatedTimesheets = updatedTimesheets.filter((ts) => !(ts.taskId === taskId && ts.date === todayStr && !ts.endTime));
-          } else if (elapsed > 0) {
-            updatedTimesheets = updatedTimesheets.map((ts) => {
-              if (ts.taskId === taskId && ts.date === todayStr && !ts.endTime) {
-                return {
-                  ...ts,
-                  hours: Number((ts.hours + elapsedHours).toFixed(2)),
-                  endTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-                };
-              }
-              return ts;
-            });
-          }
+        if (closedTimesheet) {
+          const idx = updatedTimesheets.findIndex(
+            (ts) => ts.id === closedTimesheet!.id || (ts.taskId === taskId && !ts.endTime)
+          );
+          if (idx >= 0) updatedTimesheets[idx] = { ...updatedTimesheets[idx], ...closedTimesheet };
+          else updatedTimesheets = [closedTimesheet, ...updatedTimesheets];
         }
 
         return {
@@ -696,7 +1023,12 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       };
     });
 
-    persistTaskStatus(taskId, targetStatus, task.status);
+    persistTaskStatus(
+      taskId,
+      targetStatus,
+      task.status,
+      closedSeconds != null ? { timeSpentSeconds: closedSeconds, timerStartedAt: null } : undefined
+    );
     if (targetStatus !== 'In Progress') {
       setVerifiedTrackingTaskIds((prev) => {
         const next = new Set(prev);
@@ -737,9 +1069,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   // Direct Status Changer inside Task Drawer
-  const handleUpdateTaskStatus = (taskId: string, newStatus: Task['status']) => {
+  const handleUpdateTaskStatus = async (taskId: string, newStatus: Task['status']) => {
     const task = state.tasks.find((t) => t.id === taskId);
     if (!task || normalizeTaskStatus(task.status) === newStatus) return;
+    if (!ensureCanManageTask(task)) return;
 
     if (normalizeTaskStatus(task.status) === 'Review' && newStatus === 'Completed') {
       if (!isSuperAdmin) {
@@ -758,9 +1091,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         return;
       }
 
-      const isAssigneeClockedIn = isEmployeeClockedIn(task.assigneeId, task.assigneeName);
+      const isAssigneeClockedIn = isAnyAssigneeClockedIn(task);
       if (!isAssigneeClockedIn) {
-        setPermissionNotice(`Cannot move task to In Progress: ${task.assigneeName || 'The assignee'} is not clocked in today.`);
+        setPermissionNotice(`Cannot move task to In Progress: none of the assignees are clocked in today.`);
         setTimeout(() => setPermissionNotice(null), 5000);
         return;
       }
@@ -770,9 +1103,25 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
 
     const nowTime = Date.now();
-    const nowStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    let closedTimesheet: TimesheetEntry | null = null;
+    let closedSeconds: number | undefined;
+    if (normalizeTaskStatus(task.status) === 'In Progress') {
+      try {
+        const closed = await closeTaskTimesheet(task, state.timesheets, nowTime);
+        closedTimesheet = closed.timesheet;
+        closedSeconds = closed.timeSpentSeconds;
+      } catch (err: any) {
+        notifyApiError(err?.message || 'Failed to save the timesheet for this task.');
+        return;
+      }
+    }
 
-    persistTaskStatus(taskId, newStatus, task.status);
+    persistTaskStatus(
+      taskId,
+      newStatus,
+      task.status,
+      closedSeconds != null ? { timeSpentSeconds: closedSeconds, timerStartedAt: null } : undefined
+    );
     if (newStatus !== 'In Progress') {
       setVerifiedTrackingTaskIds((prev) => {
         const next = new Set(prev);
@@ -789,39 +1138,23 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       const updatedTasks = prev.tasks.map((t) => {
         if (t.id !== taskId) return t;
 
-        let timeSpentSeconds = t.timeSpentSeconds || (t.actualHours ? Math.round(t.actualHours * 3600) : 0);
+        let timeSpentSeconds = closedSeconds ?? (t.timeSpentSeconds || (t.actualHours ? Math.round(t.actualHours * 3600) : 0));
         let isTimerRunning = t.isTimerRunning;
         let timerStartedAt = t.timerStartedAt;
-        let elapsed = 0;
 
         if (normalizeTaskStatus(t.status) === 'In Progress') {
-          if (isTimerRunning && timerStartedAt) {
-            elapsed = Math.max(0, Math.floor((nowTime - timerStartedAt) / 1000));
-            timeSpentSeconds += elapsed;
-          }
           isTimerRunning = false;
           timerStartedAt = undefined;
         }
 
         const actualHours = Number((timeSpentSeconds / 3600).toFixed(2));
-        const elapsedHours = Number((elapsed / 3600).toFixed(2));
 
-        if (normalizeTaskStatus(t.status) === 'In Progress' && newStatus !== 'In Progress') {
-          if (timeSpentSeconds < 600) {
-            // Active work under 10 minutes: remove open work log from timesheets only (keep task on Kanban board)
-            updatedTimesheets = updatedTimesheets.filter((ts) => !(ts.taskId === taskId && ts.date === todayStr && !ts.endTime));
-          } else if (elapsed > 0) {
-            updatedTimesheets = updatedTimesheets.map((ts) => {
-              if (ts.taskId === taskId && ts.date === todayStr && !ts.endTime) {
-                return {
-                  ...ts,
-                  hours: Number((ts.hours + elapsedHours).toFixed(2)),
-                  endTime: nowStr,
-                };
-              }
-              return ts;
-            });
-          }
+        if (closedTimesheet) {
+          const idx = updatedTimesheets.findIndex(
+            (ts) => ts.id === closedTimesheet!.id || (ts.taskId === taskId && !ts.endTime)
+          );
+          if (idx >= 0) updatedTimesheets[idx] = { ...updatedTimesheets[idx], ...closedTimesheet };
+          else updatedTimesheets = [closedTimesheet, ...updatedTimesheets];
         }
 
         return {
@@ -876,7 +1209,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   // Execute transition to In Progress with Tracking and Auto Check-In options
-  const executeTaskTransition = (
+  const executeTaskTransition = async (
     taskId: string,
     targetStatus: Task['status'],
     startTimer: boolean,
@@ -885,6 +1218,43 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     const nowTime = Date.now();
     const nowStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
     const targetTask = state.tasks.find((t) => t.id === taskId);
+    if (!targetTask) return;
+
+    const pausedSessions: Array<{ id: string; timesheet: TimesheetEntry | null; timeSpentSeconds: number }> = [];
+    if (startTimer) {
+      const others = state.tasks.filter(
+        (t) =>
+          t.id !== taskId &&
+          t.isTimerRunning &&
+          (t.assigneeId === targetTask.assigneeId ||
+            (targetTask.assigneeName && t.assigneeName === targetTask.assigneeName))
+      );
+      for (const other of others) {
+        try {
+          const closed = await closeTaskTimesheet(other, state.timesheets, nowTime);
+          await api.projects.updateTask(other.id, {
+            timeSpentSeconds: closed.timeSpentSeconds,
+            timerStartedAt: null,
+          });
+          pausedSessions.push({ id: other.id, timesheet: closed.timesheet, timeSpentSeconds: closed.timeSpentSeconds });
+        } catch (err: any) {
+          notifyApiError(err?.message || 'Failed to pause the other running task.');
+          return;
+        }
+      }
+    }
+
+    let openedTimesheet: TimesheetEntry | null = null;
+    try {
+      openedTimesheet = await openTaskTimesheet(
+        targetTask,
+        state.currentPersona.id,
+        state.currentPersona.name
+      );
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Failed to log this task on the timesheet.');
+      return;
+    }
 
     onUpdateState((prev) => {
       let updatedAttendance = prev.attendance;
@@ -931,7 +1301,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
       // Enforce clock-in requirement for In Progress tasks
       if (targetStatus === 'In Progress' && !autoCheckIn) {
-        const isAssigneeClockedIn = isEmployeeClockedIn(targetTask?.assigneeId, targetTask?.assigneeName);
+        const isAssigneeClockedIn = isAnyAssigneeClockedIn(targetTask);
         const isCurrentPersonaClockedIn = isEmployeeClockedIn(prev.currentPersona?.id, prev.currentPersona?.name);
         if (!isAssigneeClockedIn && !isCurrentPersonaClockedIn) {
           setPermissionNotice('You must clock in / check in attendance before moving tasks to In Progress.');
@@ -966,6 +1336,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
             isTimerRunning,
             actualHours,
             progress: 50,
+            openTimesheetId: openedTimesheet?.id,
           };
         }
 
@@ -1010,36 +1381,16 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         return t;
       });
 
-      // Auto-create or ensure TimesheetEntry exists for this task on today
-      if (targetTask) {
-        const existingTsIndex = updatedTimesheets.findIndex(
-          (ts) => ts.taskId === taskId && ts.date === todayStr && !ts.endTime
+      if (openedTimesheet) {
+        updatedTimesheets = [openedTimesheet, ...updatedTimesheets.filter((ts) => ts.id !== openedTimesheet!.id)];
+      }
+      for (const paused of pausedSessions) {
+        if (!paused.timesheet) continue;
+        const idx = updatedTimesheets.findIndex(
+          (ts) => ts.id === paused.timesheet!.id || (ts.taskId === paused.id && !ts.endTime)
         );
-        if (existingTsIndex >= 0) {
-          updatedTimesheets[existingTsIndex] = {
-            ...updatedTimesheets[existingTsIndex],
-            status: 'Review',
-          };
-        } else {
-          const initialHours = Number(((targetTask?.timeSpentSeconds || 0) / 3600).toFixed(2)) || targetTask?.actualHours || 0;
-          const newTs: TimesheetEntry = {
-            id: `ts_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-            employeeId: targetTask?.assigneeId || prev.currentPersona.id,
-            employeeName: targetTask?.assigneeName || prev.currentPersona.name,
-            projectId: targetTask?.projectId || '',
-            projectName: targetTask?.projectName || 'General Project',
-            taskId: targetTask?.id || taskId,
-            taskTitle: targetTask?.title || 'Deliverable',
-            date: todayStr,
-            startTime: nowStr,
-            hours: initialHours,
-            billable: true,
-            category: 'Development',
-            description: `Live work log for ${targetTask?.title || 'task'}`,
-            status: 'Review',
-          };
-          updatedTimesheets = [newTs, ...updatedTimesheets];
-        }
+        if (idx >= 0) updatedTimesheets[idx] = { ...updatedTimesheets[idx], ...paused.timesheet };
+        else updatedTimesheets = [paused.timesheet, ...updatedTimesheets];
       }
 
       return {
@@ -1063,7 +1414,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       };
     });
 
-    persistTaskStatus(taskId, targetStatus, targetTask?.status || 'To Do');
+    persistTaskStatus(taskId, targetStatus, targetTask?.status || 'To Do', {
+      timerStartedAt: startTimer ? nowTime : null,
+      timeSpentSeconds: targetTask.timeSpentSeconds || 0,
+    });
 
     if (startTimer) {
       api.projects
@@ -1098,13 +1452,14 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   // Toggle Live Timer (Play / Pause) for an In Progress task
-  const handleToggleTimer = (taskId: string) => {
+  const handleToggleTimer = async (taskId: string) => {
     const task = state.tasks.find((t) => t.id === taskId);
     if (!task) return;
+    if (!ensureCanManageTask(task)) return;
 
     // If starting/resuming timer, verify attendance check-in
     if (!task.isTimerRunning) {
-      const isAssigneeClockedIn = isEmployeeClockedIn(task.assigneeId, task.assigneeName);
+      const isAssigneeClockedIn = isAnyAssigneeClockedIn(task);
       const isCurrentPersonaClockedIn = isEmployeeClockedIn(state.currentPersona?.id, state.currentPersona?.name);
 
       if (!isAssigneeClockedIn && !isCurrentPersonaClockedIn) {
@@ -1115,6 +1470,30 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
     const nowTime = Date.now();
     const nowStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const starting = !task.isTimerRunning;
+    let sessionSheet: TimesheetEntry | null = null;
+    let persistedSeconds = task.timeSpentSeconds || (task.actualHours ? Math.round(task.actualHours * 3600) : 0);
+    try {
+      if (starting) {
+        sessionSheet = await openTaskTimesheet(task, state.currentPersona.id, state.currentPersona.name);
+        await api.projects.updateTask(taskId, {
+          status: 'In Progress',
+          timerStartedAt: nowTime,
+          timeSpentSeconds: persistedSeconds,
+        });
+      } else {
+        const closed = await closeTaskTimesheet(task, state.timesheets, nowTime);
+        sessionSheet = closed.timesheet;
+        persistedSeconds = closed.timeSpentSeconds;
+        await api.projects.updateTask(taskId, {
+          timerStartedAt: null,
+          timeSpentSeconds: persistedSeconds,
+        });
+      }
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Failed to update the timesheet for this task.');
+      return;
+    }
 
     onUpdateState((prev) => {
       let updatedTimesheets = [...prev.timesheets];
@@ -1160,34 +1539,16 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           timerStartedAt,
           isTimerRunning,
           actualHours,
+          openTimesheetId: starting ? sessionSheet?.id : undefined,
         };
       });
 
-      // If timer just started, ensure timesheet entry exists
-      if (!task.isTimerRunning) {
-        const existingTs = updatedTimesheets.find(
-          (ts) => ts.taskId === taskId && ts.date === todayStr && !ts.endTime
+      if (sessionSheet) {
+        const idx = updatedTimesheets.findIndex(
+          (ts) => ts.id === sessionSheet!.id || (ts.taskId === taskId && !ts.endTime)
         );
-        if (!existingTs) {
-          const initialHours = Number(((task.timeSpentSeconds || 0) / 3600).toFixed(2)) || task.actualHours || 0;
-          const newTs: TimesheetEntry = {
-            id: `ts_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-            employeeId: task.assigneeId || prev.currentPersona.id,
-            employeeName: task.assigneeName || prev.currentPersona.name,
-            projectId: task.projectId || '',
-            projectName: task.projectName || 'General Project',
-            taskId: task.id,
-            taskTitle: task.title,
-            date: todayStr,
-            startTime: nowStr,
-            hours: initialHours,
-            billable: true,
-            category: 'Development',
-            description: `Live work log for ${task.title}`,
-            status: 'Review',
-          };
-          updatedTimesheets = [newTs, ...updatedTimesheets];
-        }
+        if (idx >= 0) updatedTimesheets[idx] = { ...updatedTimesheets[idx], ...sessionSheet };
+        else updatedTimesheets = [sessionSheet, ...updatedTimesheets];
       }
 
       return {
@@ -1247,6 +1608,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
   // Subtask Management in Drawer
   const handleToggleSubtask = (taskId: string, subtaskId: string) => {
+    if (!ensureCanManageTask(taskId)) return;
     onUpdateState((prev) => ({
       ...prev,
       tasks: prev.tasks.map((t) => {
@@ -1267,6 +1629,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
   const handleCreateSubtask = async (taskId: string) => {
     if (!newSubtaskTitle.trim()) return;
+    if (!ensureCanManageTask(taskId)) return;
 
     const newSt = {
       id: `st_${Date.now()}`,
@@ -1304,6 +1667,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   const handleDeleteSubtask = async (taskId: string, subtaskId: string) => {
+    if (!ensureCanManageTask(taskId)) return;
     setIsSaving(true);
     try {
       const targetTask = state.tasks.find((t) => t.id === taskId);
@@ -1334,17 +1698,13 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
   // Filtered Tasks
   const filteredTasks = state.tasks.filter((t) => {
+    if (t.isRecurrenceTemplate) return false;
     if (isTestEntity(t.title) || isTestEntity(t.description) || isTestEntity(t.projectName || '')) {
       return false;
     }
 
-    // Role-based visibility: Regular employees only see their own assigned tasks
-    if (!isAdmin) {
-      const isMyTask =
-        t.assigneeId === state.currentPersona?.id ||
-        (t.assigneeName || '').toLowerCase() === (state.currentPersona?.name || '').toLowerCase();
-      if (!isMyTask) return false;
-    }
+    // Only show tasks the user can act on: their own, plus their team's for managers
+    if (!canManageThisTask(t)) return false;
 
     const matchesProj =
       selectedProjectId === 'All' ||
@@ -1357,15 +1717,18 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       (t.projectName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (t.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (t.tags || []).some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      t.assigneeName.toLowerCase().includes(searchQuery.toLowerCase());
+      taskAssigneeNames(t).some((name) => name.toLowerCase().includes(searchQuery.toLowerCase()));
 
     const matchesEmployee =
       !isAdmin
         ? true
         : selectedEmployeeId === 'All' ||
-        t.assigneeId === selectedEmployeeId ||
-        (t.assigneeName || '').toLowerCase() ===
-        (state.employees.find((e) => e.id === selectedEmployeeId)?.name || '').toLowerCase();
+        taskAssigneeIds(t).includes(selectedEmployeeId) ||
+        taskAssigneeNames(t).some(
+          (name) =>
+            name.toLowerCase() ===
+            (state.employees.find((e) => e.id === selectedEmployeeId)?.name || '').toLowerCase()
+        );
 
     return matchesProj && matchesSearch && matchesEmployee;
   });
@@ -1387,7 +1750,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           e.id === state.currentPersona?.id ||
           (e.email && e.email.toLowerCase() === state.currentPersona?.email?.toLowerCase())
       ) || assignableEmployees[0] || state.employees[0];
-    setNewTaskAssignee(defaultEmp?.id || state.currentPersona?.id || '');
+    const defaultId = defaultEmp?.id || state.currentPersona?.id || '';
+    setNewTaskAssignee(defaultId);
+    setNewTaskAssignees(defaultId ? [defaultId] : []);
     setNewTaskTitle('');
     setNewTaskDescription('');
     setNewTaskPriority('High');
@@ -1401,8 +1766,19 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     const today = new Date().toISOString().split('T')[0];
     const isStandalone = !newTaskProj || newTaskProj === 'standalone';
     const proj = !isStandalone ? state.projects.find((p) => p.id === newTaskProj) : undefined;
-    const targetAssigneeId = isAdmin ? newTaskAssignee : (state.currentPersona?.id || state.employees[0]?.id || '');
+    const targetAssigneeIds = isAdmin
+      ? (newTaskAssignees.length ? newTaskAssignees : newTaskAssignee ? [newTaskAssignee] : [])
+      : [state.currentPersona?.id || state.employees[0]?.id || ''].filter(Boolean);
+    if (targetAssigneeIds.some((id) => id !== state.currentPersona?.id && !assignableEmployees.some((e) => e.id === id))) {
+      flashPermissionNotice("You can't assign tasks to someone above you or outside your team.");
+      return;
+    }
+    const targetAssigneeId = targetAssigneeIds[0] || '';
+    const assignedEmployees = targetAssigneeIds
+      .map((id) => state.employees.find((e) => e.id === id))
+      .filter(Boolean) as typeof state.employees;
     const emp =
+      assignedEmployees[0] ||
       state.employees.find(
         (e) =>
           e.id === targetAssigneeId ||
@@ -1424,16 +1800,33 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         title: newTaskTitle.trim(),
         description: newTaskDescription.trim() || 'Sprint deliverable requirement.',
         assignedToEmployeeId: emp?.id || (targetAssigneeId && targetAssigneeId !== 'user_admin' ? targetAssigneeId : undefined),
+        assignedToEmployeeIds: targetAssigneeIds.filter((id) => id && id !== 'user_admin'),
         priority: newTaskPriority?.toLowerCase() as any,
-        dueDate: today,
+        dueDate: newTaskDueDate || null,
+        billable: newTaskBillable,
+        billingType: newTaskBillingType,
+        unitPrice: Number(newTaskPrice) || 0,
+        clientId: newTaskClientId || undefined,
+        recurrence: newTaskRepeat === 'none' ? null : {
+          frequency: newTaskRepeat,
+          weekday: newTaskWeekday,
+          endDate: newTaskRecurrenceEnd || null,
+        },
       });
 
       if (!taskRes.success) {
         throw new Error(taskRes.error?.message || 'Request failed');
       }
 
+      const mapped = taskRes.data
+        ? mapApiTask({
+            ...taskRes.data,
+            project_name: isStandalone ? 'General' : proj?.name || 'General Project',
+            assigned_to_name: emp?.name || state.currentPersona?.name,
+          })
+        : null;
       const newTask: Task = {
-        id: taskRes.data?.id || `task_${Date.now()}`,
+        id: mapped?.id || taskRes.data?.id || `task_${Date.now()}`,
         taskKey: taskRes.data?.task_key || `TSK-${String(state.tasks.length + 1).padStart(3, '0')}`,
         issueType: 'Task',
         projectId: isStandalone ? '' : proj?.id || '',
@@ -1442,11 +1835,23 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         description: newTaskDescription.trim() || 'Sprint deliverable requirement.',
         assigneeId: emp?.id || state.currentPersona?.id || '',
         assigneeName: emp?.name || state.currentPersona?.name || 'Workspace Member',
+        assigneeIds: assignedEmployees.map((person) => person.id),
+        assigneeNames: assignedEmployees.map((person) => person.name),
         assigneeAvatar: emp?.avatar || state.currentPersona?.avatar || '',
         reporterName: state.currentPersona?.name || 'Admin',
         priority: newTaskPriority,
         status: 'To Do',
         startDate: today,
+        dueDate: mapped?.dueDate,
+        billable: mapped?.billable ?? newTaskBillable,
+        billingType: mapped?.billingType || newTaskBillingType,
+        unitPrice: mapped?.unitPrice ?? (Number(newTaskPrice) || 0),
+        clientId: mapped?.clientId || newTaskClientId || undefined,
+        recurrenceRule: mapped?.recurrenceRule || (newTaskRepeat === 'none' ? null : { frequency: newTaskRepeat, weekday: newTaskWeekday }),
+        recurrenceSeriesId: mapped?.recurrenceSeriesId,
+        recurrenceEnd: mapped?.recurrenceEnd,
+        occurrenceDate: mapped?.occurrenceDate,
+        parentTaskId: mapped?.parentTaskId,
         actualHours: 0,
         timeSpentSeconds: 0,
         isTimerRunning: false,
@@ -1456,25 +1861,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         attachedDocIds: [],
       };
 
-      const newTimesheet: TimesheetEntry = {
-        id: `ts_${Date.now()}_${newTask.id}`,
-        employeeId: newTask.assigneeId,
-        employeeName: newTask.assigneeName,
-        projectId: newTask.projectId,
-        projectName: newTask.projectName,
-        taskId: newTask.id,
-        taskTitle: newTask.title,
-        date: today,
-        hours: 0,
-        description: newTask.description || newTask.title,
-        billable: true,
-        status: 'Submitted',
-      };
-
       onUpdateState((prev) => ({
         ...prev,
         tasks: [newTask, ...prev.tasks],
-        timesheets: [newTimesheet, ...prev.timesheets],
         auditLogs: [
           {
             id: `log_${Date.now()}`,
@@ -1492,7 +1881,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           {
             id: `notif_${Date.now()}`,
             title: 'Task Created & Assigned',
-            message: `"${newTask.title}" assigned to ${newTask.assigneeName}.`,
+            message: `"${newTask.title}" assigned to ${newTask.assigneeNames?.join(', ') || newTask.assigneeName}.`,
             timestamp: 'Just now',
             category: 'Tasks' as const,
             priority: (newTask.priority === 'Urgent' ? 'urgent' : newTask.priority === 'High' ? 'high' : 'medium') as any,
@@ -1509,6 +1898,12 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       setShowCreateTaskModal(false);
       setNewTaskTitle('');
       setNewTaskDescription('');
+      setNewTaskDueDate('');
+      setNewTaskRepeat('none');
+      setNewTaskRecurrenceEnd('');
+      setNewTaskPrice('');
+      setNewTaskBillable(true);
+      setNewTaskBillingType('deliverable');
     } catch (e) {
       console.error('Task creation failed', e);
       alert(`Could not create task in backend database: ${e instanceof Error ? e.message : 'Request failed'}`);
@@ -1521,6 +1916,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     if (e) e.stopPropagation();
     const taskToDelete = state.tasks.find((t) => t.id === taskId);
     if (!taskToDelete) return;
+    if (!ensureCanManageTask(taskToDelete)) return;
 
     const confirmDelete = window.confirm(`Are you sure you want to delete task "${taskToDelete.title}"?`);
     if (!confirmDelete) return;
@@ -1713,6 +2109,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   const handleTaskQuickLogTime = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTask) return;
+    if (!ensureCanManageTask(selectedTask)) return;
     const todayStr = new Date().toISOString().split('T')[0];
     if (taskLogDate > todayStr) {
       alert("Cannot log time for future dates!");
@@ -1795,6 +2192,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   const handleApproveProject = async (projectId: string) => {
+    if (!ensureCanManageProject(projectId)) return;
     setIsSaving(true);
     try {
       await api.projects.updateProject(projectId, { approvalStatus: 'Approved' });
@@ -1847,6 +2245,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   const handleDenyProject = async (projectId: string, reason?: string) => {
+    if (!ensureCanManageProject(projectId)) return;
     setIsSaving(true);
     try {
       await api.projects.updateProject(projectId, { approvalStatus: 'Denied', denialReason: reason });
@@ -1914,6 +2313,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   const handleUpdateProjectWorkHours = async (projectId: string, hours: number) => {
+    if (!ensureCanManageProject(projectId)) return;
     setIsSaving(true);
     try {
       await api.projects.updateProject(projectId, { totalWorkHours: hours });
@@ -1950,6 +2350,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   const handleApproveTask = async (taskId: string) => {
+    if (!ensureCanManageTask(taskId)) return;
     setIsSaving(true);
     try {
       await api.projects.updateTask(taskId, { status: 'In Progress' });
@@ -2006,6 +2407,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   const handleRejectTask = async (taskId: string) => {
+    if (!ensureCanManageTask(taskId)) return;
     setIsSaving(true);
     try {
       await api.projects.updateTask(taskId, { status: 'Review' });
@@ -2097,7 +2499,12 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         name: newProjName.trim(),
         code: code.toUpperCase(),
         description: newProjDescription.trim() || 'Enterprise project deliverable',
-        clientName: newProjClient.trim() || 'Internal Core Deliverable',
+        clientName: billingClients.find((c) => c.id === newProjClientId)?.company_name
+          || billingClients.find((c) => c.id === newProjClientId)?.companyName
+          || billingClients.find((c) => c.id === newProjClientId)?.name
+          || newProjClient.trim()
+          || 'Internal Core Deliverable',
+        clientId: newProjClientId || undefined,
         managerId: managerId,
         startDate: finalStartDate,
         endDate: finalEndDate,
@@ -2111,7 +2518,12 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         id: projRes.data?.id || `proj_${Date.now()}`,
         name: newProjName.trim(),
         code: code.toUpperCase(),
-        clientName: newProjClient.trim() || 'Internal Core Deliverable',
+        clientName: billingClients.find((c) => c.id === newProjClientId)?.company_name
+          || billingClients.find((c) => c.id === newProjClientId)?.companyName
+          || billingClients.find((c) => c.id === newProjClientId)?.name
+          || newProjClient.trim()
+          || 'Internal Core Deliverable',
+        clientId: newProjClientId || undefined,
         description: newProjDescription.trim() || 'Enterprise project deliverable',
         managerId: managerId,
         managerName: managerName,
@@ -2168,174 +2580,116 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   return (
-    <div className="space-y-5 text-white">
-      {/* Header & Primary Action */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900">Tasks</h1>
-        </div>
-
-        {/* View Mode Switcher & Actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 w-full sm:w-auto">
-          <div className="grid grid-cols-3 gap-1 bg-slate-100/90 p-1 rounded-xl shadow-2xs w-full sm:w-auto">
-            <button
-              onClick={() => setActiveTab('kanban')}
-              className={`flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === 'kanban'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-                }`}
-            >
-              <FolderKanban className="h-3.5 w-3.5 shrink-0" />
-              <span>Board</span>
+    <div className="work-page">
+      <div className="work-head">
+        <h1 className="work-title">Plan project work</h1>
+        <div className="work-actions">
+          {isAdmin && (
+            <button type="button" onClick={handleOpenCreateProjectModal} className="work-btn-secondary">
+              Add project
             </button>
-            <button
-              onClick={() => setActiveTab('backlog')}
-              className={`flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === 'backlog'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-                }`}
-            >
-              <ListFilter className="h-3.5 w-3.5 shrink-0" />
-              <span>List</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('projects')}
-              className={`flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === 'projects'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-                }`}
-            >
-              <Folder className="h-3.5 w-3.5 shrink-0" />
-              <span>Overview</span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            {isAdmin && (
-              <button
-                onClick={handleOpenCreateProjectModal}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-700 transition-all active:scale-95 cursor-pointer shadow-2xs"
-              >
-                <FolderPlus className="h-4 w-4 text-slate-500 stroke-[1.8]" />
-                <span>Add Project</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => handleOpenCreateTaskModal()}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 px-4 py-2 text-xs font-bold text-white transition-all active:scale-95 cursor-pointer shadow-sm"
-            >
-              <Plus className="h-4 w-4 stroke-[2.2]" /> Add Task
-            </button>
-          </div>
+          )}
+          <button type="button" onClick={() => handleOpenCreateTaskModal()} className="work-btn-primary">
+            Add task
+          </button>
         </div>
       </div>
 
-      {/* Super Admin Review Permission Notice Toast */}
+      <div role="tablist" aria-label="Project views" className="work-tabs">
+        <button type="button" role="tab" aria-selected={activeTab === 'kanban'} onClick={() => setActiveTab('kanban')} className="work-tab">
+          Board
+        </button>
+        <button type="button" role="tab" aria-selected={activeTab === 'backlog'} onClick={() => setActiveTab('backlog')} className="work-tab">
+          List
+        </button>
+        <button type="button" role="tab" aria-selected={activeTab === 'projects'} onClick={() => setActiveTab('projects')} className="work-tab">
+          Projects
+        </button>
+      </div>
+
       {permissionNotice && (
-        <div className="fixed top-6 right-6 z-60 bg-rose-950/95 border border-rose-800 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
-          <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
-          <span className="text-xs font-semibold">{permissionNotice}</span>
-          <button onClick={() => setPermissionNotice(null)} className="text-rose-400 hover:text-white p-1 cursor-pointer">
+        <div className="fixed top-6 right-6 z-60 flex items-center gap-3 rounded-[9px] border border-[var(--studio-error)]/30 bg-[var(--studio-error-surface)] px-4 py-3 text-[var(--studio-error)]">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span className="text-[13px] font-semibold">{permissionNotice}</span>
+          <button type="button" onClick={() => setPermissionNotice(null)} className="p-1" aria-label="Dismiss">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
 
-      {/* Subheader: Filter & Search Bar */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1">
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search tasks or projects..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-blue-500 transition-all"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-1 sm:flex-none">
-            <select
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 outline-none hover:text-slate-900 focus:bg-white focus:border-blue-500 cursor-pointer"
-            >
-              <option value="All">All Projects</option>
-              <option value="standalone">General / Standalone Tasks</option>
-              {state.projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
-              ))}
-            </select>
-
-            {/* Employee Filter (Admin & HR Only) */}
-            {isAdmin && (
-              <select
-                value={selectedEmployeeId}
-                onChange={(e) => setSelectedEmployeeId(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 outline-none hover:text-slate-900 focus:bg-white focus:border-blue-500 cursor-pointer"
-              >
-                <option value="All">All Employees</option>
-                {state.employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
-            )}
-          </div>
+      <div className="work-toolbar">
+        <div className="relative w-[220px] max-w-full">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input
+            type="text"
+            placeholder="Find a task"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="work-field w-full pl-10"
+          />
         </div>
-
-        <div className="flex items-center justify-between sm:justify-end gap-2 text-xs text-slate-500 pt-1 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-          <span className="text-xs text-slate-500 font-mono">
-            {filteredTasks.length} tasks
-          </span>
-        </div>
+        <select
+          value={selectedProjectId}
+          onChange={(e) => setSelectedProjectId(e.target.value)}
+          className="work-field"
+          aria-label="Filter by project"
+        >
+          <option value="All">All projects</option>
+          <option value="standalone">Standalone tasks</option>
+          {state.projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.code} — {p.name}</option>
+          ))}
+        </select>
+        {isAdmin && (
+          <select
+            value={selectedEmployeeId}
+            onChange={(e) => setSelectedEmployeeId(e.target.value)}
+            className="work-field"
+            aria-label="Filter by person"
+          >
+            <option value="All">Everyone</option>
+            {assignableEmployees.map((emp) => (
+              <option key={emp.id} value={emp.id}>{emp.name}</option>
+            ))}
+          </select>
+        )}
+        <span className="text-[11px] font-semibold text-[var(--text-muted)]">
+          {filteredTasks.length} {filteredTasks.length === 1 ? 'task' : 'tasks'}
+        </span>
       </div>
 
       {/* TAB 1: KANBAN BOARD WITH DRAG & DROP */}
       {activeTab === 'kanban' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-x-auto pb-4">
+        <div className="work-kanban">
           {columns.map((col) => {
             const colTasks = filteredTasks.filter((t) => normalizeTaskStatus(t.status) === col);
 
             return (
-              <div key={col} className="flex flex-col min-w-[260px] space-y-3">
-                {/* Column Header */}
-                <div className="flex items-center justify-between border border-slate-200 bg-white p-3 rounded-xl shadow-2xs">
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">{col}</h3>
-                  <span className="text-[11px] font-mono font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 border border-slate-200 rounded-full">
-                    {colTasks.length}
-                  </span>
+              <section
+                key={col}
+                aria-label={col}
+                onDragOver={(e) => handleDragOver(e, col)}
+                onDragLeave={(e) => handleDragLeave(e, col)}
+                onDrop={(e) => handleDrop(e, col)}
+                className={`work-col ${dragOverColumn === col ? 'is-drop' : ''}`}
+              >
+                <div className="work-col-head">
+                  <h3>{col}</h3>
+                  <span className="work-count">{colTasks.length}</span>
                 </div>
 
-                <div
-                  onDragOver={(e) => handleDragOver(e, col)}
-                  onDragLeave={(e) => handleDragLeave(e, col)}
-                  onDrop={(e) => handleDrop(e, col)}
-                  className={`space-y-3 flex-1 overflow-y-auto max-h-[calc(100vh-280px)] custom-scrollbar pr-1 min-h-[140px] rounded-xl transition-all ${dragOverColumn === col ? 'bg-blue-50/80 border border-dashed border-blue-400' : ''
-                    }`}
-                >
+                <div className="work-col-body custom-scrollbar">
                   {colTasks.length === 0 ? (
-                    <div className="border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400 rounded-xl bg-slate-50/50">
-                      No tasks in {col}
-                    </div>
+                    <p className="work-col-empty">No tasks</p>
                   ) : (
                     colTasks.map((task) => {
                       const isFeatured = task.id === selectedTask?.id;
-                      const avatarStyle = getAssigneeAvatarStyle(task.assigneeName);
-                      const initials = getInitials(task.assigneeName);
-                      const taskApprovedHrs = state.timesheets
-                        .filter((ts) => ts.taskId === task.id && ts.status === 'Approved')
-                        .reduce((sum, ts) => sum + ts.hours, 0);
-
-                      const isMyTask =
-                        task.assigneeId === state.currentPersona?.id ||
-                        (task.assigneeName || '').toLowerCase() === (state.currentPersona?.name || '').toLowerCase();
-                      const canDrag = isAdmin || isMyTask;
-
+                      const canDrag = canManageThisTask(task);
                       const isBeingTracked =
                         normalizeTaskStatus(task.status) === 'In Progress' &&
                         (Boolean(task.isTimerRunning) || verifiedTrackingTaskIds.has(task.id) || Boolean(task.isTrackingVerified));
+                      const overdue = isTaskOverdue(task);
+                      const repeatText = recurrenceLabel(task.recurrenceRule);
 
                       return (
                         <div
@@ -2343,71 +2697,70 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                           draggable={canDrag}
                           onDragStart={(e) => handleDragStart(e, task.id)}
                           onClick={() => setSelectedTask(task)}
-                          className={`group rounded-xl p-4 transition-all space-y-3 ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
-                            isBeingTracked
-                              ? 'bg-white border-2 border-emerald-500 ring-2 ring-emerald-500/20 text-slate-900 shadow-sm'
-                              : isFeatured
-                              ? 'bg-white border border-blue-500 text-slate-900 shadow-md ring-1 ring-blue-500/30'
-                              : 'bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50/70 text-slate-900 shadow-2xs'
+                          className={`work-card group space-y-3 ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
+                            overdue ? 'is-overdue' : isBeingTracked ? 'is-tracking' : isFeatured ? 'is-selected' : ''
                           }`}
                         >
-                          {/* Top: Project Name & Priority / Tracking Indicator */}
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-[11px] font-semibold text-slate-600 flex items-center gap-1.5 truncate max-w-[170px]">
-                              <Layers className="h-3.5 w-3.5 text-slate-400 shrink-0 stroke-[1.8]" />
+                            <span className="flex max-w-[170px] items-center gap-1.5 truncate text-[11px] font-semibold text-[var(--text-secondary)]">
+                              <Layers className="h-3.5 w-3.5 shrink-0" />
                               <span className="truncate">{task.projectName || 'General'}</span>
                             </span>
-
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${task.priority === 'Urgent'
-                                ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                                : task.priority === 'High'
-                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                  : 'bg-slate-100 text-slate-600 border border-slate-200'
-                                }`}>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              {overdue && <span className="work-chip work-chip-error">Overdue</span>}
+                              <span
+                                className={`work-chip shrink-0 ${
+                                  task.priority === 'Urgent'
+                                    ? 'work-chip-error'
+                                    : task.priority === 'High'
+                                      ? 'work-chip-navy'
+                                      : 'work-chip-muted'
+                                }`}
+                              >
                                 {task.priority}
                               </span>
-                              <button
-                                type="button"
-                                onClick={(e) => handleDeleteTask(task.id, e)}
-                                title="Delete Task"
-                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 p-0.5 rounded transition-all cursor-pointer"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
+                              {canDrag && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDeleteTask(task.id, e)}
+                                  title="Delete Task"
+                                  className="rounded p-0.5 text-[var(--text-muted)] opacity-0 hover:text-[var(--studio-error)] group-hover:opacity-100"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
 
-                          {/* Title & Description */}
                           <div>
-                            <h4 className="text-xs font-bold leading-snug text-slate-900 group-hover:text-blue-600 transition-colors">
-                              {task.title}
-                            </h4>
-                            <p className="text-[11px] mt-1 line-clamp-2 text-slate-500">
-                              {task.description || 'Sprint task deliverable.'}
-                            </p>
+                            <h4 className="text-[13px] font-bold leading-snug text-[var(--text-primary)]">{task.title}</h4>
+                            {task.description && (
+                              <p className="mt-1 line-clamp-2 text-[12px] text-[var(--text-secondary)]">{task.description}</p>
+                            )}
+                            {(task.dueDate || repeatText) && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                {task.dueDate && (
+                                  <span className={`inline-flex items-center gap-1 text-[11px] font-semibold ${overdue ? 'text-[var(--studio-error)]' : 'text-[var(--text-muted)]'}`}>
+                                    <Calendar className="h-3 w-3" />
+                                    {task.dueDate.slice(0, 10)}
+                                  </span>
+                                )}
+                                {repeatText && <span className="text-[11px] font-semibold text-[var(--text-muted)]">{repeatText}</span>}
+                              </div>
+                            )}
                           </div>
 
-                          {/* Footer: Avatar + Comments & Attachments + Live Timer */}
-                          <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className={`h-6 w-6 rounded-full border flex items-center justify-center text-[10px] font-bold shrink-0 ${avatarStyle}`}>
-                                {initials}
-                              </div>
-                              <span className="text-[11px] text-slate-600 font-medium truncate max-w-[100px]">
-                                {task.assigneeName}
+                          <div className="flex items-center justify-between border-t border-[var(--border-color)] pt-2.5">
+                            {renderAssigneeStack(task)}
+                            <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
+                              <span className="inline-flex items-center gap-1">
+                                <MessageSquare className="h-3 w-3" /> {task.commentsCount || 0}
                               </span>
-                            </div>
-
-                            <div className="flex items-center gap-3 text-[11px] text-slate-500">
-                              <span className="flex items-center gap-1">
-                                <MessageSquare className="h-3 w-3 text-slate-400" /> {task.commentsCount || 0}
+                              <span className="inline-flex items-center gap-1">
+                                <Paperclip className="h-3 w-3" /> {(task.attachedDocIds || []).length || 0}
                               </span>
-                              <span className="flex items-center gap-1">
-                                <Paperclip className="h-3 w-3 text-slate-400" /> {(task.attachedDocIds || []).length || 0}
-                              </span>
-                              <span className="font-mono text-[11px] flex items-center gap-1 text-slate-500">
-                                <Clock className="h-3 w-3 text-slate-400" />
+                              <span className="inline-flex items-center gap-1 tabular-nums">
+                                <Clock className="h-3 w-3" />
                                 {formatHM(getTaskTotalSeconds(task))}
                               </span>
                             </div>
@@ -2417,7 +2770,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                     })
                   )}
                 </div>
-              </div>
+              </section>
             );
           })}
         </div>
@@ -2429,19 +2782,22 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           {/* Mobile Tasks Cards */}
           <div className="block md:hidden space-y-3">
             {filteredTasks.length === 0 ? (
-              <div className="p-8 rounded-2xl border border-slate-200 bg-white text-center text-xs text-slate-400 font-semibold shadow-2xs">
-                No tasks found. Click &quot;+ Add Task&quot; to get started.
+              <div className="work-empty">
+                No tasks match these filters. Add a task to start the board.
               </div>
             ) : (
               filteredTasks.map((task) => {
                 const isTaskTracking =
                   normalizeTaskStatus(task.status) === 'In Progress' &&
                   (Boolean(task.isTimerRunning) || verifiedTrackingTaskIds.has(task.id) || Boolean(task.isTrackingVerified));
+                const overdue = isTaskOverdue(task);
                 return (
                   <div
                     key={task.id}
                     className={`p-4 rounded-2xl bg-white shadow-2xs space-y-3 transition-all ${
-                      isTaskTracking
+                      overdue
+                        ? 'border-2 border-rose-500 ring-2 ring-rose-500/20'
+                        : isTaskTracking
                         ? 'border-2 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
                         : 'border border-slate-200'
                     }`}
@@ -2450,20 +2806,17 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                       <div className="min-w-0">
                         <h4 className="text-xs font-bold text-slate-900">{task.title}</h4>
                         <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{task.description}</p>
+                        {(task.dueDate || recurrenceLabel(task.recurrenceRule)) && (
+                          <p className={`text-[10px] font-semibold mt-1 ${overdue ? 'text-rose-600' : 'text-slate-500'}`}>
+                            {task.dueDate ? task.dueDate.slice(0, 10) : ''}
+                            {overdue ? ' · Overdue' : ''}
+                            {recurrenceLabel(task.recurrenceRule) ? ` · ${recurrenceLabel(task.recurrenceRule)}` : ''}
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide shrink-0 ${
-                            normalizeTaskStatus(task.status) === 'Completed'
-                              ? 'bg-[#E8F8F0] text-[#10B981]'
-                              : normalizeTaskStatus(task.status) === 'In Progress'
-                              ? 'bg-[#EBF3FE] text-[#3B82F6]'
-                              : normalizeTaskStatus(task.status) === 'Review'
-                              ? 'bg-[#F3EEFE] text-[#8B5CF6]'
-                              : 'bg-slate-100 text-slate-700'
-                          }`}
-                        >
-                          {normalizeTaskStatus(task.status).toUpperCase()}
+                        <span className={`${taskStatusChip(task.status)} shrink-0`}>
+                          {normalizeTaskStatus(task.status)}
                         </span>
                         <button
                           type="button"
@@ -2481,30 +2834,11 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                         <Layers className="h-3 w-3 text-slate-400 shrink-0 stroke-[1.8]" />
                         <span>{task.projectName || 'General'}</span>
                       </span>
-                      <span
-                        className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${
-                          task.priority === 'Urgent'
-                            ? 'bg-[#FEECEE] text-[#EF4444]'
-                            : task.priority === 'High'
-                            ? 'bg-[#FEF6E6] text-[#F59E0B]'
-                            : 'bg-slate-100 text-slate-700'
-                        }`}
-                      >
-                        {task.priority.toUpperCase()}
-                      </span>
+                      {getPriorityBadge(task.priority)}
                     </div>
 
                     <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className={`h-5 w-5 rounded-full border flex items-center justify-center font-bold text-[9px] ${getAssigneeAvatarStyle(
-                            task.assigneeName
-                          )}`}
-                        >
-                          {getInitials(task.assigneeName)}
-                        </div>
-                        <span className="text-slate-800 text-[11px] font-medium">{task.assigneeName}</span>
-                      </div>
+                      {renderAssigneeStack(task, 'h-5 w-5 text-[9px]')}
                       <span className={`text-[11px] font-mono font-bold flex items-center gap-1.5 ${isTaskTracking ? 'text-emerald-600' : 'text-slate-500'}`}>
                         {isTaskTracking && (
                           <span className="relative flex h-2 w-2 mr-0.5" title="Actively tracking (Verified with backend)">
@@ -2523,7 +2857,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           </div>
 
           {/* Desktop Backlog Table */}
-          <div className="hidden md:block rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
+          <div className="work-table hidden md:block overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold text-[10px] uppercase">
@@ -2533,6 +2867,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   <th className="px-4 py-3.5">Assignee</th>
                   <th className="px-4 py-3.5">Status</th>
                   <th className="px-4 py-3.5">Priority</th>
+                  <th className="px-4 py-3.5">Due</th>
                   <th className="px-4 py-3.5">Time Tracked</th>
                   <th className="px-4 py-3.5 text-right">Action</th>
                 </tr>
@@ -2540,13 +2875,15 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                 {filteredTasks.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-12 text-center text-xs text-slate-400">
-                      No tasks found. Click &quot;+ Add Task&quot; to get started.
+                    <td colSpan={8} className="p-12 text-center text-xs text-slate-400">
+                      No tasks match these filters. Add a task to start the list.
                     </td>
                   </tr>
                 ) : (
-                  filteredTasks.map((task) => (
-                    <tr key={task.id} className="hover:bg-slate-50 transition-colors">
+                  filteredTasks.map((task) => {
+                    const overdue = isTaskOverdue(task);
+                    return (
+                    <tr key={task.id} className={`transition-colors ${overdue ? 'bg-rose-50/60 ring-2 ring-inset ring-rose-500' : 'hover:bg-slate-50'}`}>
                         <td className="px-4 py-3.5">
                           <p className="font-bold text-slate-900 text-xs">{task.title}</p>
                           <p className="text-[11px] text-slate-500 line-clamp-1">{task.description}</p>
@@ -2560,46 +2897,22 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                         </td>
 
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className={`h-5 w-5 rounded-full border flex items-center justify-center font-bold text-[9px] ${getAssigneeAvatarStyle(
-                                task.assigneeName
-                              )}`}
-                            >
-                              {getInitials(task.assigneeName)}
-                            </div>
-                            <span className="text-slate-900 font-medium">{task.assigneeName}</span>
-                          </div>
+                          {renderAssigneeStack(task, 'h-5 w-5 text-[9px]')}
                         </td>
 
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide ${
-                              normalizeTaskStatus(task.status) === 'Completed'
-                                ? 'bg-[#E8F8F0] text-[#10B981]'
-                                : normalizeTaskStatus(task.status) === 'In Progress'
-                                  ? 'bg-[#EBF3FE] text-[#3B82F6]'
-                                  : normalizeTaskStatus(task.status) === 'Review'
-                                    ? 'bg-[#F3EEFE] text-[#8B5CF6]'
-                                    : 'bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            {normalizeTaskStatus(task.status).toUpperCase()}
+                          <span className={taskStatusChip(task.status)}>
+                            {normalizeTaskStatus(task.status)}
                           </span>
                         </td>
 
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wide ${
-                              task.priority === 'Urgent'
-                                ? 'bg-[#FEECEE] text-[#EF4444]'
-                                : task.priority === 'High'
-                                  ? 'bg-[#FEF6E6] text-[#F59E0B]'
-                                  : 'bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            {task.priority.toUpperCase()}
-                          </span>
+                          {getPriorityBadge(task.priority)}
+                        </td>
+
+                        <td className={`px-4 py-3.5 whitespace-nowrap text-[11px] font-semibold ${overdue ? 'text-rose-600' : 'text-slate-500'}`}>
+                          {task.dueDate ? task.dueDate.slice(0, 10) : '—'}
+                          {overdue ? ' · Overdue' : ''}
                         </td>
 
                         <td className="px-4 py-3.5 font-mono text-slate-500 text-[11px] whitespace-nowrap">
@@ -2613,22 +2926,25 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                           <div className="flex items-center justify-end gap-1.5">
                             <button
                               onClick={() => setSelectedTask(task)}
-                              className="rounded-lg bg-slate-100 hover:bg-blue-600 hover:text-white border border-slate-200 px-3 py-1 text-xs font-bold text-slate-700 transition-all cursor-pointer"
+                              className="rounded-lg bg-slate-100 hover:bg-[var(--studio-navy)] hover:text-white border border-slate-200 px-3 py-1 text-xs font-bold text-slate-700 transition-all cursor-pointer"
                             >
                               Details
                             </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteTask(task.id, e)}
-                              title="Delete Task"
-                              className="rounded-lg bg-slate-100 hover:bg-rose-600 hover:text-white border border-slate-200 p-1.5 text-xs text-slate-500 transition-all cursor-pointer"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            {canManageThisTask(task) && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteTask(task.id, e)}
+                                title="Delete Task"
+                                className="rounded-lg bg-slate-100 hover:bg-rose-600 hover:text-white border border-slate-200 p-1.5 text-xs text-slate-500 transition-all cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
-                    ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -2648,13 +2964,11 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           {/* Add Project Card (Admin Only) */}
           {isAdmin && (
             <button
+              type="button"
               onClick={handleOpenCreateProjectModal}
-              className="group flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed border-slate-200 hover:border-blue-500 bg-white hover:bg-slate-50/50 transition-all text-center cursor-pointer min-h-[220px] shadow-2xs"
+              className="flex min-h-[180px] flex-col items-center justify-center rounded-[12px] border border-dashed border-[var(--border-strong)] bg-[var(--bg-app)] px-6 py-8 text-center text-[13px] font-semibold text-[var(--studio-navy)] hover:bg-[var(--studio-selected)]"
             >
-              <div className="h-12 w-12 rounded-full bg-blue-50 border border-blue-200/60 text-blue-600 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform shadow-xs">
-                <Plus className="h-6 w-6" />
-              </div>
-              <span className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors">Create New Project</span>
+              Add a project
             </button>
           )}
 
@@ -2669,12 +2983,12 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
               <div
                 key={proj.id}
                 onClick={() => setSelectedProjectForDetails(proj)}
-                className="rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#121214] p-5 space-y-4 hover:border-blue-500/50 transition-all shadow-xs hover:shadow-md cursor-pointer flex flex-col justify-between text-slate-900 dark:text-white group"
+                className="work-card flex cursor-pointer flex-col justify-between space-y-4 p-5"
               >
                 <div className="space-y-3">
                   <div>
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-[var(--studio-navy)] dark:group-hover:text-blue-400 transition-colors">
                         {proj.name}
                       </h3>
                       <span className="text-xs font-mono font-medium text-slate-400 dark:text-slate-500 shrink-0">
@@ -2692,16 +3006,16 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   <div className="space-y-1.5 pt-1">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-600 dark:text-slate-400 font-medium flex items-center gap-1.5">
-                        <Clock className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" /> Work Hours
+                        <Clock className="h-3.5 w-3.5 text-[var(--studio-navy)] dark:text-blue-400" /> Work Hours
                       </span>
                       <div className="text-right font-mono text-xs">
-                        <span className="font-bold text-blue-600 dark:text-blue-400">{projApprovedHours}h</span>
+                        <span className="font-bold text-[var(--studio-navy)] dark:text-blue-400">{projApprovedHours}h</span>
                         <span className="text-slate-400 dark:text-slate-500 text-[11px]"> / {totalHoursAllocated}h</span>
                       </div>
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                       <div
-                        className={`h-full transition-all duration-300 rounded-full ${hoursPercent > 90 ? 'bg-amber-500' : 'bg-blue-600 dark:bg-blue-500'
+                        className={`h-full transition-all duration-300 rounded-full ${hoursPercent > 90 ? 'bg-amber-500' : 'bg-[var(--studio-navy)] dark:bg-blue-500'
                           }`}
                         style={{ width: `${hoursPercent}%` }}
                       />
@@ -2755,6 +3069,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
         const taskSubtasks = selectedTask.subtasks || [];
         const completedSubtaskCount = taskSubtasks.filter((st) => st.completed).length;
+        const canEditSelectedTask = canManageThisTask(selectedTask);
 
         return (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
@@ -2776,14 +3091,16 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   </h3>
                 </div>
                 <div className="flex items-center gap-1 shrink-0 mt-0.5">
-                  <button
-                    type="button"
-                    onClick={(e) => handleDeleteTask(selectedTask.id, e)}
-                    title="Delete Task"
-                    className="text-slate-400 hover:text-rose-600 p-2 cursor-pointer rounded-xl hover:bg-rose-50 transition-colors"
-                  >
-                    <Trash2 className="h-5 w-5" />
-                  </button>
+                  {canEditSelectedTask && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteTask(selectedTask.id, e)}
+                      title="Delete Task"
+                      className="text-slate-400 hover:text-rose-600 p-2 cursor-pointer rounded-xl hover:bg-rose-50 transition-colors"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  )}
                   <button
                     onClick={() => setSelectedTask(null)}
                     className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors"
@@ -2809,7 +3126,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-slate-100 border border-slate-200">
                     {(['To Do', 'In Progress', 'Review', 'Completed'] as const).map((st) => {
                       const isActive = normalizeTaskStatus(selectedTask.status) === st;
-                      const isReviewCompletedLocked = st === 'Completed' && normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin;
+                      const isReviewCompletedLocked =
+                        !canEditSelectedTask ||
+                        (st === 'Completed' && normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin);
 
                       return (
                         <button
@@ -2818,12 +3137,18 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                           disabled={isReviewCompletedLocked}
                           onClick={() => handleUpdateTaskStatus(selectedTask.id, st)}
                           className={`py-2 px-1 sm:px-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all text-center flex items-center justify-center cursor-pointer truncate ${isActive
-                            ? 'bg-blue-600 text-white shadow-xs'
+                            ? 'bg-[var(--studio-navy)] text-white shadow-xs'
                             : isReviewCompletedLocked
                               ? 'text-slate-300 cursor-not-allowed opacity-50'
                               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                             }`}
-                          title={isReviewCompletedLocked ? 'Super Admin approval required' : `Move to ${st}`}
+                          title={
+                            !canEditSelectedTask
+                              ? 'You can only update your own or your team’s tasks'
+                              : isReviewCompletedLocked
+                                ? 'Super Admin approval required'
+                                : `Move to ${st}`
+                          }
                         >
                           <span className="truncate">{st === 'Completed' ? 'Done' : st}</span>
                         </button>
@@ -2844,7 +3169,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                      <CheckSquare className="h-3.5 w-3.5 text-blue-600" />
+                      <CheckSquare className="h-3.5 w-3.5 text-[var(--studio-navy)]" />
                       <span>Subtasks Checklist ({completedSubtaskCount}/{taskSubtasks.length})</span>
                     </label>
                   </div>
@@ -2861,7 +3186,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                             type="checkbox"
                             checked={st.completed}
                             onChange={() => handleToggleSubtask(selectedTask.id, st.id)}
-                            className="h-4 w-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer shrink-0"
+                            className="h-4 w-4 rounded text-[var(--studio-navy)] border-slate-300 focus:ring-blue-500 cursor-pointer shrink-0"
                           />
                           <span className={`text-xs font-medium truncate ${st.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
                             {st.title}
@@ -2895,7 +3220,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                       <button
                         type="button"
                         onClick={() => handleAddSubtask(selectedTask.id)}
-                        className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 text-xs font-semibold cursor-pointer transition-colors shrink-0"
+                        className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-[var(--studio-navy)] hover:text-white text-slate-700 text-xs font-semibold cursor-pointer transition-colors shrink-0"
                       >
                         Add
                       </button>
@@ -2907,30 +3232,122 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
                   <div className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0 overflow-hidden">
                     <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Workspace</span>
-                    <span className="text-xs font-bold text-blue-600 block truncate" title={selectedTask.projectName || 'General'}>
+                    <span className="text-xs font-bold text-[var(--studio-navy)] block truncate" title={selectedTask.projectName || 'General'}>
                       {selectedTask.projectName || 'General'}
                     </span>
                   </div>
                   <div className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0 overflow-hidden">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Priority</span>
-                    <span className={`text-xs font-bold block ${selectedTask.priority === 'Urgent'
-                      ? 'text-rose-600'
-                      : selectedTask.priority === 'High'
-                        ? 'text-amber-600'
-                        : 'text-slate-700'
-                      }`}>
-                      {selectedTask.priority}
-                    </span>
+                    <label htmlFor="task-priority" className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Priority</label>
+                    <select
+                      id="task-priority"
+                      value={selectedTask.priority}
+                      disabled={!canEditSelectedTask}
+                      onChange={(e) => saveTaskPriority(selectedTask, e.target.value as Task['priority'])}
+                      className={`w-full -ml-1 bg-transparent text-xs font-bold outline-none rounded-md px-1 py-0.5 hover:bg-slate-50 focus:bg-slate-50 disabled:hover:bg-transparent disabled:cursor-default cursor-pointer ${selectedTask.priority === 'Urgent'
+                        ? 'text-rose-600'
+                        : selectedTask.priority === 'High'
+                          ? 'text-amber-600'
+                          : 'text-slate-700'
+                        }`}
+                    >
+                      {priorityOptions.map((p) => (
+                        <option key={p} value={p} className="text-slate-800">{p}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
                 {/* Assignee */}
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1.5">Assigned Member</label>
-                  <div className="rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 bg-white flex items-center gap-2">
-                    <User className="h-4 w-4 text-slate-400 shrink-0" />
-                    <span className="truncate">{selectedTask.assigneeName}</span>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1.5">Assignees</label>
+                  {canEditSelectedTask ? (
+                    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2.5 bg-white">
+                      {taskAssigneeIds(selectedTask).map((id) => {
+                        const person = state.employees.find((emp) => emp.id === id);
+                        return (
+                          <span key={id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 py-0.5 pl-2 pr-0.5 text-[11px] font-semibold text-slate-700">
+                            {person?.name || selectedTask.assigneeName}
+                            <button
+                              type="button"
+                              onClick={() => saveTaskAssignees(selectedTask, taskAssigneeIds(selectedTask).filter((item) => item !== id))}
+                              className="rounded-full px-1 text-slate-400 hover:text-rose-600"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        );
+                      })}
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) saveTaskAssignees(selectedTask, [...taskAssigneeIds(selectedTask), e.target.value]);
+                        }}
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 outline-none"
+                      >
+                        <option value="">{taskAssigneeIds(selectedTask).length ? '+ Add another' : '+ Add people'}</option>
+                        {assignableEmployees.filter((emp) => !taskAssigneeIds(selectedTask).includes(emp.id)).map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 bg-white">
+                      {renderAssigneeStack(selectedTask)}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="task-due-date" className="text-xs font-semibold text-slate-700 block">
+                      Due date <span className="text-slate-400 font-medium">(optional)</span>
+                    </label>
+                    {canEditSelectedTask && selectedTask.dueDate && (
+                      <button
+                        type="button"
+                        onClick={() => saveTaskDueDate(selectedTask, '')}
+                        className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
                   </div>
+                  <input
+                    id="task-due-date"
+                    type="date"
+                    value={selectedTask.dueDate ? selectedTask.dueDate.slice(0, 10) : ''}
+                    disabled={!canEditSelectedTask}
+                    onChange={(e) => e.target.value && saveTaskDueDate(selectedTask, e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 disabled:bg-slate-50 disabled:text-slate-500"
+                  />
+                  {isTaskOverdue(selectedTask) && (
+                    <p className="text-[11px] font-semibold text-rose-600">Overdue</p>
+                  )}
+                  {selectedTask.recurrenceSeriesId && (
+                    <div className="flex items-center gap-3 text-[11px] text-slate-600">
+                      <span className="font-semibold">{recurrenceLabel(selectedTask.recurrenceRule) || 'Repeats'}</span>
+                      <label className="inline-flex items-center gap-1">
+                        <input
+                          type="radio"
+                          name="due-scope"
+                          checked={editDueScope === 'occurrence'}
+                          onChange={() => setEditDueScope('occurrence')}
+                        />
+                        This occurrence
+                      </label>
+                      <label className="inline-flex items-center gap-1">
+                        <input
+                          type="radio"
+                          name="due-scope"
+                          checked={editDueScope === 'future'}
+                          onChange={() => setEditDueScope('future')}
+                        />
+                        This and future
+                      </label>
+                    </div>
+                  )}
                 </div>
 
                 {/* Live Time Tracking Section (No set work / estimated hours) */}
@@ -2960,7 +3377,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                           </span>
                           {selectedTask.isTimerRunning && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 animate-pulse">
-                              <span className="h-1.5 w-1.5 rounded-full bg-blue-600 animate-ping" />
+                              <span className="h-1.5 w-1.5 rounded-full bg-[var(--studio-navy)] animate-ping" />
                               Running
                             </span>
                           )}
@@ -2982,7 +3399,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                           <button
                             type="button"
                             onClick={() => handleToggleTimer(selectedTask.id)}
-                            className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                            className="px-3.5 py-1.5 rounded-lg bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                           >
                             <Play className="h-3.5 w-3.5 fill-current" />
                             <span>Resume</span>
@@ -2995,7 +3412,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                           <button
                             type="button"
                             onClick={() => handleUpdateTaskStatus(selectedTask.id, 'In Progress')}
-                            className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                            className="px-3.5 py-1.5 rounded-lg bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                           >
                             <Play className="h-3.5 w-3.5 fill-current" />
                             <span>Start Working</span>
@@ -3011,23 +3428,70 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                       <Paperclip className="h-3.5 w-3.5 text-slate-500" />
-                      <span>Attached Documents ({(selectedTask.attachedDocIds || []).length})</span>
+                      <span>Attached Documents ({resolveTaskAttachments(selectedTask).length})</span>
                     </label>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
+                        disabled={!canEditSelectedTask}
                         onClick={() => setShowAttachDriveModal(true)}
-                        className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer transition-colors shadow-2xs"
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer transition-colors shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         + Drive
                       </button>
                       <button
+                        type="button"
+                        disabled={!canEditSelectedTask}
                         onClick={() => setShowUploadAttachModal(true)}
-                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer transition-colors shadow-2xs"
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white cursor-pointer transition-colors shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Upload
                       </button>
                     </div>
                   </div>
+
+                  {resolveTaskAttachments(selectedTask).length > 0 ? (
+                    <div className="space-y-2">
+                      {resolveTaskAttachments(selectedTask).map((doc) => (
+                        <div
+                          key={doc.id}
+                          className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="h-4 w-4 text-slate-400 shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-slate-800 truncate">{doc.name}</p>
+                              <p className="text-[10px] text-slate-400">{[doc.size, doc.owner].filter(Boolean).join(' · ')}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {doc.s3Key && (
+                              <button
+                                type="button"
+                                title="Download"
+                                onClick={() => handleDownloadAttachment(doc)}
+                                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            {canEditSelectedTask && (
+                              <button
+                                type="button"
+                                title="Remove"
+                                onClick={() => handleRemoveAttachment(doc.id)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400">No files yet. Upload one or attach from Drive.</p>
+                  )}
                 </div>
               </div>
 
@@ -3060,14 +3524,13 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         const assigneeName = task.assigneeName || 'Unassigned';
 
         // Find attendance record for assignee
-        const todayStrVal = new Date().toISOString().split('T')[0];
         const attendanceRecord = state.attendance.find(
           (a) =>
-            (a.employeeId === assigneeId || (assigneeName && a.employeeName.toLowerCase() === assigneeName.toLowerCase())) &&
-            a.date === todayStrVal &&
+            (a.employeeId === assigneeId || (assigneeName && (a.employeeName || '').toLowerCase() === assigneeName.toLowerCase())) &&
+            isTodayAttendanceDate(a.date) &&
             !!a.checkIn
         );
-        const isCheckedIn = !!attendanceRecord && !attendanceRecord.checkOut;
+        const isCheckedIn = !!attendanceRecord?.checkIn && !attendanceRecord.checkOut;
         const isCheckedOut = !!attendanceRecord?.checkOut;
         const isCurrentAssignee = state.currentPersona?.id === assigneeId || state.currentPersona?.name === assigneeName;
 
@@ -3100,7 +3563,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
               {/* Task Details - Clean typography, proper spacing, no background box */}
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
+                  <span className="text-xs font-semibold text-[var(--studio-navy)] bg-blue-50 px-2 py-0.5 rounded-md">
                     {task.projectName || 'General Project'}
                   </span>
                   <span className="text-xs text-slate-400">•</span>
@@ -3114,7 +3577,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
               {/* Other Running Task Notice (if any) */}
               {otherRunningTask && isCheckedIn && (
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-start gap-2.5">
-                  <Clock className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                  <Clock className="h-4 w-4 text-[var(--studio-navy)] shrink-0 mt-0.5" />
                   <span>
                     &quot;{otherRunningTask.title}&quot; is currently tracking time. Starting this timer will automatically pause the previous task.
                   </span>
@@ -3142,7 +3605,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   <button
                     type="button"
                     onClick={() => executeTaskTransition(task.id, 'In Progress', true)}
-                    className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-sm transition-all active:scale-[0.99]"
+                    className="w-full py-2.5 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-sm transition-all active:scale-[0.99]"
                   >
                     <Play className="h-3.5 w-3.5 fill-current" />
                     <span>Start Tracking</span>
@@ -3175,24 +3638,146 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         );
       })()}
 
+      {/* Attach from Drive */}
+      {showAttachDriveModal && selectedTask && (() => {
+        const attachedIds = new Set(resolveTaskAttachments(selectedTask).map((doc) => doc.id));
+        const catalog: Array<DriveItem | TaskAttachment> = [
+          ...state.driveItems.filter((item) => item.type !== 'folder'),
+          ...state.tasks.flatMap((task) => resolveTaskAttachments(task)),
+        ];
+        const unique = new Map<string, DriveItem | TaskAttachment>();
+        catalog.forEach((item) => {
+          if (item.id && !unique.has(item.id)) unique.set(item.id, item);
+        });
+        const query = attachSearchQuery.trim().toLowerCase();
+        const options = Array.from(unique.values()).filter((item) => {
+          if (attachedIds.has(item.id)) return false;
+          if (!query) return true;
+          return item.name.toLowerCase().includes(query) || String((item as DriveItem).owner || (item as TaskAttachment).owner || '').toLowerCase().includes(query);
+        });
+
+        return (
+          <SlideOverDrawer
+            title="Attach from Drive"
+            description="Choose a file already in the workspace"
+            zClass="z-70"
+            onClose={() => {
+              setShowAttachDriveModal(false);
+              setAttachSearchQuery('');
+            }}
+          >
+              <div className={slideOverBodyClass}>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={attachSearchQuery}
+                  onChange={(e) => setAttachSearchQuery(e.target.value)}
+                  placeholder="Search documents..."
+                  className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="mt-3 max-h-72 overflow-y-auto space-y-1.5">
+                {options.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center">
+                    <p className="text-xs font-semibold text-slate-600">No Drive files to attach</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Upload a file to this task, or add documents in Drive first.</p>
+                  </div>
+                ) : (
+                  options.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleAttachExistingDoc(item)}
+                      className="w-full flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2.5 text-left cursor-pointer"
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 text-slate-400 shrink-0" />
+                        <span className="min-w-0">
+                          <span className="block text-xs font-semibold text-slate-800 truncate">{item.name}</span>
+                          <span className="block text-[10px] text-slate-400 truncate">
+                            {[item.size, (item as DriveItem).owner || (item as TaskAttachment).owner].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="text-[11px] font-semibold text-[var(--studio-navy)] shrink-0">Attach</span>
+                    </button>
+                  ))
+                )}
+              </div>
+              </div>
+          </SlideOverDrawer>
+        );
+      })()}
+
+      {/* Upload and attach */}
+      {showUploadAttachModal && selectedTask && (
+        <SlideOverDrawer
+          title="Upload Document"
+          description={`Attach a file to ${selectedTask.title}`}
+          zClass="z-70"
+          onClose={() => {
+            setShowUploadAttachModal(false);
+            setPendingAttachFile(null);
+          }}
+        >
+            <form onSubmit={handleUploadAndAttach} className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className={slideOverBodyClass}>
+              <input
+                ref={attachFileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => setPendingAttachFile(e.target.files?.[0] || null)}
+              />
+              <button
+                type="button"
+                onClick={() => attachFileInputRef.current?.click()}
+                className="w-full rounded-xl border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 px-4 py-6 text-center cursor-pointer"
+              >
+                <Upload className="h-6 w-6 text-[var(--studio-navy)] mx-auto mb-1.5" />
+                <p className="text-xs font-bold text-slate-800">
+                  {pendingAttachFile ? pendingAttachFile.name : 'Choose a file to upload'}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {pendingAttachFile ? formatFileSize(pendingAttachFile.size) || 'Selected' : 'PDF, DOCX, XLSX, images, and ZIP'}
+                </p>
+              </button>
+
+              </div>
+              <div className={slideOverFooterClass}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUploadAttachModal(false);
+                    setPendingAttachFile(null);
+                  }}
+                  className={slideOverCancelClass}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!pendingAttachFile || isAttachingDoc}
+                  className={slideOverPrimaryClass}
+                >
+                  {isAttachingDoc ? 'Uploading...' : 'Upload & Attach'}
+                </button>
+              </div>
+            </form>
+        </SlideOverDrawer>
+      )}
+
       {/* Quick Log Time Modal */}
       {showTaskLogTimeModal && selectedTask && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 border border-slate-100 text-slate-900 animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <div>
-                <h4 className="text-lg font-bold text-slate-900">Log Time on Task</h4>
-                <p className="text-xs text-slate-500 truncate max-w-[280px]">{selectedTask.title}</p>
-              </div>
-              <button
-                onClick={() => setShowTaskLogTimeModal(false)}
-                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleTaskQuickLogTime} className="space-y-4 pt-4 text-xs">
+        <SlideOverDrawer
+          title="Log Time on Task"
+          description={selectedTask.title}
+          zClass="z-60"
+          onClose={() => setShowTaskLogTimeModal(false)}
+        >
+            <form onSubmit={handleTaskQuickLogTime} className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className={slideOverBodyClass}>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1.5">Hours Spent *</label>
@@ -3203,7 +3788,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                     max="24"
                     value={taskLogHours}
                     onChange={(e) => setTaskLogHours(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-mono font-bold text-blue-600 outline-none focus:border-blue-500"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-mono font-bold text-[var(--studio-navy)] outline-none focus:border-blue-500"
                     required
                   />
                 </div>
@@ -3247,7 +3832,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 />
               </div>
 
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center justify-between">
                 <button
                   type="button"
                   onClick={() => setTaskLogBillable(!taskLogBillable)}
@@ -3256,32 +3841,31 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 >
                   {taskLogBillable ? 'Billable' : 'Non-Billable'}
                 </button>
-
-                <div className="flex items-center gap-2">
+              </div>
+              </div>
+              <div className={slideOverFooterClass}>
                   <button
                     type="button"
                     onClick={() => setShowTaskLogTimeModal(false)}
-                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold cursor-pointer"
+                    className={slideOverCancelClass}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={taskLogDate > todayStr}
-                    className={`px-5 py-2 rounded-xl text-white font-bold shadow-sm transition-colors ${taskLogDate > todayStr
-                        ? 'bg-slate-300 cursor-not-allowed'
+                    className={`${slideOverPrimaryClass} ${taskLogDate > todayStr
+                        ? 'bg-slate-300 hover:bg-slate-300 cursor-not-allowed shadow-none'
                         : taskLogDate < todayStr
-                          ? 'bg-amber-600 hover:bg-amber-700 cursor-pointer'
-                          : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
+                          ? 'bg-amber-600 hover:bg-amber-700'
+                          : ''
                       }`}
                   >
                     {taskLogDate > todayStr ? 'Future Date Not Allowed' : taskLogDate < todayStr ? 'Apply for Regularization' : 'Save Time'}
                   </button>
-                </div>
               </div>
             </form>
-          </div>
-        </div>
+        </SlideOverDrawer>
       )}
 
       {/* Create Task Slide-over Drawer */}
@@ -3339,19 +3923,49 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 {isAdmin ? (
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
-                      Assignee Member <span className="text-rose-500">*</span>
+                      Assignees <span className="text-rose-500">*</span>
                     </label>
-                    <select
-                      value={newTaskAssignee}
-                      onChange={(e) => setNewTaskAssignee(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
-                    >
-                      {assignableEmployees.map((e) => (
-                        <option key={e.id} value={e.id} className="bg-white text-slate-800">
-                          {e.name} ({e.designation})
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      {newTaskAssignees.length === 0 && (
+                        <span className="text-[11px] font-medium text-slate-400">Select one or more people</span>
+                      )}
+                      {newTaskAssignees.map((id) => {
+                        const person = assignableEmployees.find((emp) => emp.id === id);
+                        return (
+                          <span key={id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 py-0.5 pl-2 pr-0.5 text-[11px] font-semibold text-slate-700">
+                            {person?.name || 'Unknown'}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = newTaskAssignees.filter((item) => item !== id);
+                                setNewTaskAssignees(next);
+                                setNewTaskAssignee(next[0] || '');
+                              }}
+                              className="rounded-full px-1 text-slate-400 hover:text-rose-600"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        );
+                      })}
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (!e.target.value) return;
+                          const next = [...newTaskAssignees, e.target.value];
+                          setNewTaskAssignees(next);
+                          setNewTaskAssignee(next[0]);
+                        }}
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 outline-none"
+                      >
+                        <option value="">{newTaskAssignees.length ? '+ Add another' : '+ Add people'}</option>
+                        {assignableEmployees.filter((emp) => !newTaskAssignees.includes(emp.id)).map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.name} ({emp.designation})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 ) : (
                   <div>
@@ -3374,15 +3988,122 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Priority Level</label>
                   <select
                     value={newTaskPriority}
-                    onChange={(e) => setNewTaskPriority(e.target.value as any)}
+                    onChange={(e) => setNewTaskPriority(e.target.value as Task['priority'])}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
                   >
-                    <option value="Low" className="bg-white text-slate-800">Low Priority</option>
-                    <option value="Medium" className="bg-white text-slate-800">Medium Priority</option>
-                    <option value="High" className="bg-white text-slate-800">High Priority</option>
-                    <option value="Urgent" className="bg-white text-slate-800">Urgent Priority</option>
+                    {priorityOptions.map((p) => (
+                      <option key={p} value={p} className="bg-white text-slate-800">{p}</option>
+                    ))}
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
+                    Due date <span className="text-slate-400 font-medium">(optional)</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={newTaskDueDate}
+                    onChange={(e) => setNewTaskDueDate(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Repeat</label>
+                    <select
+                      value={newTaskRepeat}
+                      onChange={(e) => setNewTaskRepeat(e.target.value as typeof newTaskRepeat)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
+                    >
+                      <option value="none">Does not repeat</option>
+                      <option value="daily">Every day</option>
+                      <option value="weekly">Every week</option>
+                      <option value="biweekly">Every 2 weeks</option>
+                      <option value="monthly">Every month</option>
+                    </select>
+                  </div>
+                  {newTaskRepeat !== 'none' && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Repeat until</label>
+                      <input
+                        type="date"
+                        value={newTaskRecurrenceEnd}
+                        onChange={(e) => setNewTaskRecurrenceEnd(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {(newTaskRepeat === 'weekly' || newTaskRepeat === 'biweekly') && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Weekday</label>
+                    <select
+                      value={newTaskWeekday}
+                      onChange={(e) => setNewTaskWeekday(Number(e.target.value))}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
+                    >
+                      {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, index) => (
+                        <option key={day} value={index}>{day}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={newTaskBillable}
+                      onChange={(e) => setNewTaskBillable(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-[var(--studio-navy)]"
+                    />
+                    Billable to client
+                  </label>
+                  <select
+                    value={newTaskBillingType}
+                    onChange={(e) => setNewTaskBillingType(e.target.value as 'deliverable' | 'hourly')}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
+                  >
+                    <option value="deliverable">Fixed deliverable price</option>
+                    <option value="hourly">Hourly</option>
+                  </select>
+                </div>
+                {newTaskBillable && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Charge to client</label>
+                    <select
+                      value={newTaskClientId}
+                      onChange={(e) => setNewTaskClientId(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
+                    >
+                      <option value="">Project default</option>
+                      {billingClients.map((client) => (
+                        <option key={client.id} value={client.id}>
+                          {client.company_name || client.companyName || client.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {newTaskBillable && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
+                      {newTaskBillingType === 'deliverable' ? 'Fixed price' : 'Hourly rate'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={newTaskPrice}
+                      onChange={(e) => setNewTaskPrice(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400"
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Description & Deliverables</label>
@@ -3407,7 +4128,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
+                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
                 >
                   Add Task
                 </button>
@@ -3478,14 +4199,31 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Client / Customer Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Apex Global Enterprises"
-                    value={newProjClient}
-                    onChange={(e) => setNewProjClient(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
-                  />
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Client</label>
+                  <select
+                    value={newProjClientId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setNewProjClientId(id);
+                      const match = billingClients.find((c) => c.id === id);
+                      setNewProjClient(match?.company_name || match?.companyName || match?.name || '');
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
+                  >
+                    <option value="">Internal / no client</option>
+                    {billingClients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.company_name || client.companyName || client.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-[11px] text-slate-500">
+                    Add clients in{' '}
+                    <Link href="/payroll/billable" className="font-semibold text-[var(--studio-navy)]">
+                      Payroll → Billable
+                    </Link>
+                    .
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
@@ -3538,7 +4276,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
+                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
                 >
                   Create Project
                 </button>
@@ -3563,6 +4301,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         const isDenied = p.approvalStatus === 'Denied' || p.status === 'Denied';
         const isApproved = p.approvalStatus === 'Approved' || (!isPending && !isDenied);
         const hoursPercent = Math.min(100, Math.round((approvedHours / totalBudgetHours) * 100));
+        const canEditProject = canManageThisProject(p);
 
         return (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
@@ -3571,7 +4310,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
               <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
                 <div className="min-w-0 flex-1 pr-2">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider block">
+                    <span className="text-[11px] font-bold text-[var(--studio-navy)] uppercase tracking-wider block">
                       {p.code}
                     </span>
                     <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border bg-emerald-50 border-emerald-200 text-emerald-700">
@@ -3595,12 +4334,12 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div>
                       <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                        <Clock className="h-3.5 w-3.5 text-blue-600" />
+                        <Clock className="h-3.5 w-3.5 text-[var(--studio-navy)]" />
                         Project Work Hours Allocation
                       </span>
                     </div>
 
-                    {isAdmin && !isEditingWorkHours && (
+                    {canEditProject && !isEditingWorkHours && (
                       <button
                         onClick={() => {
                           setEditWorkHoursValue(String(p.totalWorkHours || 250));
@@ -3625,7 +4364,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                       />
                       <button
                         onClick={() => handleUpdateProjectWorkHours(p.id, parseFloat(editWorkHoursValue) || 250)}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold text-xs cursor-pointer hover:bg-blue-700"
+                        className="px-3 py-1.5 rounded-lg bg-[var(--studio-navy)] text-white font-bold text-xs cursor-pointer hover:bg-[var(--studio-navy-hover)]"
                       >
                         Save
                       </button>
@@ -3640,7 +4379,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                     <div className="flex items-center justify-between pt-1">
                       <div>
                         <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Work Hours Set</span>
-                        <span className="text-base font-mono font-bold text-blue-600">
+                        <span className="text-base font-mono font-bold text-[var(--studio-navy)]">
                           {p.totalWorkHours || 250} hrs
                         </span>
                       </div>
@@ -3656,7 +4395,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   {/* Progress Bar */}
                   <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
                     <div
-                      className={`h-full transition-all duration-300 ${hoursPercent >= 100 ? 'bg-rose-500' : hoursPercent >= 80 ? 'bg-amber-500' : 'bg-blue-600'
+                      className={`h-full transition-all duration-300 ${hoursPercent >= 100 ? 'bg-rose-500' : hoursPercent >= 80 ? 'bg-amber-500' : 'bg-[var(--studio-navy)]'
                         }`}
                       style={{ width: `${hoursPercent}%` }}
                     />
@@ -3683,11 +4422,118 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   </div>
                 </div>
 
+                {canEditProject && (
+                <div className="p-4 sm:p-5 rounded-xl border border-slate-200 bg-white space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-800">Bill client</span>
+                    <Link href="/payroll/billable?tab=unbilled" className="text-[11px] font-semibold text-[var(--studio-navy)]">
+                      See all unbilled
+                    </Link>
+                  </div>
+                  <p className="text-[11px] text-slate-500">{p.clientName || 'No client assigned'}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={billingModeDraft}
+                      onChange={(e) => setBillingModeDraft(e.target.value as 'deliverable' | 'hourly')}
+                      className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-medium text-slate-800"
+                    >
+                      <option value="deliverable">Deliverable fees</option>
+                      <option value="hourly">Hourly</option>
+                    </select>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Hourly rate"
+                      value={hourlyRateDraft}
+                      onChange={(e) => setHourlyRateDraft(e.target.value)}
+                      className="rounded-lg border border-slate-200 px-2 py-2 text-xs font-medium text-slate-800"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={saveProjectBilling}
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Save billing
+                  </button>
+                  {billLines.length === 0 ? (
+                    <p className="text-[11px] text-slate-500">
+                      {billingModeDraft === 'hourly'
+                        ? 'No approved billable timesheets are waiting to be invoiced.'
+                        : 'No completed billable tasks are waiting to be invoiced.'}
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {billLines.map((line, index) => (
+                        <div key={line.key} className="grid grid-cols-[auto_1fr_4.5rem_5rem] gap-2 items-center">
+                          <input
+                            type="checkbox"
+                            checked={line.included}
+                            onChange={(e) => setBillLines((prev) => prev.map((row, i) => i === index ? { ...row, included: e.target.checked } : row))}
+                          />
+                          <span className="text-[11px] text-slate-700 truncate">{line.description}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={line.quantity}
+                            onChange={(e) => setBillLines((prev) => prev.map((row, i) => i === index ? { ...row, quantity: Number(e.target.value) || 0 } : row))}
+                            className="rounded-md border border-slate-200 px-1.5 py-1 text-[11px]"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={line.unitPrice}
+                            onChange={(e) => setBillLines((prev) => prev.map((row, i) => i === index ? { ...row, unitPrice: Number(e.target.value) || 0 } : row))}
+                            className="rounded-md border border-slate-200 px-1.5 py-1 text-[11px]"
+                          />
+                        </div>
+                      ))}
+                      <div className="text-[11px] text-slate-600 font-medium">
+                        {(() => {
+                          const subtotal = billLines.filter((line) => line.included).reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
+                          const gst = subtotal * 0.18;
+                          return `Subtotal ${subtotal.toFixed(2)} · GST 18% ${gst.toFixed(2)} · Total ${(subtotal + gst).toFixed(2)}`;
+                        })()}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={createDraftInvoice}
+                        className="px-3 py-1.5 rounded-lg bg-[var(--studio-navy)] text-white text-xs font-semibold hover:bg-[var(--studio-navy-hover)]"
+                      >
+                        Create draft invoice
+                      </button>
+                    </div>
+                  )}
+                  {projectInvoices.length > 0 && (
+                    <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                      {projectInvoices.map((inv) => (
+                        <div key={inv.id} className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="font-semibold text-slate-800">{inv.invoice_number}</span>
+                          <span className="text-slate-500">{Number(inv.total_amount || 0).toFixed(2)} · {inv.status}</span>
+                          {String(inv.status).toLowerCase() === 'draft' && (
+                            <button
+                              type="button"
+                              onClick={() => sendProjectInvoice(inv.id)}
+                              className="text-[var(--studio-navy)] font-semibold"
+                            >
+                              Send
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                )}
+
                 {/* Project Tasks List in this Workspace */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                      <Layers className="h-3.5 w-3.5 text-blue-600" />
+                      <Layers className="h-3.5 w-3.5 text-[var(--studio-navy)]" />
                       <span>Workspace Deliverables ({projectTasks.length})</span>
                     </label>
                   </div>
@@ -3739,7 +4585,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 </button>
                 <button
                   onClick={() => setSelectedProjectForDetails(null)}
-                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99] text-center"
+                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99] text-center"
                 >
                   Close
                 </button>
@@ -3751,19 +4597,8 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
       {/* Denial Reason Modal */}
       {showDenyReasonModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 border border-slate-100 text-slate-900 animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <h4 className="text-base font-bold text-slate-900">Deny Project Workspace</h4>
-              <button
-                onClick={() => setShowDenyReasonModal(null)}
-                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4 pt-4 text-xs">
+        <SlideOverDrawer title="Deny Project Workspace" zClass="z-60" onClose={() => setShowDenyReasonModal(null)}>
+            <div className={slideOverBodyClass}>
               <div>
                 <label className="block font-semibold text-slate-700 mb-1.5">Reason for Denial / Feedback</label>
                 <textarea
@@ -3775,25 +4610,24 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+            </div>
+            <div className={slideOverFooterClass}>
                 <button
                   type="button"
                   onClick={() => setShowDenyReasonModal(null)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold cursor-pointer"
+                  className={slideOverCancelClass}
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={() => handleDenyProject(showDenyReasonModal, denyReasonText)}
-                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-sm cursor-pointer"
+                  className={`${slideOverPrimaryClass} bg-rose-600 hover:bg-rose-700 shadow-none`}
                 >
                   Confirm Denial
                 </button>
-              </div>
             </div>
-          </div>
-        </div>
+        </SlideOverDrawer>
       )}
 
       {/* Confirm Reject Task Modal */}

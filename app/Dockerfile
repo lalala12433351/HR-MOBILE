@@ -1,12 +1,13 @@
 # ==============================================================================
 # Build Stage: Compile TypeScript into optimized Node.js distribution
 # ==============================================================================
-FROM node:20-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /usr/src/app
 
 COPY package*.json ./
 COPY prisma/ ./prisma/
+COPY prisma.config.ts ./
 RUN npm ci
 
 COPY tsconfig.json ./
@@ -14,11 +15,12 @@ COPY src/ ./src/
 
 RUN npx prisma generate
 RUN npm run build
+RUN npm prune --omit=dev && npm cache clean --force
 
 # ==============================================================================
 # Production Runtime Stage: Minimized footprint for AWS ECS Fargate
 # ==============================================================================
-FROM node:20-alpine AS runner
+FROM node:26-alpine AS runner
 
 WORKDIR /usr/src/app
 
@@ -29,8 +31,10 @@ RUN apk add --no-cache wget curl
 
 COPY package*.json ./
 COPY prisma/ ./prisma/
-RUN npm ci --only=production && npm cache clean --force
-RUN npx prisma generate
+COPY prisma.config.ts ./
+
+# Production deps (including the generated Prisma client) from the builder
+COPY --from=builder /usr/src/app/node_modules ./node_modules
 
 # Copy compiled JavaScript output
 COPY --from=builder /usr/src/app/dist ./dist

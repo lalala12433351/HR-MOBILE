@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 
 export async function getAnnouncements(req: Request, res: Response): Promise<void> {
   try {
+    await ensureAnnouncementExtras(req);
     const result = await req.tenantQuery!(
       `SELECT 
         a.id,
@@ -36,25 +37,27 @@ export async function getAnnouncements(req: Request, res: Response): Promise<voi
 
 export async function createAnnouncement(req: Request, res: Response): Promise<void> {
   try {
+    await ensureAnnouncementExtras(req);
     const {
       title,
       content,
       authorEmployeeId,
       targetDepartmentId,
-      priority = 'NORMAL',
+      priority = 'normal',
       category = 'GENERAL',
       pinToHeaderBanner = false,
       tags = [],
       attachment,
     } = req.body;
 
-    let validAuthorId = authorEmployeeId;
+    let validAuthorId: string | null = null;
     if (authorEmployeeId) {
       const emp = await req.tenantQuery!('SELECT id FROM employees WHERE id::text = $1 OR employee_code = $1 LIMIT 1', [authorEmployeeId]);
-      if (emp.rows[0]) validAuthorId = emp.rows[0].id;
-    } else {
+      validAuthorId = emp.rows[0]?.id ?? null;
+    }
+    if (!validAuthorId) {
       const firstEmp = await req.tenantQuery!('SELECT id FROM employees LIMIT 1');
-      validAuthorId = firstEmp.rows[0]?.id;
+      validAuthorId = firstEmp.rows[0]?.id ?? null;
     }
 
     const tagsJson = JSON.stringify(Array.isArray(tags) ? tags : []);
@@ -75,7 +78,7 @@ export async function createAnnouncement(req: Request, res: Response): Promise<v
         content,
         validAuthorId,
         targetDepartmentId || null,
-        String(priority).toUpperCase(),
+        priority,
         String(category).toUpperCase(),
         Boolean(pinToHeaderBanner),
         tagsJson,
@@ -143,6 +146,10 @@ async function ensureAnnouncementExtras(req: Request): Promise<void> {
   await req.tenantQuery!(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS pin_to_header_banner BOOLEAN NOT NULL DEFAULT false`);
   await req.tenantQuery!(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS category VARCHAR(64) DEFAULT 'GENERAL'`);
   await req.tenantQuery!(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb`);
+  await req.tenantQuery!(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS attachment_file_name VARCHAR(255)`);
+  await req.tenantQuery!(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS attachment_file_url TEXT`);
+  await req.tenantQuery!(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS attachment_file_size BIGINT`);
+  await req.tenantQuery!(`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS attachment_mime_type VARCHAR(128)`);
   await req.tenantQuery!(`
     CREATE TABLE IF NOT EXISTS announcement_reactions (
       announcement_id UUID NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,

@@ -3,18 +3,11 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  Home,
-  Users,
-  Clock,
-  FolderKanban,
-  Megaphone,
-  GraduationCap,
-  Sparkles,
-  Calendar,
-} from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { isInstitutionMode } from '@/utils/organizationMode';
+import { PixbeIcon } from '@/components/common/PixbeIcon';
+import { useChatUnread } from '@/hooks/useChat';
 
 export function MobileBottomBar() {
   const pathname = usePathname();
@@ -27,6 +20,7 @@ export function MobileBottomBar() {
   const isInstitution = isInstitutionMode(state.organization, currentPersona);
   const isStudentRole = currentPersona?.role === 'student';
   const unreadNotifCount = state.notifications?.filter((n) => !n.read).length || 0;
+  const chatUnread = useChatUnread();
 
   const isPathActive = (path: string) => {
     if (!pathname) return false;
@@ -42,16 +36,17 @@ export function MobileBottomBar() {
   const isPeopleActive = isPathActive(isInstitution ? '/student-directory' : '/hr');
   const isProjectsActive = isPathActive('/projects');
   const isHomeActive = isPathActive('/dashboard');
+  const isChatActive = isPathActive('/chat');
 
   return (
     <nav
       aria-label="Mobile Bottom Navigation"
-      className="fixed bottom-0 inset-x-0 z-30 flex lg:hidden bg-white dark:bg-[#0f1117] border-t border-slate-200/80 dark:border-slate-800 shadow-[0_-4px_24px_rgba(0,0,0,0.03)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)] select-none transition-colors duration-200"
+      className="pixbe-mobile-nav fixed bottom-0 inset-x-0 z-30 flex lg:hidden bg-[var(--bg-surface)] dark:bg-[#0f1117] border-t border-[var(--border-color)]/80 shadow-[0_-4px_24px_rgba(0,0,0,0.03)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)] select-none transition-colors duration-200"
       style={{
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}
     >
-      <div className={`w-full max-w-md mx-auto grid ${isStudentRole ? 'grid-cols-4' : 'grid-cols-5'} h-16 items-center`}>
+      <div className={`w-full max-w-md mx-auto grid ${isStudentRole ? 'grid-cols-4' : 'grid-cols-6'} h-16 items-center`}>
         {/* ─── STUDENT NAVIGATION BAR ─── */}
         {isStudentRole ? (
           <>
@@ -63,13 +58,14 @@ export function MobileBottomBar() {
               aria-label="Class Timetable"
             >
               {isTimetableActive && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
               )}
-              <Calendar
+              <PixbeIcon
+                name="timetable"
                 className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                   isTimetableActive
-                    ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                    : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                    ? 'text-[var(--studio-navy)] '
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                 }`}
               />
             </Link>
@@ -82,13 +78,14 @@ export function MobileBottomBar() {
               aria-label="My Attendance"
             >
               {isAttendanceActive && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
               )}
-              <Clock
+              <PixbeIcon
+                name="attendance"
                 className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                   isAttendanceActive
-                    ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                    : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                    ? 'text-[var(--studio-navy)] '
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                 }`}
               />
             </Link>
@@ -102,7 +99,7 @@ export function MobileBottomBar() {
               aria-label="Ask AI Assistant"
             >
               <Sparkles
-                className="h-[22px] w-[22px] text-slate-400 hover:text-blue-600 dark:text-slate-500 dark:hover:text-blue-400 stroke-[1.6] transition-all duration-150 group-active:scale-90"
+                className="h-[22px] w-[22px] text-[var(--text-muted)] hover:text-[var(--studio-navy)] dark:text-[var(--text-muted)] dark:hover:text-blue-400 stroke-[1.6] transition-all duration-150 group-active:scale-90"
               />
             </button>
 
@@ -114,18 +111,19 @@ export function MobileBottomBar() {
               aria-label="Announcements & Notices"
             >
               {isAnnouncementsActive && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
               )}
               <div className="relative flex items-center justify-center">
-                <Megaphone
+                <PixbeIcon
+                  name="announcements"
                   className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                     isAnnouncementsActive
-                      ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                      : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                      ? 'text-[var(--studio-navy)] '
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                   }`}
                 />
                 {unreadNotifCount > 0 && !isAnnouncementsActive && (
-                  <span className="absolute -top-1 -right-1 flex h-2 w-2 rounded-full bg-blue-600 ring-2 ring-white dark:ring-[#0f1117]" />
+                  <span className="absolute -top-1 -right-1 flex h-2 w-2 rounded-full bg-[var(--studio-navy)] ring-2 ring-white dark:ring-[#0f1117]" />
                 )}
               </div>
             </Link>
@@ -141,18 +139,49 @@ export function MobileBottomBar() {
               aria-label="Home"
             >
               {isHomeActive && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
               )}
-              <Home
+              <PixbeIcon
+                name="home"
                 className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                   isHomeActive
-                    ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                    : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                    ? 'text-[var(--studio-navy)] '
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                 }`}
               />
             </Link>
 
-            {/* Tab 2: Students or People Directory */}
+            {/* Tab 2: Chat */}
+            <Link
+              href="/chat"
+              className="relative flex items-center justify-center h-full w-full group cursor-pointer focus:outline-none"
+              title="Chat"
+              aria-label={chatUnread > 0 ? `Chat, ${chatUnread} unread` : 'Chat'}
+            >
+              {isChatActive && (
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
+              )}
+              <div className="relative flex items-center justify-center">
+                <PixbeIcon
+                  name="chat"
+                  className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
+                    isChatActive
+                      ? 'text-[var(--studio-navy)] '
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
+                  }`}
+                />
+                {chatUnread > 0 && (
+                  <span
+                    aria-hidden
+                    className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 rounded-full bg-[#53886b] px-1 text-[9.5px] font-bold leading-4 text-white text-center ring-2 ring-white dark:ring-[#0f1117]"
+                  >
+                    {chatUnread > 99 ? '99+' : chatUnread}
+                  </span>
+                )}
+              </div>
+            </Link>
+
+            {/* Tab 3: Students or People Directory */}
             <Link
               href={isInstitution ? '/student-directory' : '/hr'}
               className="relative flex items-center justify-center h-full w-full group cursor-pointer focus:outline-none"
@@ -160,28 +189,30 @@ export function MobileBottomBar() {
               aria-label={isInstitution ? 'Student Directory' : 'People Directory'}
             >
               {isPeopleActive && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
               )}
               {isInstitution ? (
-                <GraduationCap
+                <PixbeIcon
+                  name="students"
                   className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                     isPeopleActive
-                      ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                      : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                      ? 'text-[var(--studio-navy)] '
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                   }`}
                 />
               ) : (
-                <Users
+                <PixbeIcon
+                  name="people"
                   className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                     isPeopleActive
-                      ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                      : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                      ? 'text-[var(--studio-navy)] '
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                   }`}
                 />
               )}
             </Link>
 
-            {/* Tab 3: Timetables (in Institution Mode) OR Attendance (in Corporate) */}
+            {/* Tab 4: Timetables (in Institution Mode) OR Attendance (in Corporate) */}
             {isInstitution ? (
               <Link
                 href="/timetable"
@@ -190,13 +221,14 @@ export function MobileBottomBar() {
                 aria-label="Class Timetables"
               >
                 {isTimetableActive && (
-                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
                 )}
-                <Calendar
+                <PixbeIcon
+                  name="timetable"
                   className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                     isTimetableActive
-                      ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                      : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                      ? 'text-[var(--studio-navy)] '
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                   }`}
                 />
               </Link>
@@ -208,19 +240,20 @@ export function MobileBottomBar() {
                 aria-label="Attendance & Leaves"
               >
                 {isAttendanceActive && (
-                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
                 )}
-                <Clock
+                <PixbeIcon
+                  name="attendance"
                   className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                     isAttendanceActive
-                      ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                      : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                      ? 'text-[var(--studio-navy)] '
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                   }`}
                 />
               </Link>
             )}
 
-            {/* Tab 4: Attendance (in Institution) OR Projects (in Corporate) */}
+            {/* Tab 5: Attendance (in Institution) OR Projects (in Corporate) */}
             {isInstitution ? (
               <Link
                 href="/student-attendance"
@@ -229,13 +262,14 @@ export function MobileBottomBar() {
                 aria-label="Class Attendance"
               >
                 {isAttendanceActive && (
-                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
                 )}
-                <Clock
+                <PixbeIcon
+                  name="attendance"
                   className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                     isAttendanceActive
-                      ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                      : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                      ? 'text-[var(--studio-navy)] '
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                   }`}
                 />
               </Link>
@@ -247,19 +281,20 @@ export function MobileBottomBar() {
                 aria-label="Projects & Tasks"
               >
                 {isProjectsActive && (
-                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
                 )}
-                <FolderKanban
+                <PixbeIcon
+                  name="projects"
                   className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                     isProjectsActive
-                      ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                      : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                      ? 'text-[var(--studio-navy)] '
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                   }`}
                 />
               </Link>
             )}
 
-            {/* Tab 5: Announcements */}
+            {/* Tab 6: Announcements */}
             <Link
               href="/announcements"
               className="relative flex items-center justify-center h-full w-full group cursor-pointer focus:outline-none"
@@ -267,18 +302,19 @@ export function MobileBottomBar() {
               aria-label="Announcements & Notices"
             >
               {isAnnouncementsActive && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-blue-600 dark:bg-blue-500" />
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-10 sm:w-11 h-[3.5px] rounded-b-full bg-[var(--studio-navy)] " />
               )}
               <div className="relative flex items-center justify-center">
-                <Megaphone
+                <PixbeIcon
+                  name="announcements"
                   className={`h-[22px] w-[22px] transition-all duration-150 group-active:scale-90 ${
                     isAnnouncementsActive
-                      ? 'text-blue-600 dark:text-blue-500 stroke-[2.3]'
-                      : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 stroke-[1.6]'
+                      ? 'text-[var(--studio-navy)] '
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] dark:text-[var(--text-muted)] dark:hover:text-slate-300'
                   }`}
                 />
                 {unreadNotifCount > 0 && !isAnnouncementsActive && (
-                  <span className="absolute -top-1 -right-1 flex h-2 w-2 rounded-full bg-blue-600 ring-2 ring-white dark:ring-[#0f1117]" />
+                  <span className="absolute -top-1 -right-1 flex h-2 w-2 rounded-full bg-[var(--studio-navy)] ring-2 ring-white dark:ring-[#0f1117]" />
                 )}
               </div>
             </Link>

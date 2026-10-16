@@ -2,12 +2,18 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import {
+  LayoutList,
+  Layers3,
+  Pencil,
+  Printer,
   Search,
   X,
 } from 'lucide-react';
 import { Employee, AccountStatus } from '../../../types';
 import { AppState } from '../../../services/store';
 import { UserAvatar } from '@/components/common/UserAvatar';
+import { DepartmentCodeBadge, DepartmentTag } from '@/components/common/DepartmentTag';
+import { buildDepartmentCodeMap } from '@/utils/departmentCode';
 
 interface EmployeeTableTabProps {
   state: AppState;
@@ -20,6 +26,9 @@ interface EmployeeTableTabProps {
   initialScope?: 'team' | 'all';
   onScopeChange?: (scope: 'team' | 'all') => void;
   onSelectEmployee: (emp: Employee) => void;
+  onSelectDepartment?: (departmentName: string) => void;
+  onResendInvite?: (emp: Employee) => Promise<void>;
+  onPrintIdCards?: (employees: Employee[]) => void;
 }
 
 export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
@@ -33,8 +42,12 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
   initialScope,
   onScopeChange,
   onSelectEmployee,
+  onSelectDepartment,
+  onResendInvite,
+  onPrintIdCards,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [resendingId, setResendingId] = useState<string | null>(null);
   const [teamScopeFilter, setTeamScopeFilter] = useState<'team' | 'all'>(
     initialScope || (isManager && !isSuperAdmin && !isHR ? 'team' : 'all')
   );
@@ -140,6 +153,10 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
     return sanitizedList;
   }, [isSuperAdmin, isHR, state.employees, accessibleEmployees, teamScopeFilter, state.currentPersona, state.customOptions?.offices]);
 
+  const departmentCodes = useMemo(() => buildDepartmentCodeMap(state), [state.customOptions]);
+  const deptCodeOf = (department?: string) =>
+    department ? departmentCodes.get(department.trim().toLowerCase()) : undefined;
+
   const filteredEmployees = useMemo(() => {
     return baseEmployeesList.filter((emp) => {
       const q = searchQuery.toLowerCase();
@@ -149,6 +166,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
         emp.email.toLowerCase().includes(q) ||
         (emp.employeeId && emp.employeeId.toLowerCase().includes(q)) ||
         emp.department?.toLowerCase().includes(q) ||
+        deptCodeOf(emp.department)?.includes(q) ||
         (emp.designation && emp.designation.toLowerCase().includes(q));
 
       const branchVal = emp.officeName || emp.location || '';
@@ -186,7 +204,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
 
       return matchesSearch && matchesBranch && matchesDept && matchesJob && matchesStatus && matchesEmpType;
     });
-  }, [baseEmployeesList, searchQuery, branchFilter, departmentFilter, jobTitleFilter, statusFilter, employmentTypeFilter, state.currentPersona]);
+  }, [baseEmployeesList, searchQuery, branchFilter, departmentFilter, jobTitleFilter, statusFilter, employmentTypeFilter, state.currentPersona, departmentCodes]);
 
   // Group filtered employees by department
   const groupedByDepartment = useMemo(() => {
@@ -204,21 +222,19 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
     const isSuper = emp.role === 'super_admin' || emp.employeeId === 'EMP001';
     const accStatus = (isSuper ? 'Active' : (emp.accountStatus || 'Not Activated')) as AccountStatus;
 
-    let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+    let tone = 'people-studio__status--wait';
     if (accStatus === 'Active' || accStatus === 'Activated') {
-      badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    } else if (accStatus === 'In Probation' || accStatus === 'Notice Period') {
-      badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
-    } else if (accStatus === 'Not Activated') {
-      badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
+      tone = 'people-studio__status--ok';
+    } else if (accStatus === 'Invited') {
+      tone = 'people-studio__status--invite';
     } else if (accStatus === 'On Leave') {
-      badgeClass = 'bg-purple-50 text-purple-700 border-purple-200';
+      tone = 'people-studio__status--muted';
     } else if (accStatus === 'Suspended' || accStatus === 'Deactivated') {
-      badgeClass = 'bg-rose-50 text-rose-700 border-rose-200';
+      tone = 'people-studio__status--error';
     }
 
     return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${badgeClass}`}>
+      <span className={`people-studio__status ${tone}`}>
         {accStatus === 'Activated' ? 'Active' : accStatus}
       </span>
     );
@@ -261,6 +277,53 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
     setEmploymentTypeFilter('All');
   };
 
+  const currentEmployee = useMemo(() => {
+    const persona = state.currentPersona;
+    if (!persona) return null;
+    const personaEmail = persona.email?.trim().toLowerCase();
+    const personaName = persona.name?.trim().toLowerCase();
+
+    return (state.employees || []).find(
+      (employee) =>
+        employee.id === persona.id ||
+        (!!personaEmail && employee.email?.trim().toLowerCase() === personaEmail) ||
+        (!!personaName && employee.name?.trim().toLowerCase() === personaName)
+    ) || null;
+  }, [state.currentPersona, state.employees]);
+
+  const managementChain = useMemo(() => {
+    if (!currentEmployee) return [];
+
+    const roster = state.employees || [];
+    const chain: Employee[] = [];
+    const visited = new Set<string>([currentEmployee.id]);
+    let cursor: Employee | null = currentEmployee;
+
+    while (cursor) {
+      const managerId = cursor.managerId;
+      const managerName = cursor.managerName?.trim().toLowerCase() || cursor.lineManager?.name?.trim().toLowerCase();
+      const managerEmail = cursor.lineManager?.username?.trim().toLowerCase();
+      const manager = roster.find(
+        (employee) =>
+          (!!managerId && employee.id === managerId) ||
+          (!!managerEmail && employee.email?.trim().toLowerCase() === managerEmail) ||
+          (!!managerName && employee.name?.trim().toLowerCase() === managerName)
+      );
+
+      if (!manager || visited.has(manager.id)) break;
+      chain.unshift(manager);
+      visited.add(manager.id);
+      cursor = manager;
+    }
+
+    return chain;
+  }, [currentEmployee, state.employees]);
+
+  const teamPreviewMembers = useMemo(() => {
+    const excludedIds = new Set([currentEmployee?.id, ...managementChain.map((employee) => employee.id)].filter(Boolean));
+    return accessibleEmployees.filter((employee) => !excludedIds.has(employee.id));
+  }, [accessibleEmployees, currentEmployee, managementChain]);
+
   const renderEmployeeRow = (emp: Employee, hideDept = false) => {
     const branchText = emp.officeName || emp.location || '—';
     const mgr = emp.managerId ? (state.employees || []).find((e) => e.id === emp.managerId) : null;
@@ -275,87 +338,73 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
         ));
 
     return (
-      <tr
-        key={emp.id}
-        className="hover:bg-[#f8fafc] transition-colors border-b border-[#e2e8f0]/80 group"
-      >
-
-        {/* Employee Info: Avatar + Name + ID + Email */}
-        <td className="py-2.5 px-3 whitespace-nowrap">
-          <div className="flex items-center gap-2.5">
-            <UserAvatar src={emp.avatar} name={emp.name} className="h-7 w-7 text-xs ring-1 ring-[#e2e8f0]" />
+      <tr key={emp.id}>
+        <td>
+          <div className="people-studio__who">
+            <UserAvatar src={emp.avatar} name={emp.name} className="h-8 w-8 text-[11px]" />
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => onSelectEmployee(emp)}
-                  className="font-bold text-[#0f172a] hover:text-[#2563eb] cursor-pointer text-left truncate transition-colors text-xs"
-                >
+              <div>
+                <button type="button" onClick={() => onSelectEmployee(emp)} className="people-studio__who-name">
                   {emp.name}
                 </button>
-                {emp.employeeId && (
-                  <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                    {emp.employeeId}
-                  </span>
-                )}
-                {isTeamManager && (
-                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-100">
-                    Manager
-                  </span>
-                )}
+                {emp.employeeId && <span className="people-studio__id">{emp.employeeId}</span>}
+                {isTeamManager && <span className="people-studio__chip">Manager</span>}
               </div>
-              <span className="text-[10px] text-[#64748b] block truncate font-medium">
-                {emp.email}
-              </span>
+              <span className="people-studio__who-mail">{emp.email}</span>
             </div>
           </div>
         </td>
-
-        {/* Job Title */}
-        <td className="py-2.5 px-3 whitespace-nowrap">
-          <span className="font-semibold text-[#0f172a] text-xs block">
+        <td>
+          <span className="people-studio__role">
             {emp.designation || (emp.role === 'super_admin' ? 'Founder & CEO' : 'Team Member')}
           </span>
         </td>
-
-        {/* Department (if not in grouped mode) */}
         {!hideDept && (
-          <td className="py-2.5 px-3 text-[#475569] whitespace-nowrap font-medium text-xs">
-            <span className="px-2 py-0.5 rounded-md bg-slate-100/80 border border-slate-200 text-slate-700 font-semibold text-[11px]">
-              {emp.department || 'Operations'}
+          <td>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="people-studio__quiet">{emp.department || 'Operations'}</span>
+              <DepartmentCodeBadge code={deptCodeOf(emp.department)} />
             </span>
           </td>
         )}
-
-        {/* Office / Branch */}
-        <td className="py-2.5 px-3 font-medium text-[#475569] whitespace-nowrap text-xs">
-          <span>{branchText}</span>
+        <td>
+          <span className="people-studio__quiet">{branchText}</span>
         </td>
-
-        {/* Reporting Manager */}
-        <td className="py-2.5 px-3 text-[#64748b] whitespace-nowrap text-xs font-medium">
+        <td>
           {mgrDisplay !== '—' ? (
-            <span className="font-semibold text-[#0f172a] hover:text-[#2563eb] cursor-pointer">
-              {mgrDisplay}
-            </span>
+            <span className="people-studio__role">{mgrDisplay}</span>
           ) : (
-            <span className="text-slate-400">—</span>
+            <span className="people-studio__empty-mark">—</span>
           )}
         </td>
-
-        {/* Status Badge */}
-        <td className="py-2.5 px-3 whitespace-nowrap">
-          {getStatusBadge(emp)}
-        </td>
-
-        {/* Manage Action Button */}
-        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+        <td>{getStatusBadge(emp)}</td>
+        <td className="people-studio__row-actions">
+          {onResendInvite &&
+            emp.email &&
+            emp.role !== 'super_admin' &&
+            (emp.accountStatus === 'Invited' || emp.accountStatus === 'Not Activated' || !emp.accountStatus) && (
+              <button
+                type="button"
+                disabled={resendingId === emp.id}
+                onClick={async () => {
+                  setResendingId(emp.id);
+                  try {
+                    await onResendInvite(emp);
+                  } finally {
+                    setResendingId(null);
+                  }
+                }}
+                className="people-studio__btn people-studio__btn--secondary people-studio__btn--compact"
+              >
+                {resendingId === emp.id ? 'Sending…' : 'Resend invite'}
+              </button>
+            )}
           <button
             type="button"
             onClick={() => onSelectEmployee(emp)}
-            className="px-2.5 py-1 rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#eff6ff] hover:border-blue-300 text-[#0f172a] hover:text-[#2563eb] text-[11px] font-bold cursor-pointer transition-all shadow-2xs"
+            className="people-studio__btn people-studio__btn--secondary people-studio__btn--compact"
           >
-            Manage Profile
+            Open profile
           </button>
         </td>
       </tr>
@@ -363,184 +412,262 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
   };
 
   return (
-    <div className="space-y-3 w-full">
-      {/* 1. Filter Strip: Search + Multi-dropdowns + Layout Switcher */}
-      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2.5 bg-white p-2.5 rounded-xl border border-[#e2e8f0] shadow-card">
-        {/* Search Field */}
-        <div className="relative flex-1 min-w-[220px] max-w-lg">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by name, ID, email, role, or department..."
-            className="w-full rounded-lg border border-[#e2e8f0] bg-[#f8fafc] pl-8.5 pr-4 py-1.5 text-xs text-[#0f172a] placeholder:text-slate-400 outline-none focus:bg-white focus:border-[#2563eb] focus:ring-1 focus:ring-blue-100 transition-all font-medium"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        {/* Right Section: Dropdown Filters & Layout Toggle */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {/* Department Filter */}
-          <select
-            value={departmentFilter}
-            onChange={(e) => setDepartmentFilter(e.target.value)}
-            className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] cursor-pointer font-semibold shadow-2xs"
-          >
-            <option value="All">All Departments</option>
-            {availableDepartments.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-
-          {/* Branch / Office Filter */}
-          <select
-            value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-            className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] cursor-pointer font-semibold shadow-2xs"
-          >
-            <option value="All">All Locations</option>
-            {availableBranches.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-
-          {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-[#e2e8f0] bg-white px-2.5 py-1 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] cursor-pointer font-semibold shadow-2xs"
-          >
-            <option value="All">All Statuses</option>
-            <option value="Not Activated">Not Activated</option>
-            <option value="Active">Active</option>
-            <option value="In Probation">In Probation</option>
-            <option value="On Leave">On Leave</option>
-            <option value="Notice Period">Notice Period</option>
-            <option value="Suspended">Suspended</option>
-            <option value="Deactivated">Deactivated</option>
-          </select>
-
-          {/* Layout Toggle: Departments Grouped vs Flat */}
-          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-[#e2e8f0]">
-            <button
-              type="button"
-              onClick={() => setViewLayout('grouped')}
-              title="Department Breakdown"
-              className={`px-2.5 py-0.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                viewLayout === 'grouped'
-                  ? 'bg-white text-[#0f172a] shadow-2xs font-bold'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Grouped
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewLayout('flat')}
-              title="Single Unified Table"
-              className={`px-2.5 py-0.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                viewLayout === 'flat'
-                  ? 'bg-white text-[#0f172a] shadow-2xs font-bold'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Unified
-            </button>
+    <div className="people-studio__panel">
+      {teamScopeFilter === 'team' && (
+        <section className="people-studio__sheet people-studio__line">
+          <div className="people-studio__line-main">
+            <p className="people-studio__kicker">Reporting line</p>
+            <div className="people-studio__chain">
+              {managementChain.length > 0 ? managementChain.map((employee, index) => (
+                <React.Fragment key={employee.id}>
+                  {index > 0 && <span className="people-studio__dash" aria-hidden="true" />}
+                  <div className="people-studio__person">
+                    <UserAvatar src={employee.avatar} name={employee.name} className="h-7 w-7 text-[10px]" />
+                    <div className="min-w-0">
+                      <p className="people-studio__person-name">{employee.name}</p>
+                      <p className="people-studio__person-role">{employee.designation || 'Manager'}</p>
+                    </div>
+                  </div>
+                </React.Fragment>
+              )) : (
+                <span className="people-studio__note">No reporting manager assigned.</span>
+              )}
+              {managementChain.length > 0 && <span className="people-studio__dash" aria-hidden="true" />}
+              <div className="people-studio__person is-you">
+                <UserAvatar src={currentEmployee?.avatar} name={currentEmployee?.name || state.currentPersona?.name || 'You'} className="h-7 w-7 text-[10px]" />
+                <div className="min-w-0">
+                  <p className="people-studio__person-name">{currentEmployee?.name || state.currentPersona?.name || 'You'}</p>
+                  <p className="people-studio__person-role">You</p>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Clear Filter Button */}
-          {hasActiveFilters && (
+          <div className="people-studio__line-side">
+            <div className="flex items-center justify-between gap-3">
+              <p className="people-studio__kicker">My team</p>
+              <span className="people-studio__dept-count">{teamPreviewMembers.length}</span>
+            </div>
+            <div className="people-studio__avatars">
+              {teamPreviewMembers.slice(0, 6).map((employee) => (
+                <UserAvatar key={employee.id} src={employee.avatar} name={employee.name} className="h-8 w-8 border-2 border-[var(--bg-surface)] text-[10px]" />
+              ))}
+              {teamPreviewMembers.length > 6 && (
+                <span className="people-studio__more">+{teamPreviewMembers.length - 6}</span>
+              )}
+              {teamPreviewMembers.length === 0 && <span className="people-studio__note">No team members assigned yet.</span>}
+            </div>
+            {teamPreviewMembers.length > 0 && (
+              <p className="people-studio__meta">{teamPreviewMembers.slice(0, 2).map((employee) => employee.name).join(', ')}{teamPreviewMembers.length > 2 ? ` and ${teamPreviewMembers.length - 2} more` : ''}</p>
+            )}
+          </div>
+        </section>
+      )}
+
+      <section className="people-studio__sheet people-studio__sheet--pad">
+        <div className="people-studio__filters">
+          <div className="people-studio__search">
+            <Search className="people-studio__search-icon" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by name, ID, email, role, or department"
+              aria-label="Search people"
+            />
+            {searchQuery && (
+              <button type="button" onClick={() => setSearchQuery('')} className="people-studio__search-clear" aria-label="Clear search">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="people-studio__controls">
+            <select
+              value={departmentFilter}
+              onChange={(e) => setDepartmentFilter(e.target.value)}
+              aria-label="Filter by department"
+              className="people-studio__select"
+            >
+              <option value="All">All departments</option>
+              {availableDepartments.map((d) => {
+                const code = deptCodeOf(d);
+                return (
+                  <option key={d} value={d}>
+                    {code ? `${d} (${code})` : d}
+                  </option>
+                );
+              })}
+            </select>
+
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              aria-label="Filter by location"
+              className="people-studio__select"
+            >
+              <option value="All">All locations</option>
+              {availableBranches.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="Filter by account status"
+              className="people-studio__select"
+            >
+              <option value="All">All statuses</option>
+              <option value="Not Activated">Not Activated</option>
+              <option value="Invited">Invited</option>
+              <option value="Active">Active</option>
+              <option value="In Probation">In Probation</option>
+              <option value="On Leave">On Leave</option>
+              <option value="Notice Period">Notice Period</option>
+              <option value="Suspended">Suspended</option>
+              <option value="Deactivated">Deactivated</option>
+            </select>
+
+            <div className="people-studio__seg" role="group" aria-label="Roster layout">
+              <button
+                type="button"
+                onClick={() => setViewLayout('grouped')}
+                className={viewLayout === 'grouped' ? 'is-on' : ''}
+              >
+                <Layers3 className="h-3.5 w-3.5" /> Grouped
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewLayout('flat')}
+                className={viewLayout === 'flat' ? 'is-on' : ''}
+              >
+                <LayoutList className="h-3.5 w-3.5" /> Unified
+              </button>
+            </div>
+
+            {hasActiveFilters && (
+              <button type="button" onClick={handleClearFilters} className="people-studio__btn people-studio__btn--ghost">
+                <X className="w-3 h-3" /> Clear
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="people-studio__count">
+          <span>
+            <strong>{filteredEmployees.length}</strong> {filteredEmployees.length === 1 ? 'person' : 'people'} in this view
+          </span>
+          {onPrintIdCards && (
             <button
               type="button"
-              onClick={handleClearFilters}
-              className="px-2 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
+              disabled={filteredEmployees.length === 0}
+              onClick={() => onPrintIdCards(filteredEmployees)}
+              className="people-studio__btn people-studio__btn--secondary people-studio__btn--compact"
             >
-              <X className="w-3 h-3" /> Clear
+              <Printer className="h-3.5 w-3.5" />
+              Print ID cards
             </button>
           )}
         </div>
-      </div>
+      </section>
 
-      {/* 2. Mobile View Card List */}
-      <div className="block md:hidden space-y-3">
+      <div className="people-studio__cards">
         {filteredEmployees.length === 0 ? (
-          <div className="p-6 rounded-xl border border-[#e2e8f0] bg-white text-center text-xs text-[#64748b] font-medium shadow-card">
-            No employees found matching filter criteria
-          </div>
+          <div className="people-studio__empty">No people match these filters. Clear a filter or search a different name.</div>
         ) : viewLayout === 'grouped' ? (
           Object.entries(groupedByDepartment).map(([deptName, deptEmployees]) => (
-            <div key={deptName} className="rounded-xl border border-[#e2e8f0] bg-white overflow-hidden shadow-card">
-              <div className="px-3.5 py-2 bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between">
-                <span className="text-xs font-bold text-[#0f172a] uppercase tracking-wider">{deptName}</span>
-                <span className="text-[11px] text-[#64748b] font-bold">
+            <div key={deptName} className="people-studio__sheet people-studio__dept">
+              <div className="people-studio__dept-head">
+                {onSelectDepartment && deptName !== 'Unassigned' ? (
+                  <button
+                    type="button"
+                    onClick={() => onSelectDepartment(deptName)}
+                    className="people-studio__dept-open"
+                  >
+                    <DepartmentTag name={deptName} code={deptCodeOf(deptName)} className="people-studio__dept-name" />
+                  </button>
+                ) : (
+                  <DepartmentTag name={deptName} code={deptCodeOf(deptName)} className="people-studio__dept-name" />
+                )}
+                <span className="people-studio__dept-count">
                   {deptEmployees.length} {deptEmployees.length === 1 ? 'member' : 'members'}
                 </span>
+                {onSelectDepartment && (isSuperAdmin || isHR) && deptName !== 'Unassigned' && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectDepartment(deptName)}
+                    className="people-studio__dept-edit"
+                    title={`Edit ${deptName}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </button>
+                )}
               </div>
-              <div className="p-2.5 space-y-2 divide-y divide-slate-100">
-                {deptEmployees.map((emp) => {
-                  const branchText = emp.officeName || emp.location || 'Bengaluru HQ';
-
-                  return (
-                    <div
-                      key={emp.id}
-                      onClick={() => onSelectEmployee(emp)}
-                      className="pt-2 first:pt-0 space-y-1.5 cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between gap-2.5">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <UserAvatar src={emp.avatar} name={emp.name} className="h-7 w-7 ring-1 ring-slate-200" />
-                          <div className="min-w-0">
-                            <h3 className="font-bold text-xs text-[#0f172a] truncate">{emp.name}</h3>
-                            <p className="text-[10px] text-[#64748b] truncate">{emp.designation || (emp.role === 'super_admin' ? 'Founder & CEO' : 'Team Member')}</p>
-                          </div>
+              {deptEmployees.map((emp) => {
+                const branchText = emp.officeName || emp.location || 'No office';
+                return (
+                  <div
+                    key={emp.id}
+                    onClick={() => onSelectEmployee(emp)}
+                    className="people-studio__mobile-row"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') onSelectEmployee(emp);
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="people-studio__mobile-top">
+                      <div className="people-studio__who">
+                        <UserAvatar src={emp.avatar} name={emp.name} className="h-8 w-8 text-[11px]" />
+                        <div className="min-w-0">
+                          <p className="people-studio__who-name">{emp.name}</p>
+                          <p className="people-studio__who-mail">{emp.designation || (emp.role === 'super_admin' ? 'Founder & CEO' : 'Team Member')}</p>
                         </div>
-                        {getStatusBadge(emp)}
                       </div>
-                      <div className="flex items-center justify-between text-[10px] text-[#64748b]">
-                        <span>{branchText}</span>
-                        <span className="font-mono">{emp.employeeId}</span>
-                      </div>
+                      {getStatusBadge(emp)}
                     </div>
-                  );
-                })}
-              </div>
+                    <div className="people-studio__mobile-meta">
+                      <span>{branchText}</span>
+                      <span className="people-studio__id">{emp.employeeId}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ))
         ) : (
           filteredEmployees.map((emp) => {
-            const branchText = emp.officeName || emp.location || 'Bengaluru HQ';
-
+            const branchText = emp.officeName || emp.location || 'No office';
             return (
               <div
                 key={emp.id}
                 onClick={() => onSelectEmployee(emp)}
-                className="p-3 rounded-xl border border-[#e2e8f0] bg-white space-y-2 cursor-pointer hover:border-blue-300 transition-colors shadow-card"
+                className="people-studio__sheet people-studio__mobile-row"
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') onSelectEmployee(emp);
+                }}
+                role="button"
+                tabIndex={0}
               >
-                <div className="flex items-center justify-between gap-2.5">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <UserAvatar src={emp.avatar} name={emp.name} className="h-7 w-7 ring-1 ring-slate-200" />
+                <div className="people-studio__mobile-top">
+                  <div className="people-studio__who">
+                    <UserAvatar src={emp.avatar} name={emp.name} className="h-8 w-8 text-[11px]" />
                     <div className="min-w-0">
-                      <h3 className="font-bold text-xs text-[#0f172a] truncate">{emp.name}</h3>
-                      <p className="text-[10px] text-[#64748b] truncate">{emp.email}</p>
+                      <p className="people-studio__who-name">{emp.name}</p>
+                      <p className="people-studio__who-mail">{emp.email}</p>
                     </div>
                   </div>
                   {getStatusBadge(emp)}
                 </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1 border-t border-slate-100">
-                  <span className="truncate">{emp.designation} · {emp.department}</span>
-                  <span className="truncate text-slate-500">
+                <div className="people-studio__mobile-meta">
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <span className="truncate">{emp.designation}</span>
+                    <DepartmentTag name={emp.department || ''} code={deptCodeOf(emp.department)} />
+                  </span>
+                  <span className="truncate">
                     {emp.managerName || emp.lineManager?.name
                       ? `Reports to ${emp.managerName || emp.lineManager?.name}`
                       : branchText}
@@ -552,45 +679,56 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
         )}
       </div>
 
-      {/* 3. Desktop Table (Grouped or Unified) */}
-      <div className="hidden md:block space-y-3.5">
+      <div className="people-studio__desktop">
         {filteredEmployees.length === 0 ? (
-          <div className="rounded-xl border border-[#e2e8f0] bg-white p-10 text-center text-xs text-[#64748b] shadow-card font-medium">
-            No employees found matching filter criteria.
-          </div>
+          <div className="people-studio__empty">No people match these filters. Clear a filter or search a different name.</div>
         ) : viewLayout === 'grouped' ? (
-          /* GROUPED BY DEPARTMENT */
           Object.entries(groupedByDepartment).map(([deptName, deptEmployees]) => (
-            <div
-              key={deptName}
-              className="rounded-xl border border-[#e2e8f0] bg-white overflow-hidden shadow-card transition-all"
-            >
-              {/* Department Header Banner */}
-              <div className="px-4 py-2 bg-[#f8fafc] border-b border-[#e2e8f0] flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-[#0f172a] tracking-wider uppercase">
-                    {deptName}
-                  </span>
-                  <span className="text-[11px] text-[#64748b] font-semibold">
-                    · {deptEmployees.length} {deptEmployees.length === 1 ? 'member' : 'members'}
-                  </span>
-                </div>
+            <div key={deptName} className="people-studio__sheet people-studio__dept">
+              <div className="people-studio__dept-head">
+                {onSelectDepartment && deptName !== 'Unassigned' ? (
+                  <button
+                    type="button"
+                    onClick={() => onSelectDepartment(deptName)}
+                    className="people-studio__dept-open"
+                  >
+                    <span className="people-studio__dept-name">{deptName}</span>
+                    <DepartmentCodeBadge code={deptCodeOf(deptName)} />
+                  </button>
+                ) : (
+                  <>
+                    <span className="people-studio__dept-name">{deptName}</span>
+                    <DepartmentCodeBadge code={deptCodeOf(deptName)} />
+                  </>
+                )}
+                <span className="people-studio__dept-count">
+                  {deptEmployees.length} {deptEmployees.length === 1 ? 'member' : 'members'}
+                </span>
+                {onSelectDepartment && (isSuperAdmin || isHR) && deptName !== 'Unassigned' && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectDepartment(deptName)}
+                    className="people-studio__dept-edit"
+                    title={`Edit ${deptName}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </button>
+                )}
               </div>
-
-              {/* Department Table */}
-              <div className="overflow-x-auto custom-scrollbar">
-                <table className="w-full text-left text-xs border-collapse">
+              <div className="people-studio__table-wrap custom-scrollbar">
+                <table>
                   <thead>
-                    <tr className="border-b border-[#e2e8f0] bg-white text-[#64748b] font-bold text-[10px] uppercase tracking-wider">
-                      <th className="py-2.5 px-3 font-bold text-[#0f172a]">Employee</th>
-                      <th className="py-2.5 px-3 font-bold text-[#0f172a]">Role</th>
-                      <th className="py-2.5 px-3 font-bold text-[#0f172a]">Office Location</th>
-                      <th className="py-2.5 px-3 font-bold text-[#0f172a]">Reports To</th>
-                      <th className="py-2.5 px-3 font-bold text-[#0f172a]">Status</th>
-                      <th className="py-2.5 px-3 text-right font-bold text-[#0f172a]">Action</th>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Role</th>
+                      <th>Office location</th>
+                      <th>Reports to</th>
+                      <th>Status</th>
+                      <th className="people-studio__row-actions">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#e2e8f0]/60 text-slate-800">
+                  <tbody>
                     {deptEmployees.map((emp) => renderEmployeeRow(emp, true))}
                   </tbody>
                 </table>
@@ -598,22 +736,21 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
             </div>
           ))
         ) : (
-          /* FLAT UNIFIED TABLE */
-          <div className="rounded-xl border border-[#e2e8f0] bg-white overflow-hidden shadow-card">
-            <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-left text-xs border-collapse">
+          <div className="people-studio__sheet">
+            <div className="people-studio__table-wrap custom-scrollbar">
+              <table>
                 <thead>
-                  <tr className="border-b border-[#e2e8f0] bg-[#f8fafc] text-[#64748b] font-bold text-[10px] uppercase tracking-wider">
-                    <th className="py-2.5 px-3 font-bold text-[#0f172a]">Employee</th>
-                    <th className="py-2.5 px-3 font-bold text-[#0f172a]">Role</th>
-                    <th className="py-2.5 px-3 font-bold text-[#0f172a]">Department</th>
-                    <th className="py-2.5 px-3 font-bold text-[#0f172a]">Office Location</th>
-                    <th className="py-2.5 px-3 font-bold text-[#0f172a]">Reports To</th>
-                    <th className="py-2.5 px-3 font-bold text-[#0f172a]">Status</th>
-                    <th className="py-2.5 px-3 text-right font-bold text-[#0f172a]">Action</th>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Role</th>
+                    <th>Department</th>
+                    <th>Office location</th>
+                    <th>Reports to</th>
+                    <th>Status</th>
+                    <th className="people-studio__row-actions">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#e2e8f0]/60 text-slate-800">
+                <tbody>
                   {filteredEmployees.map((emp) => renderEmployeeRow(emp, false))}
                 </tbody>
               </table>

@@ -18,12 +18,12 @@ import {
   Check,
   Tag,
   Search,
-  User,
   Video,
   Link2,
+  Users,
 } from 'lucide-react';
 import { AppState, isTestEntity, normalizeTaskStatus } from '../../services/store';
-import { TimesheetEntry, Project, Task } from '../../types';
+import { TimesheetEntry, Project } from '../../types';
 import { api } from '../../services/apiClient';
 
 interface TimesheetsModuleProps {
@@ -73,6 +73,7 @@ function to12HourStr(time24: string): string {
 
 import {
   isExecutiveOrAdmin,
+  isHRPersona,
   isManagerPersona,
   getTeamEmployees,
   canApproveTimesheet,
@@ -96,6 +97,49 @@ function formatHoursHM(hrs: number): string {
   return `${h}h ${m}m`;
 }
 
+function isPendingStatus(status?: TimesheetEntry['status']): boolean {
+  return status !== 'Approved' && status !== 'Rejected';
+}
+
+function getInitials(name: string): string {
+  return (name || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]!.toUpperCase())
+    .join('');
+}
+
+function getDayEventAppearance(status?: TimesheetEntry['status']) {
+  switch (status) {
+    case 'Approved':
+      return {
+        card: 'bg-[var(--studio-sage-surface)] text-[var(--text-primary)] border-[var(--border-color)]',
+        badge: 'work-chip work-chip-sage border-0',
+        meta: 'text-[var(--text-secondary)]',
+      };
+    case 'Rejected':
+      return {
+        card: 'bg-[var(--studio-error-surface)] text-[var(--text-primary)] border-[var(--border-color)]',
+        badge: 'work-chip work-chip-error border-0',
+        meta: 'text-[var(--studio-error)]',
+      };
+    case 'Review':
+    case 'Submitted':
+      return {
+        card: 'bg-[var(--studio-selected)] text-[var(--text-primary)] border-[var(--studio-focus)]',
+        badge: 'work-chip work-chip-navy border-0',
+        meta: 'text-[var(--text-secondary)]',
+      };
+    default:
+      return {
+        card: 'bg-[var(--bg-surface)] text-[var(--text-primary)] border-[var(--border-color)]',
+        badge: 'work-chip work-chip-muted border-0',
+        meta: 'text-[var(--text-muted)]',
+      };
+  }
+}
+
 export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   state,
   onUpdateState,
@@ -103,7 +147,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 }) => {
   const userRole = state.currentPersona?.role;
   const isSuperAdmin = userRole === 'super_admin' || userRole === 'admin';
-  const isHR = userRole === 'hr_manager';
+  const isHR = isHRPersona(state.currentPersona);
   const isManager = isManagerPersona(state.currentPersona, state.employees);
   const isAdmin = isSuperAdmin || isHR || isManager;
 
@@ -128,7 +172,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>(selectedProjectId);
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string>(
-    isAdmin ? 'All' : state.currentPersona?.id || state.employees[0]?.id || ''
+    state.currentPersona?.id || state.employees[0]?.id || ''
   );
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [selectedApprovalIds, setSelectedApprovalIds] = useState<string[]>([]);
@@ -137,6 +181,10 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
+  const apiErrorMessage = (err: unknown, fallback: string) =>
+    err instanceof Error && err.message ? err.message : fallback;
+  const canReviewEntry = (entry: TimesheetEntry) =>
+    canApproveTimesheet(state.currentPersona, entry, state.employees, state.projects);
   const [showLogModal, setShowLogModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
@@ -155,17 +203,18 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   const [formBillable, setFormBillable] = useState(true);
   const [formDescription, setFormDescription] = useState('');
   const [formEmployeeId, setFormEmployeeId] = useState(state.currentPersona?.id || state.employees[0]?.id || '');
+  const [formEmployeeIds, setFormEmployeeIds] = useState<string[]>([]);
 
   const timeGridScrollRef = useRef<HTMLDivElement>(null);
   const HOUR_HEIGHT = 68;
 
   useEffect(() => {
-    if (isAdmin) {
-      setSelectedEmployeeFilter('All');
-    } else {
-      setSelectedEmployeeFilter(state.currentPersona?.id || state.employees[0]?.id || '');
-    }
-  }, [state.currentPersona?.id, isAdmin, state.employees]);
+    setSelectedEmployeeFilter(state.currentPersona?.id || state.employees[0]?.id || '');
+  }, [state.currentPersona?.id, isAdmin, state.employees.length]);
+
+  useEffect(() => {
+    setSelectedApprovalIds([]);
+  }, [selectedEmployeeFilter]);
 
   useEffect(() => {
     if (timeGridScrollRef.current) {
@@ -233,8 +282,14 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
           const taskHrs = Number(((task.timeSpentSeconds || 0) / 3600).toFixed(2)) || task.actualHours || 0;
           existing.unshift({
             id: `ts_live_${task.id}`,
-            employeeId: task.assigneeId || state.currentPersona?.id || state.employees[0]?.id || '',
-            employeeName: task.assigneeName || state.currentPersona?.name || state.employees[0]?.name || 'Team Member',
+            employeeId: [...(task.assigneeIds || []), task.assigneeId].includes(state.currentPersona?.id)
+              ? state.currentPersona?.id || task.assigneeId
+              : task.assigneeId || state.currentPersona?.id || state.employees[0]?.id || '',
+            employeeName: [...(task.assigneeNames || []), task.assigneeName].some(
+              (name) => (name || '').toLowerCase() === (state.currentPersona?.name || '').toLowerCase()
+            )
+              ? state.currentPersona?.name || task.assigneeName
+              : task.assigneeName || state.currentPersona?.name || state.employees[0]?.name || 'Team Member',
             projectId: task.projectId || 'standalone',
             projectName: task.projectName || 'General Project',
             taskId: task.id,
@@ -253,7 +308,12 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     return existing;
   }, [state.timesheets, state.tasks, TODAY_DATE, state.currentPersona, state.employees]);
 
-  const filteredEntries = useMemo(() => {
+  const entryBelongsTo = (entry: TimesheetEntry, empId: string, empName?: string) =>
+    entry.employeeId === empId ||
+    (!!empName && (entry.employeeName || '').toLowerCase() === empName.toLowerCase());
+
+  // Everything the viewer may see after project/status/search filters, before narrowing to one employee.
+  const scopedEntries = useMemo(() => {
     return allTimesheets.filter((entry) => {
       if (isTestEntity(entry.taskTitle) || isTestEntity(entry.projectName) || isTestEntity(entry.description)) return false;
       
@@ -278,14 +338,6 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
         }
       }
 
-      if (selectedEmployeeFilter !== 'All') {
-        const matchesEmp =
-          entry.employeeId === selectedEmployeeFilter ||
-          (entry.employeeName || '').toLowerCase() ===
-            (state.employees.find((e) => e.id === selectedEmployeeFilter)?.name || '').toLowerCase();
-        if (!matchesEmp) return false;
-      }
-
       if (selectedProjectFilter !== 'All') {
         if (selectedProjectFilter === 'standalone') {
           if (entry.projectId && entry.projectId !== 'standalone' && entry.projectId !== 'general') return false;
@@ -293,7 +345,9 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
           if (entry.projectId !== selectedProjectFilter) return false;
         }
       }
-      if (statusFilter !== 'All' && entry.status !== statusFilter) return false;
+      if (statusFilter === 'Pending') {
+        if (!isPendingStatus(entry.status)) return false;
+      } else if (statusFilter !== 'All' && entry.status !== statusFilter) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         if (
@@ -317,13 +371,21 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     accessibleEmpIds,
     accessibleEmpNames,
     state.currentPersona,
-    selectedEmployeeFilter,
     selectedProjectFilter,
     statusFilter,
     searchQuery,
-    state.employees,
     state.projects,
   ]);
+
+  const selectedEmployee = useMemo(
+    () => (selectedEmployeeFilter === 'All' ? null : state.employees.find((e) => e.id === selectedEmployeeFilter) || null),
+    [selectedEmployeeFilter, state.employees]
+  );
+
+  const filteredEntries = useMemo(() => {
+    if (selectedEmployeeFilter === 'All') return scopedEntries;
+    return scopedEntries.filter((entry) => entryBelongsTo(entry, selectedEmployeeFilter, selectedEmployee?.name));
+  }, [scopedEntries, selectedEmployeeFilter, selectedEmployee]);
 
   const projectTasks = useMemo(() => {
     if (!formProjectId || formProjectId === 'standalone') {
@@ -412,7 +474,149 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     return days;
   }, [selectedDate, filteredEntries, TODAY_DATE, now, state.tasks]);
 
-  const handleOpenLogModal = (dateStr?: string, hourNum?: number) => {
+  const periodRange = useMemo<{ start: string; end: string } | null>(() => {
+    if (viewMode === 'day') return { start: selectedDate, end: selectedDate };
+    if (viewMode === 'week') return { start: weekDays[0].dateStr, end: weekDays[6].dateStr };
+    if (viewMode === 'month') {
+      const ym = selectedDate.slice(0, 7);
+      return { start: `${ym}-01`, end: `${ym}-31` };
+    }
+    return null;
+  }, [viewMode, selectedDate, weekDays]);
+
+  const periodLabel = viewMode === 'list' ? 'all time' : headerDateTitle;
+
+  const inPeriod = (entry: TimesheetEntry) =>
+    !periodRange || (entry.date >= periodRange.start && entry.date <= periodRange.end);
+
+  const [employeeSearch, setEmployeeSearch] = useState('');
+
+  const employeeSummaries = useMemo(() => {
+    const q = employeeSearch.trim().toLowerCase();
+    return accessibleEmployees
+      .filter((emp) => !isTestEntity(emp.name))
+      .filter(
+        (emp) =>
+          !q ||
+          [emp.name, emp.designation, emp.department, emp.email]
+            .filter(Boolean)
+            .some((v) => String(v).toLowerCase().includes(q))
+      )
+      .map((emp) => {
+        const entries = scopedEntries.filter((e) => inPeriod(e) && entryBelongsTo(e, emp.id, emp.name));
+        return {
+          emp,
+          hours: entries.reduce((sum, e) => sum + getEntryLiveHours(e), 0),
+          pending: entries.filter((e) => isPendingStatus(e.status)).length,
+          count: entries.length,
+        };
+      })
+      .sort((a, b) => b.pending - a.pending || b.hours - a.hours || a.emp.name.localeCompare(b.emp.name));
+  }, [accessibleEmployees, employeeSearch, scopedEntries, periodRange, now, state.tasks]);
+
+  const reviewablePeriodEntries = useMemo(
+    () =>
+      filteredEntries.filter(
+        (e) =>
+          inPeriod(e) &&
+          isPendingStatus(e.status) &&
+          !e.id.startsWith('ts_live_') &&
+          canReviewEntry(e)
+      ),
+    [filteredEntries, periodRange, state.currentPersona, state.employees, state.projects]
+  );
+
+  const approvalDisabledReason = useMemo(() => {
+    if (!selectedEmployee || reviewablePeriodEntries.length > 0) return '';
+    const pending = filteredEntries.filter(
+      (e) => inPeriod(e) && isPendingStatus(e.status) && !e.id.startsWith('ts_live_')
+    );
+    if (pending.length === 0) return 'No pending entries in this period.';
+    const onlyOwn = pending.every(
+      (e) =>
+        e.employeeId === state.currentPersona?.id ||
+        (e.employeeName || '').toLowerCase() === (state.currentPersona?.name || '').toLowerCase()
+    );
+    if (onlyOwn) return 'You cannot approve your own timesheets.';
+    return 'You can only approve timesheets for your team or projects you manage.';
+  }, [selectedEmployee, reviewablePeriodEntries.length, filteredEntries, periodRange, state.currentPersona]);
+
+  const handleApproveEmployeePeriod = async () => {
+    const entries = reviewablePeriodEntries;
+    if (entries.length === 0 || !selectedEmployee) return;
+    const ids = entries.map((e) => e.id);
+    setIsSaving(true);
+    try {
+      await api.projects.bulkUpdateTimesheets({ timesheetIds: ids, status: 'Approved', approvedBy: state.currentPersona.name });
+      onUpdateState((prev) => ({
+        ...prev,
+        timesheets: prev.timesheets.map((t) => (ids.includes(t.id) ? { ...t, status: 'Approved', approvedBy: prev.currentPersona.name } : t)),
+        auditLogs: [
+          {
+            id: `log_${Date.now()}`,
+            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+            user: prev.currentPersona.name,
+            action: 'APPROVED_EMPLOYEE_TIMESHEETS',
+            entity: 'TimesheetEntry',
+            entityId: selectedEmployee.id,
+            ipAddress: '106.51.72.18',
+            details: `Approved ${ids.length} timesheets for ${selectedEmployee.name} (${periodLabel})`,
+          },
+          ...prev.auditLogs,
+        ],
+      }));
+      showToast(`Approved ${ids.length} entries for ${selectedEmployee.name}`);
+    } catch (err) {
+      console.error('Failed to approve employee timesheets', err);
+      showToast(apiErrorMessage(err, 'Failed to approve timesheets.'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRejectEmployeePeriod = async () => {
+    const entries = reviewablePeriodEntries;
+    if (entries.length === 0 || !selectedEmployee) return;
+    if (!confirm(`Reject ${entries.length} pending entries for ${selectedEmployee.name}? Their hours will be removed from the linked tasks.`)) return;
+    const ids = entries.map((e) => e.id);
+    setIsSaving(true);
+    try {
+      await api.projects.bulkUpdateTimesheets({ timesheetIds: ids, status: 'Rejected', approvedBy: state.currentPersona.name });
+      onUpdateState((prev) => ({
+        ...prev,
+        tasks: prev.tasks.map((task) => {
+          const deductHours = entries.filter((e) => e.taskId === task.id).reduce((sum, e) => sum + (e.hours || 0), 0);
+          if (!deductHours) return task;
+          const newSeconds = Math.max(0, (task.timeSpentSeconds || 0) - Math.round(deductHours * 3600));
+          return { ...task, timeSpentSeconds: newSeconds, actualHours: Number((newSeconds / 3600).toFixed(2)) };
+        }),
+        timesheets: prev.timesheets.map((t) =>
+          ids.includes(t.id) ? { ...t, status: 'Rejected' as const, approvedBy: prev.currentPersona.name } : t
+        ),
+        auditLogs: [
+          {
+            id: `log_${Date.now()}`,
+            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+            user: prev.currentPersona.name,
+            action: 'REJECTED_EMPLOYEE_TIMESHEETS',
+            entity: 'TimesheetEntry',
+            entityId: selectedEmployee.id,
+            ipAddress: '106.51.72.18',
+            details: `Rejected ${ids.length} timesheets for ${selectedEmployee.name} (${periodLabel})`,
+          },
+          ...prev.auditLogs,
+        ],
+      }));
+      showToast(`Rejected ${ids.length} entries for ${selectedEmployee.name}`);
+    } catch (err) {
+      console.error('Failed to reject employee timesheets', err);
+      showToast(apiErrorMessage(err, 'Failed to reject timesheets.'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleOpenLogModal = (dateStr?: string, hourNum?: number, tab: 'task' | 'schedule' = 'task') => {
     const targetDate = dateStr || selectedDate || TODAY_DATE;
     setFormDate(targetDate);
     const startH = hourNum !== undefined ? hourNum : 9;
@@ -422,16 +626,21 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     setFormEndTime(endStr);
     setFormDurationHours('1.0');
     setFormTitle('');
-    setFormType('task');
-    setLogModalTab('task');
+    setFormType(tab === 'schedule' ? 'meeting' : 'task');
+    setLogModalTab(tab);
     setFormMeetingLink('');
     setShowMeetingLinkInput(false);
     setFormProjectId(state.projects[0]?.id || 'standalone');
     setFormTaskId('');
-    setLogCategory('Development');
+    setLogCategory(tab === 'schedule' ? 'Meeting' : 'Development');
     setFormBillable(true);
     setFormDescription('');
-    setFormEmployeeId(isAdmin && selectedEmployeeFilter !== 'All' ? selectedEmployeeFilter : state.currentPersona?.id || state.employees[0]?.id || '');
+    const defaultEmp =
+      isAdmin && selectedEmployeeFilter !== 'All'
+        ? selectedEmployeeFilter
+        : state.currentPersona?.id || state.employees[0]?.id || '';
+    setFormEmployeeId(defaultEmp);
+    setFormEmployeeIds(tab === 'schedule' && isAdmin ? (defaultEmp ? [defaultEmp] : []) : defaultEmp ? [defaultEmp] : []);
     setEditingEntryId(null);
     setShowLogModal(true);
   };
@@ -449,6 +658,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     setFormBillable(entry.billable ?? true);
     setFormDescription(entry.description || '');
     setFormEmployeeId(entry.employeeId || state.currentPersona?.id || state.employees[0]?.id || '');
+    setFormEmployeeIds(entry.employeeId ? [entry.employeeId] : []);
     const isSchedule = entry.entryType === 'schedule' || entry.category === 'Meeting';
     setFormType(isSchedule ? 'meeting' : 'task');
     setLogModalTab(isSchedule ? 'schedule' : 'task');
@@ -474,8 +684,16 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       return;
     }
     const proj = state.projects.find((p) => p.id === formProjectId);
+    const assignablePeople = accessibleEmployees.filter((emp) => !isTestEntity(emp.name));
+    const selectedIds = isSchedule && isAdmin && !editingEntryId
+      ? [...new Set(formEmployeeIds.filter(Boolean))]
+      : [formEmployeeId].filter(Boolean);
+    if (isSchedule && isAdmin && !editingEntryId && selectedIds.length === 0) {
+      showToast('Select at least one person for this meeting.');
+      return;
+    }
     const emp =
-      state.employees.find((e) => e.id === formEmployeeId) ||
+      state.employees.find((e) => e.id === (selectedIds[0] || formEmployeeId)) ||
       state.employees.find(
         (e) =>
           e.id === state.currentPersona.id ||
@@ -550,15 +768,6 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                   }
                 : t
             ),
-            tasks: prev.tasks.map((t) =>
-              t.id === matchedTaskId || t.id === formTaskId
-                ? {
-                    ...t,
-                    actualHours: Math.max(0, Number(((t.actualHours || 0) + hoursDiff).toFixed(2))),
-                    timeSpentSeconds: Math.max(0, Math.round(((t.actualHours || 0) + hoursDiff) * 3600)),
-                  }
-                : t
-            ),
             projects: prev.projects.map((p) => {
               if (p.id === formProjectId) {
                 const newHrs = Math.max(0, Number(((p.loggedWorkHours || 0) + hoursDiff).toFixed(2)));
@@ -593,52 +802,18 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
         setIsSaving(false);
       }
     } else {
-      let updatedTasks = [...state.tasks];
-      let finalTaskId = matchedTaskId || formTaskId;
+      const finalTaskId = isSchedule ? '' : matchedTaskId || formTaskId;
 
       setIsSaving(true);
       try {
-        if (!isSchedule && !finalTaskId) {
-          const resTask = await api.projects.createTask({
-            projectId: formProjectId === 'standalone' ? '' : formProjectId,
-            title: title,
-            description: formDescription.trim() || 'Logged from Timesheets',
-            assignedToEmployeeId: emp.id,
-            priority: 'medium',
-            dueDate: formDate,
-          });
-
-          finalTaskId = resTask.data?.id || `task_${Date.now()}`;
-          const createdTask: Task = {
-            id: finalTaskId,
-            taskKey: `TSK-${String(state.tasks.length + 1).padStart(3, '0')}`,
-            issueType: 'Task',
-            projectId: formProjectId === 'standalone' ? '' : formProjectId,
-            projectName: projectName,
-            title: title,
-            description: formDescription.trim() || 'Logged from Timesheets',
-            assigneeId: emp.id,
-            assigneeName: emp.name,
-            assigneeAvatar: emp.avatar || '',
-            reporterName: state.currentPersona.name,
-            priority: 'Medium',
-            status: 'In Progress',
-            startDate: formDate,
-            actualHours: hoursNum,
-            timeSpentSeconds: Math.round(hoursNum * 3600),
-            isTimerRunning: false,
-            tags: ['Timesheet', category || 'Development'],
-            subtasks: [],
-            commentsCount: 0,
-            attachedDocIds: [],
-          };
-          updatedTasks = [createdTask, ...updatedTasks];
-        }
-
+      const people = selectedIds.length
+        ? selectedIds.map((id) => assignablePeople.find((e) => e.id === id) || state.employees.find((e) => e.id === id)).filter(Boolean) as { id: string; name: string }[]
+        : [{ id: emp.id, name: emp.name }];
       const resTs = await api.projects.logTimesheet({
         projectId: formProjectId === 'standalone' ? '' : formProjectId,
-        taskId: isSchedule ? undefined : finalTaskId,
-        employeeId: emp.id,
+        taskId: finalTaskId || undefined,
+        employeeId: people.length === 1 ? people[0].id : undefined,
+        employeeIds: people.length > 1 ? people.map((p) => p.id) : undefined,
         workDate: formDate,
         hoursSpent: hoursNum,
         description: formDescription.trim() || title,
@@ -652,50 +827,40 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       });
 
       if (!resTs.success && resTs.error) {
-        alert(`Backend Error: ${resTs.error.message || 'Failed to log timesheet'}`);
+        showToast(resTs.error.message || 'Failed to log timesheet');
         return;
       }
 
-      const newEntryId = resTs.data?.id || `ts_${Date.now()}`;
-      const newEntry: TimesheetEntry = {
-        id: newEntryId,
-        employeeId: emp.id,
-        employeeName: emp.name,
-        projectId: formProjectId,
-        projectName,
-        taskId: finalTaskId || '',
-        taskTitle: title,
-        date: formDate,
-        startTime: to12HourStr(formStartTime),
-        endTime: to12HourStr(formEndTime),
-        hours: hoursNum,
-        billable: formBillable,
-        category,
-        description: formDescription.trim() || (isSchedule ? 'Scheduled activity' : 'Work deliverable completed as scheduled.'),
-        status: saveStatus,
-        entryType,
-        meetingLink: meetingLink || undefined,
-      };
+      const createdRows = Array.isArray(resTs.data) ? resTs.data : resTs.data ? [resTs.data] : [];
+      const newEntries: TimesheetEntry[] = (createdRows.length ? createdRows : people).map((row: any, index: number) => {
+        const person = people[index] || people.find((p) => p.id === String(row.employee_id || row.employeeId)) || people[0];
+        return {
+          id: String(row.id || `ts_${Date.now()}_${index}`),
+          employeeId: String(row.employee_id || row.employeeId || person.id),
+          employeeName: String(row.employee_name || row.employeeName || person.name),
+          projectId: formProjectId,
+          projectName,
+          taskId: finalTaskId || '',
+          taskTitle: title,
+          date: formDate,
+          startTime: to12HourStr(formStartTime),
+          endTime: to12HourStr(formEndTime),
+          hours: hoursNum,
+          billable: formBillable,
+          category,
+          description: formDescription.trim() || (isSchedule ? 'Scheduled activity' : 'Work deliverable completed as scheduled.'),
+          status: saveStatus,
+          entryType,
+          meetingLink: meetingLink || undefined,
+        };
+      });
 
       onUpdateState((prev) => ({
         ...prev,
-        timesheets: [newEntry, ...prev.timesheets],
-        tasks: isSchedule
-          ? prev.tasks
-          : updatedTasks.map((t) =>
-              t.id === finalTaskId
-                ? {
-                    ...t,
-                    actualHours: Number(((t.actualHours || 0) + (finalTaskId === (matchedTaskId || formTaskId) ? hoursNum : 0)).toFixed(2)),
-                    timeSpentSeconds: Math.round(((t.actualHours || 0) + (finalTaskId === (matchedTaskId || formTaskId) ? hoursNum : 0)) * 3600),
-                    status: t.status === 'To Do' ? 'In Progress' : t.status,
-                    progress: t.status === 'To Do' ? 50 : t.progress,
-                  }
-                : t
-            ),
+        timesheets: [...newEntries, ...prev.timesheets],
         projects: prev.projects.map((p) => {
           if (p.id === formProjectId) {
-            const newHrs = Number(((p.loggedWorkHours || 0) + hoursNum).toFixed(2));
+            const newHrs = Number(((p.loggedWorkHours || 0) + hoursNum * newEntries.length).toFixed(2));
             return {
               ...p,
               loggedWorkHours: newHrs,
@@ -711,27 +876,33 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
             user: prev.currentPersona.name,
             action: isSchedule ? 'SCHEDULED_ACTIVITY' : 'LOGGED_TIME',
             entity: 'TimesheetEntry',
-            entityId: newEntryId,
+            entityId: newEntries[0]?.id || 'batch',
             ipAddress: '106.51.72.18',
             details: isSchedule
-              ? `Scheduled "${title}" (${to12HourStr(formStartTime)}–${to12HourStr(formEndTime)} on ${formDate})`
+              ? `Scheduled "${title}" for ${newEntries.length} people (${to12HourStr(formStartTime)}–${to12HourStr(formEndTime)} on ${formDate})`
               : `Logged ${hoursNum}h on "${title}" (${projectName})`,
           },
           ...prev.auditLogs,
         ],
       }));
 
-        showToast(isSchedule ? `Scheduled "${title}"` : `Logged ${hoursNum}h on "${title}"`);
+        showToast(
+          isSchedule
+            ? newEntries.length > 1
+              ? `Assigned "${title}" to ${newEntries.length} people`
+              : `Scheduled "${title}"`
+            : `Logged ${hoursNum}h on "${title}"`
+        );
       } catch (err) {
         console.error('Failed to save timesheet', err);
-        alert('Failed to save timesheet.');
+        showToast(apiErrorMessage(err, 'Failed to save timesheet.'));
       } finally {
         setIsSaving(false);
       }
     }
     setSelectedDate(formDate);
-    if (selectedEmployeeFilter !== 'All' && selectedEmployeeFilter !== emp.id) {
-      setSelectedEmployeeFilter('All');
+    if (selectedEmployeeFilter !== emp.id) {
+      setSelectedEmployeeFilter(emp.id);
     }
     if (selectedProjectFilter !== 'All' && formProjectId && selectedProjectFilter !== formProjectId) {
       setSelectedProjectFilter('All');
@@ -754,13 +925,6 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       onUpdateState((prev) => ({
         ...prev,
         timesheets: prev.timesheets.filter((t) => t.id !== entryId),
-        tasks: prev.tasks.map((t) => {
-          if (t.id === entry.taskId) {
-            const newHrs = Math.max(0, Number(((t.actualHours || 0) - entry.hours).toFixed(2)));
-            return { ...t, actualHours: newHrs, timeSpentSeconds: Math.round(newHrs * 3600) };
-          }
-          return t;
-        }),
         projects: prev.projects.map((p) => {
           if (p.id === entry.projectId) {
             const newHrs = Math.max(0, Number(((p.loggedWorkHours || 0) - entry.hours).toFixed(2)));
@@ -798,37 +962,50 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   };
 
   const handleBatchApprove = async () => {
-    if (selectedApprovalIds.length === 0) return;
+    const ids = selectedApprovalIds.filter((id) => {
+      const entry = state.timesheets.find((t) => t.id === id);
+      return entry && isPendingStatus(entry.status) && canReviewEntry(entry);
+    });
+    if (ids.length === 0) {
+      showToast('None of the selected entries can be approved by you.');
+      return;
+    }
     setIsSaving(true);
     try {
       await api.projects.bulkUpdateTimesheets({
-        timesheetIds: selectedApprovalIds,
+        timesheetIds: ids,
         status: 'Approved',
         approvedBy: state.currentPersona.name
       });
       onUpdateState((prev) => ({
         ...prev,
-        timesheets: prev.timesheets.map((t) => selectedApprovalIds.includes(t.id) ? { ...t, status: 'Approved', approvedBy: prev.currentPersona.name } : t),
-        auditLogs: [{ id: `log_${Date.now()}`, timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19), user: prev.currentPersona.name, action: 'APPROVED_TIMESHEETS_BATCH', entity: 'TimesheetEntry', entityId: 'batch', ipAddress: '106.51.72.18', details: `Approved ${selectedApprovalIds.length} timesheet records` }, ...prev.auditLogs],
+        timesheets: prev.timesheets.map((t) => ids.includes(t.id) ? { ...t, status: 'Approved', approvedBy: prev.currentPersona.name } : t),
+        auditLogs: [{ id: `log_${Date.now()}`, timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19), user: prev.currentPersona.name, action: 'APPROVED_TIMESHEETS_BATCH', entity: 'TimesheetEntry', entityId: 'batch', ipAddress: '106.51.72.18', details: `Approved ${ids.length} timesheet records` }, ...prev.auditLogs],
       }));
-      showToast(`Approved ${selectedApprovalIds.length} timesheets`);
+      showToast(`Approved ${ids.length} timesheets`);
       setSelectedApprovalIds([]);
     } catch (e) {
       console.error('Failed to batch approve timesheets', e);
-      alert('Failed to batch approve timesheets.');
+      showToast(apiErrorMessage(e, 'Failed to batch approve timesheets.'));
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleBatchReject = async () => {
-    if (selectedApprovalIds.length === 0) return;
-    const rejectingEntries = state.timesheets.filter((t) => selectedApprovalIds.includes(t.id));
+    const rejectingEntries = state.timesheets.filter(
+      (t) => selectedApprovalIds.includes(t.id) && isPendingStatus(t.status) && canReviewEntry(t)
+    );
+    if (rejectingEntries.length === 0) {
+      showToast('None of the selected entries can be rejected by you.');
+      return;
+    }
+    const selectedIds = rejectingEntries.map((t) => t.id);
 
     setIsSaving(true);
     try {
       await api.projects.bulkUpdateTimesheets({
-        timesheetIds: selectedApprovalIds,
+        timesheetIds: selectedIds,
         status: 'Rejected',
         approvedBy: state.currentPersona.name
       });
@@ -849,7 +1026,11 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
         return {
           ...prev,
           tasks: updatedTasks,
-          timesheets: prev.timesheets.filter((t) => !selectedApprovalIds.includes(t.id)),
+          timesheets: prev.timesheets.map((t) =>
+            selectedIds.includes(t.id)
+              ? { ...t, status: 'Rejected' as const, approvedBy: prev.currentPersona.name }
+              : t
+          ),
           auditLogs: [
             {
               id: `log_${Date.now()}`,
@@ -859,17 +1040,17 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               entity: 'TimesheetEntry',
               entityId: 'batch',
               ipAddress: '106.51.72.18',
-              details: `Rejected and removed ${selectedApprovalIds.length} timesheet records, deducting hours from tasks`,
+              details: `Rejected ${selectedIds.length} timesheet records, deducting hours from tasks`,
             },
             ...prev.auditLogs,
           ],
         };
       });
-      showToast(`Rejected & removed ${selectedApprovalIds.length} timesheets`);
+      showToast(`Rejected ${selectedIds.length} timesheets`);
       setSelectedApprovalIds([]);
     } catch (e) {
       console.error('Failed to batch reject timesheets', e);
-      alert('Failed to batch reject timesheets.');
+      showToast(apiErrorMessage(e, 'Failed to batch reject timesheets.'));
     } finally {
       setIsSaving(false);
     }
@@ -900,7 +1081,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       showToast(`Approved "${entry.taskTitle}"`);
     } catch (err) {
       console.error('Failed to approve timesheet', err);
-      alert('Failed to approve timesheet.');
+      showToast(apiErrorMessage(err, 'Failed to approve timesheet.'));
     } finally {
       setIsSaving(false);
     }
@@ -927,7 +1108,9 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
         return {
           ...prev,
           tasks: updatedTasks,
-          timesheets: prev.timesheets.filter((t) => t.id !== entry.id),
+          timesheets: prev.timesheets.map((t) =>
+            t.id === entry.id ? { ...t, status: 'Rejected' as const, approvedBy: prev.currentPersona.name } : t
+          ),
           auditLogs: [
             {
               id: `log_${Date.now()}`,
@@ -937,24 +1120,29 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               entity: 'TimesheetEntry',
               entityId: entry.id,
               ipAddress: '106.51.72.18',
-              details: `Rejected & removed timesheet entry for "${entry.taskTitle}" and deducted hours from task`,
+              details: `Rejected timesheet entry for "${entry.taskTitle}" and deducted hours from task`,
             },
             ...prev.auditLogs,
           ],
         };
       });
-      showToast(`Rejected & removed "${entry.taskTitle}"`);
+      showToast(`Rejected "${entry.taskTitle}"`);
     } catch (err) {
       console.error('Failed to reject timesheet', err);
-      alert('Failed to reject timesheet.');
+      showToast(apiErrorMessage(err, 'Failed to reject timesheet.'));
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleApproveDay = async (date: string) => {
-    const dayEntries = filteredEntries.filter((e) => e.date === date);
-    if (dayEntries.length === 0) return;
+    const dayEntries = filteredEntries.filter(
+      (e) => e.date === date && isPendingStatus(e.status) && canReviewEntry(e)
+    );
+    if (dayEntries.length === 0) {
+      showToast('No pending entries on this day that you can approve.');
+      return;
+    }
     const ids = dayEntries.map((e) => e.id);
 
     setIsSaving(true);
@@ -984,15 +1172,20 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       showToast(`Approved all ${dayEntries.length} timesheets for ${date}`);
     } catch (err) {
       console.error('Failed to approve day timesheets', err);
-      alert('Failed to approve day timesheets.');
+      showToast(apiErrorMessage(err, 'Failed to approve day timesheets.'));
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleRejectDay = async (date: string) => {
-    const dayEntries = filteredEntries.filter((e) => e.date === date);
-    if (dayEntries.length === 0) return;
+    const dayEntries = filteredEntries.filter(
+      (e) => e.date === date && isPendingStatus(e.status) && canReviewEntry(e)
+    );
+    if (dayEntries.length === 0) {
+      showToast('No pending entries on this day that you can reject.');
+      return;
+    }
     const ids = dayEntries.map((e) => e.id);
 
     setIsSaving(true);
@@ -1019,7 +1212,9 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
         return {
           ...prev,
           tasks: updatedTasks,
-          timesheets: prev.timesheets.filter((t) => !ids.includes(t.id)),
+          timesheets: prev.timesheets.map((t) =>
+            ids.includes(t.id) ? { ...t, status: 'Rejected' as const, approvedBy: prev.currentPersona.name } : t
+          ),
           auditLogs: [
             {
               id: `log_${Date.now()}`,
@@ -1029,16 +1224,16 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               entity: 'TimesheetEntry',
               entityId: date,
               ipAddress: '106.51.72.18',
-              details: `Rejected & removed all ${dayEntries.length} timesheets for ${date}`,
+              details: `Rejected all ${dayEntries.length} timesheets for ${date}`,
             },
             ...prev.auditLogs,
           ],
         };
       });
-      showToast(`Rejected & removed all ${dayEntries.length} timesheets for ${date}`);
+      showToast(`Rejected all ${dayEntries.length} timesheets for ${date}`);
     } catch (err) {
       console.error('Failed to reject day timesheets', err);
-      alert('Failed to reject day timesheets.');
+      showToast(apiErrorMessage(err, 'Failed to reject day timesheets.'));
     } finally {
       setIsSaving(false);
     }
@@ -1067,6 +1262,10 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   }, []);
 
   const todayDayEntries = useMemo(() => filteredEntries.filter((e) => e.date === selectedDate), [filteredEntries, selectedDate]);
+  const todayDayReviewable = useMemo(
+    () => todayDayEntries.filter((e) => isPendingStatus(e.status) && canReviewEntry(e)),
+    [todayDayEntries, state.currentPersona, state.employees, state.projects]
+  );
   const todayDayTotalHours = useMemo(() => todayDayEntries.reduce((sum, e) => sum + getEntryLiveHours(e), 0), [todayDayEntries, now, state.tasks]);
   const currentTimeMinutes = useMemo(() => {
     const now = new Date();
@@ -1085,285 +1284,264 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   }, []);
 
   return (
-    <div className="space-y-4">
+    <div className="work-page">
       {toastMessage && (
-        <div className="fixed top-6 right-6 z-70 bg-white border border-slate-200 text-slate-900 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
+        <div className="fixed top-6 right-6 z-70 bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-primary)] px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
           <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
           <span className="text-sm font-semibold">{toastMessage}</span>
-          <button onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+          <button onClick={() => setToastMessage(null)} className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] p-1 cursor-pointer">
             <X className="h-4 w-4" />
           </button>
         </div>
       )}
 
-      {/* PAGE TITLE */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Time Sheets</h1>
-        </div>
-      </div>
-
-      {/* TOP HEADER: Clean Light Toolbar */}
-      <div className="bg-white p-3 md:px-4 md:py-2.5 rounded-2xl border border-slate-200 shadow-2xs space-y-2.5 md:space-y-0">
-        {/* Desktop View (md:) */}
-        <div className="hidden md:flex md:items-center md:justify-between gap-2.5 flex-wrap xl:flex-nowrap">
-          {/* Date Navigation */}
-          <div className="flex items-center gap-2 shrink-0">
+      <div className="work-chrome">
+        <div className="work-chrome-row work-head">
+          <h1 className="work-title min-w-0">Log hours</h1>
+          <div className="work-actions ml-auto">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => handleOpenLogModal(selectedDate, undefined, 'schedule')}
+                className="work-btn-secondary"
+              >
+                <Users className="h-3.5 w-3.5 stroke-[2.5]" />
+                <span className="hidden sm:inline">Schedule people</span>
+                <span className="sm:hidden">Schedule</span>
+              </button>
+            )}
             <button
               type="button"
-              onClick={handleToday}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer transition-all active:scale-95 shadow-2xs"
+              onClick={() => handleOpenLogModal(selectedDate)}
+              className="work-btn-primary"
             >
+              <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
+              <span>Log Time</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="work-chrome-row">
+          <div className="work-date-step shrink-0">
+            <button type="button" onClick={handleToday}>
               Today
             </button>
-
-            <div className="flex items-center gap-0.5">
-              <button
-                type="button"
-                onClick={handlePrevDate}
-                className="h-7 w-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 cursor-pointer transition-all"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleNextDate}
-                className="h-7 w-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 cursor-pointer transition-all"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-
-            <h2 className="text-sm lg:text-base font-bold text-slate-800 tracking-tight ml-1 whitespace-nowrap">
-              {headerDateTitle}
-            </h2>
-          </div>
-
-          {/* Desktop Right Group (Search, Filters, Switcher, Log CTA) */}
-          <div className="flex items-center gap-1.5 lg:gap-2 shrink-0 justify-end">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search logs..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-7 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 outline-none focus:bg-white focus:border-blue-500 w-28 lg:w-32 xl:w-36 transition-all"
-              />
-            </div>
-
-            <select
-              value={selectedProjectFilter}
-              onChange={(e) => setSelectedProjectFilter(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 outline-none hover:bg-slate-100 focus:bg-white focus:border-blue-500 cursor-pointer max-w-[110px] lg:max-w-[130px] truncate"
-            >
-              <option value="All">All Projects</option>
-              <option value="standalone">General / Standalone</option>
-              {activeProjects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-
-            {isAdmin && (
-              <select
-                value={selectedEmployeeFilter}
-                onChange={(e) => setSelectedEmployeeFilter(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700 outline-none hover:bg-slate-100 focus:bg-white focus:border-blue-500 cursor-pointer max-w-[115px] lg:max-w-[135px] truncate"
-              >
-                <option value="All">{isSuperAdmin || isHR ? 'All Employees' : `My Team (${accessibleEmployees.length})`}</option>
-                {accessibleEmployees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name} ({emp.designation})
-                  </option>
-                ))}
-              </select>
-            )}
-
-            <div className="flex items-center rounded-xl border border-slate-200 bg-slate-100 p-0.5 shrink-0">
-              {(['day', 'week', 'month', 'list'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setViewMode(m)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold capitalize transition-all cursor-pointer ${
-                    viewMode === m
-                      ? 'bg-white text-blue-600 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => handleOpenLogModal(selectedDate)}
-              className="flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 px-3.5 py-1.5 text-xs font-bold text-white transition-all active:scale-95 cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
-            >
-              <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
-              <span>Log Time</span>
+            <button type="button" onClick={handlePrevDate} aria-label="Previous period">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={handleNextDate} aria-label="Next period">
+              <ChevronRight className="h-4 w-4" />
             </button>
           </div>
-        </div>
+          <h2 className="m-0 min-w-0 flex-1 text-[13px] font-bold tracking-tight text-[var(--text-primary)] sm:flex-none">
+            {headerDateTitle}
+          </h2>
 
-        {/* Mobile View (< md:) */}
-        <div className="md:hidden space-y-2.5">
-          {/* Mobile Row 1: Date Stepper + Truncated Date Title + Log Time Button */}
-          <div className="flex items-center justify-between gap-2 w-full">
-            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              <div className="flex items-center gap-0.5 shrink-0 bg-slate-100 p-0.5 rounded-lg">
-                <button
-                  type="button"
-                  onClick={handleToday}
-                  className="px-2 py-1 rounded-md text-[11px] font-bold text-slate-700 hover:bg-white transition-all cursor-pointer"
-                >
-                  Today
-                </button>
-                <button
-                  type="button"
-                  onClick={handlePrevDate}
-                  className="h-6 w-6 rounded-md flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-white transition-all cursor-pointer"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleNextDate}
-                  className="h-6 w-6 rounded-md flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-white transition-all cursor-pointer"
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              <h2 className="text-xs font-bold text-slate-800 tracking-tight truncate min-w-0 flex-1">
-                {headerDateTitle}
-              </h2>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => handleOpenLogModal(selectedDate)}
-              className="flex items-center gap-1 rounded-xl bg-blue-600 hover:bg-blue-700 px-3 py-1.5 text-xs font-bold text-white transition-all active:scale-95 cursor-pointer shadow-xs shrink-0"
-            >
-              <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
-              <span>Log Time</span>
-            </button>
+          <div className="relative min-w-0 w-full sm:w-auto sm:ml-auto">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
+            <input
+              type="text"
+              placeholder="Search logs"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="work-field w-full pl-10 sm:w-40"
+              aria-label="Search logs"
+            />
           </div>
-
-          {/* Mobile Row 2: 4-Column View Switcher */}
-          <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1">
+          <select
+            value={selectedProjectFilter}
+            onChange={(e) => setSelectedProjectFilter(e.target.value)}
+            className="work-field min-w-0 w-full sm:w-auto"
+            aria-label="Filter by project"
+          >
+            <option value="All">All projects</option>
+            <option value="standalone">General / Standalone</option>
+            {activeProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <div className="work-seg w-full sm:w-auto" role="group" aria-label="Timesheet view">
             {(['day', 'week', 'month', 'list'] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setViewMode(m)}
-                className={`py-1.5 rounded-lg text-xs font-bold capitalize transition-all cursor-pointer text-center ${
-                  viewMode === m
-                    ? 'bg-white text-blue-600 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
+                className={`flex-1 sm:flex-none ${viewMode === m ? 'is-on' : ''}`}
+                aria-pressed={viewMode === m}
               >
                 {m}
               </button>
             ))}
           </div>
+        </div>
 
-          {/* Mobile Row 3: Search & Filters Grid */}
-          <div className="space-y-2">
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search logs by task, project..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-blue-500 transition-all"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <select
-                value={selectedProjectFilter}
-                onChange={(e) => setSelectedProjectFilter(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 outline-none focus:bg-white focus:border-blue-500 cursor-pointer"
-              >
-                <option value="All">All Projects</option>
-                <option value="standalone">General / Standalone</option>
-                {activeProjects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-
-              {isAdmin && (
+        {isAdmin && (
+          <div className="work-chrome-row items-stretch">
+            <div className="flex min-w-0 w-full flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="m-0 text-[13px] font-semibold tracking-tight text-[var(--text-primary)]">
+                  {isSuperAdmin || isHR ? 'Employee timesheets' : 'Team timesheets'}
+                  {selectedEmployee ? (
+                    <span className="font-medium text-[var(--studio-navy)]">
+                      {' '}
+                      · {selectedEmployee.name}
+                    </span>
+                  ) : null}
+                </h3>
+                <div className="relative ml-auto min-w-0">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
+                  <input
+                    type="text"
+                    placeholder="Search people"
+                    value={employeeSearch}
+                    onChange={(e) => setEmployeeSearch(e.target.value)}
+                    className="work-field w-full pl-10 sm:w-44"
+                    aria-label="Search people"
+                  />
+                </div>
                 <select
-                  value={selectedEmployeeFilter}
-                  onChange={(e) => setSelectedEmployeeFilter(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 outline-none focus:bg-white focus:border-blue-500 cursor-pointer"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="work-field"
+                  aria-label="Filter by status"
                 >
-                  <option value="All">{isSuperAdmin || isHR ? 'All Employees' : `My Team (${accessibleEmployees.length})`}</option>
-                  {accessibleEmployees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.name} ({emp.designation})
-                    </option>
-                  ))}
+                  <option value="All">All statuses</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Rejected">Rejected</option>
                 </select>
-              )}
+              </div>
+
+              <div className="flex min-w-0 items-center gap-2">
+                <div
+                  className="flex min-w-0 flex-1 gap-1 overflow-x-auto custom-scrollbar"
+                  role="group"
+                  aria-label="Select employee"
+                >
+                  {employeeSummaries.map(({ emp, hours, pending }) => {
+                    const active = selectedEmployeeFilter === emp.id;
+                    return (
+                      <button
+                        key={emp.id}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setSelectedEmployeeFilter(emp.id)}
+                        title={`${emp.name}${emp.designation ? ` · ${emp.designation}` : ''}`}
+                        className={`work-person shrink-0 ${active ? 'is-on' : ''}`}
+                      >
+                        <span className="work-person-mark relative">
+                          {emp.avatar ? (
+                            <img src={emp.avatar} alt="" />
+                          ) : (
+                            getInitials(emp.name)
+                          )}
+                          {active && (
+                            <span className="absolute -right-0.5 -bottom-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--studio-navy)] text-[var(--bg-surface)]">
+                              <Check className="h-2.5 w-2.5 stroke-[3]" />
+                            </span>
+                          )}
+                        </span>
+                        <span className="work-person-name">{emp.name}</span>
+                        {hours > 0 && (
+                          <span className="work-person-meta">{formatHoursHM(hours)}</span>
+                        )}
+                        {pending > 0 && (
+                          <span className="rounded-md bg-[var(--studio-focus)] px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-[var(--studio-navy)]">
+                            {pending}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                  {employeeSummaries.length === 0 && (
+                    <p className="m-0 py-1.5 text-xs text-[var(--text-muted)]">
+                      No people match “{employeeSearch}”.
+                    </p>
+                  )}
+                </div>
+
+                {reviewablePeriodEntries.length > 0 ? (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      title="Approve pending entries you can review"
+                      onClick={handleApproveEmployeePeriod}
+                      className="h-9 rounded-[var(--control-radius)] bg-[var(--studio-sage)] px-2.5 text-xs font-semibold text-white hover:brightness-95 disabled:opacity-50 cursor-pointer"
+                    >
+                      Approve {reviewablePeriodEntries.length}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      title="Reject pending entries you can review"
+                      onClick={handleRejectEmployeePeriod}
+                      className="h-9 rounded-[var(--control-radius)] px-2.5 text-xs font-semibold text-[var(--studio-error)] hover:bg-[var(--studio-error-surface)] disabled:opacity-50 cursor-pointer"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                ) : (
+                  selectedEmployee &&
+                  approvalDisabledReason &&
+                  approvalDisabledReason !== 'No pending entries in this period.' && (
+                    <p className="m-0 max-w-[220px] shrink-0 text-right text-[11px] leading-snug text-[var(--text-muted)]">
+                      {approvalDisabledReason}
+                    </p>
+                  )
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* VIEW 1: DAY VIEW (Light Theme) */}
       {viewMode === 'day' && (
-        <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden flex flex-col shadow-sm">
-          <div className="flex flex-wrap items-center justify-between border-b border-slate-200 bg-white py-2.5 px-3 sm:px-4 sticky top-0 z-20 gap-2">
+        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-hidden flex flex-col shadow-sm">
+          <div className="flex flex-wrap items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-surface)] py-2.5 px-3 sm:px-4 sticky top-0 z-20 gap-2">
             <div className="flex items-center gap-2.5 sm:gap-3">
-              <div className="hidden sm:block w-16 sm:w-20 text-[10px] font-medium text-slate-400 uppercase tracking-wider">
+              <div className="hidden sm:block w-16 sm:w-20 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
                 GMT+05:30
               </div>
               <div className="flex flex-col items-center">
-                <span className="text-[10px] sm:text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <span className="text-[10px] sm:text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                   {new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short' })}
                 </span>
                 <div
                   className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center text-sm sm:text-lg mt-0.5 transition-all ${
                     selectedDate === TODAY_DATE
-                      ? 'bg-blue-600 text-white shadow-sm font-semibold'
-                      : 'text-slate-700 font-medium'
+                      ? 'bg-[var(--studio-navy)] text-white shadow-sm font-semibold'
+                      : 'text-[var(--text-secondary)] font-medium'
                   }`}
                 >
                   {new Date(selectedDate).getDate()}
                 </div>
               </div>
-              <div className="text-xs text-slate-500 pl-1 sm:pl-2">
-                <span className="text-slate-900 font-bold">{formatHoursHM(todayDayTotalHours)}</span> logged
-                <span className="text-slate-400 ml-1">• {todayDayEntries.length} tasks</span>
+              <div className="text-xs text-[var(--text-muted)] pl-1 sm:pl-2">
+                <span className="text-[var(--text-primary)] font-bold">{formatHoursHM(todayDayTotalHours)}</span> logged
+                <span className="text-[var(--text-muted)] ml-1">• {todayDayEntries.length} tasks</span>
               </div>
             </div>
 
-            {/* Admin Daily Approval Action Bar */}
-            {isAdmin && todayDayEntries.length > 0 && (
-              <div className="flex items-center gap-2">
+            {isAdmin && todayDayReviewable.length > 0 && (
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => handleApproveDay(selectedDate)}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all active:scale-95"
+                  className="px-2.5 py-1.5 rounded-[var(--control-radius)] bg-[var(--studio-sage)] hover:brightness-95 text-white font-semibold text-xs cursor-pointer transition-[filter,transform] duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--studio-focus)]"
                 >
-                  <Check className="h-3.5 w-3.5 stroke-[2.5]" />
-                  <span>Approve Day ({todayDayEntries.length})</span>
+                  Approve {todayDayReviewable.length}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleRejectDay(selectedDate)}
-                  className="px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                  className="px-2.5 py-1.5 rounded-[var(--control-radius)] text-[var(--studio-error)] font-semibold text-xs hover:bg-[var(--studio-error-surface)] cursor-pointer transition-colors duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--studio-focus)]"
                 >
-                  <X className="h-3.5 w-3.5 stroke-[2.5]" />
-                  <span>Reject Day</span>
+                  Reject
                 </button>
               </div>
             )}
@@ -1371,17 +1549,17 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
           <div
             ref={timeGridScrollRef}
-            className="overflow-y-auto max-h-[calc(100vh-280px)] custom-scrollbar relative bg-white"
+            className="overflow-y-auto max-h-[calc(100vh-280px)] custom-scrollbar relative bg-[var(--bg-surface)]"
           >
             <div className="relative min-h-[1632px]">
               {timeHours.map(({ hour, label }) => (
                 <div
                   key={hour}
                   style={{ height: `${HOUR_HEIGHT}px`, top: `${hour * HOUR_HEIGHT}px` }}
-                  className="absolute inset-x-0 flex items-start border-t border-slate-100 group cursor-pointer hover:bg-slate-50/80 transition-colors"
+                  className="absolute inset-x-0 flex items-start border-t border-[var(--border-color)] group cursor-pointer hover:bg-[var(--bg-surface-subtle)]/80 transition-colors"
                   onClick={() => handleOpenLogModal(selectedDate, hour)}
                 >
-                  <div className="w-16 sm:w-20 pr-3 -mt-2 text-right text-[11px] font-medium text-slate-400 select-none">
+                  <div className="w-16 sm:w-20 pr-3 -mt-2 text-right text-[11px] font-medium text-[var(--text-muted)] select-none">
                     {label}
                   </div>
                   <div className="flex-1 h-full flex items-center pl-4 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1455,12 +1633,12 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                      });
 
                      return cluster.map(entry => {
-                        const task = state.tasks.find((t) => t.id === entry.taskId);
                         const topPx = (entry.startMins / 60) * HOUR_HEIGHT;
                         const heightPx = Math.max(40, ( (entry.endMins - entry.startMins) / 60) * HOUR_HEIGHT - 2);
                         const colIndex = (entry as any).colIndex || 0;
                         const widthPct = 100 / cols.length;
                         const leftPct = widthPct * colIndex;
+                        const eventTone = getDayEventAppearance(entry.status);
 
                         return (
                           <div
@@ -1476,13 +1654,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                               e.stopPropagation();
                               handleEditEntry(entry);
                             }}
-                            className={`absolute pointer-events-auto rounded-xl px-3 py-2 border shadow-sm cursor-pointer transition-all flex flex-col justify-between overflow-hidden hover:scale-[1.01] hover:shadow-md hover:z-50 ${
-                              task?.colorClass
-                                ? `${task.colorClass} border-slate-300/80`
-                                : entry.status === 'Approved'
-                                  ? 'bg-emerald-600 text-white border-emerald-500'
-                                  : 'bg-blue-600 text-white border-blue-500'
-                            }`}
+                            className={`absolute pointer-events-auto rounded-xl px-3 py-2 border shadow-sm cursor-pointer transition-[box-shadow,transform] duration-150 flex flex-col justify-between overflow-hidden hover:shadow-md hover:z-50 ${eventTone.card}`}
                           >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -1490,15 +1662,11 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                             <h4 className="text-xs font-bold truncate leading-snug">
                               {entry.taskTitle}
                             </h4>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-md ${
-                              entry.status === 'Approved'
-                                ? 'bg-emerald-500/20 text-emerald-900 border border-emerald-400/40'
-                                : 'bg-blue-500/20 text-blue-900 border border-blue-400/40'
-                            }`}>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${eventTone.badge}`}>
                               {entry.status}
                             </span>
                           </div>
-                          <p className="text-[11px] opacity-80 font-medium mt-0.5 truncate">
+                          <p className={`text-[11px] font-medium mt-0.5 truncate ${eventTone.meta}`}>
                             {entry.startTime} – {getEntryLiveEndTime(entry)} • {formatHoursHM(getEntryLiveHours(entry))} • {entry.employeeName}
                           </p>
                         </div>
@@ -1508,7 +1676,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                               type="button"
                               onClick={(e) => handleApproveSingle(entry, e)}
                               title="Approve Task Log"
-                              className="h-6 w-6 rounded-md bg-white/80 hover:bg-emerald-500 hover:text-white text-emerald-700 flex items-center justify-center transition-colors shadow-2xs"
+                              className="h-6 w-6 rounded-md bg-[var(--bg-surface)] border border-[var(--border-color)] hover:bg-emerald-500 hover:border-emerald-500 hover:text-white text-emerald-600 flex items-center justify-center transition-colors shadow-2xs"
                             >
                               <Check className="h-3.5 w-3.5 stroke-[2.5]" />
                             </button>
@@ -1518,12 +1686,12 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                               type="button"
                               onClick={(e) => handleRejectSingle(entry, e)}
                               title="Reject & Remove Task Log"
-                              className="h-6 w-6 rounded-md bg-white/80 hover:bg-rose-500 hover:text-white text-rose-700 flex items-center justify-center transition-colors shadow-2xs"
+                              className="h-6 w-6 rounded-md bg-[var(--bg-surface)] border border-[var(--border-color)] hover:bg-rose-500 hover:border-rose-500 hover:text-white text-rose-600 flex items-center justify-center transition-colors shadow-2xs"
                             >
                               <X className="h-3.5 w-3.5 stroke-[2.5]" />
                             </button>
                           )}
-                          <span className="text-[10px] bg-black/10 px-1.5 py-0.5 rounded font-semibold whitespace-nowrap">
+                          <span className="text-[10px] bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-secondary)] px-1.5 py-0.5 rounded-md font-semibold whitespace-nowrap">
                             {entry.projectName || 'General'}
                           </span>
                         </div>
@@ -1541,10 +1709,10 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
       {/* VIEW 2: WEEK VIEW (Light Theme) */}
       {viewMode === 'week' && (
-        <div className="rounded-2xl border border-slate-200 bg-white overflow-x-auto custom-scrollbar touch-pan-x shadow-sm">
+        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-x-auto custom-scrollbar touch-pan-x shadow-sm">
           <div className="min-w-[640px] flex flex-col">
-            <div className="grid grid-cols-8 border-b border-slate-200 bg-white py-2.5 sticky top-0 z-20">
-              <div className="p-2 text-center text-[10px] font-medium text-slate-400 uppercase tracking-wider flex items-center justify-center">
+            <div className="grid grid-cols-8 border-b border-[var(--border-color)] bg-[var(--bg-surface)] py-2.5 sticky top-0 z-20">
+              <div className="p-2 text-center text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider flex items-center justify-center">
                 Time
               </div>
               {Array.from({ length: 7 }, (_, i) => {
@@ -1557,12 +1725,12 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
                 return (
                   <div key={i} className="p-2 text-center">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">
+                    <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">
                       {colDate.toLocaleDateString('en-US', { weekday: 'short' })}
                     </span>
                     <div
                       className={`h-7 w-7 rounded-full mx-auto flex items-center justify-center text-xs mt-1 ${
-                        isToday ? 'bg-blue-600 text-white font-bold' : 'text-slate-700 font-semibold'
+                        isToday ? 'bg-[var(--studio-navy)] text-white font-bold' : 'text-[var(--text-secondary)] font-semibold'
                       }`}
                     >
                       {colDate.getDate()}
@@ -1572,10 +1740,10 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               })}
             </div>
 
-            <div className="divide-y divide-slate-100 max-h-[calc(100vh-280px)] overflow-y-auto custom-scrollbar">
+            <div className="divide-y divide-[var(--border-color)] max-h-[calc(100vh-280px)] overflow-y-auto custom-scrollbar">
               {timeHours.map(({ hour, label }) => (
-                <div key={hour} className="grid grid-cols-8 min-h-[50px] divide-x divide-slate-100">
-                  <div className="p-2 text-right text-[10px] font-medium text-slate-400 select-none">{label}</div>
+                <div key={hour} className="grid grid-cols-8 min-h-[50px] divide-x divide-[var(--border-color)]">
+                  <div className="p-2 text-right text-[10px] font-medium text-[var(--text-muted)] select-none">{label}</div>
                   {Array.from({ length: 7 }, (_, i) => {
                     const d = new Date(selectedDate);
                     const day = d.getDay();
@@ -1591,7 +1759,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                       <div
                         key={i}
                         onClick={() => handleOpenLogModal(colDate, hour)}
-                        className="relative p-1 hover:bg-blue-50/30 transition-colors cursor-pointer group"
+                        className="relative p-1 hover:bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)]/30 transition-colors cursor-pointer group"
                       >
                         {entriesInSlot.map((entry) => (
                           <div
@@ -1600,11 +1768,14 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                               e.stopPropagation();
                               handleEditEntry(entry);
                             }}
-                            className="w-full rounded-lg bg-blue-50 border border-blue-200/80 p-1.5 text-xs text-blue-900 shadow-2xs mb-1 hover:bg-blue-100/80 transition-all cursor-pointer"
+                            className="w-full rounded-lg bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] border border-blue-200/80 p-1.5 text-xs text-blue-900 shadow-2xs mb-1 hover:bg-blue-100/80 transition-all cursor-pointer"
                           >
                             <p className="font-bold truncate text-[11px]">{entry.projectName}</p>
                             <p className="text-[10px] text-blue-700 truncate">{entry.taskTitle || entry.description}</p>
-                            <div className="flex items-center justify-between text-[9px] text-blue-600 mt-1 font-mono">
+                            {isAdmin && selectedEmployeeFilter === 'All' && (
+                              <p className="text-[9px] text-[var(--studio-navy)]/80 truncate">{entry.employeeName}</p>
+                            )}
+                            <div className="flex items-center justify-between text-[9px] text-[var(--studio-navy)] mt-1 font-mono">
                               <span>{entry.startTime || '09:00 AM'}</span>
                               <span className="font-bold">{formatHoursHM(getEntryLiveHours(entry))}</span>
                             </div>
@@ -1622,16 +1793,16 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
       {/* VIEW 3: MONTH VIEW (Light Theme) */}
       {viewMode === 'month' && (
-        <div className="rounded-2xl border border-slate-200 bg-white overflow-x-auto custom-scrollbar touch-pan-x shadow-sm">
+        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-x-auto custom-scrollbar touch-pan-x shadow-sm">
           <div className="min-w-[640px] flex flex-col">
-            <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 py-2.5">
+            <div className="grid grid-cols-7 border-b border-[var(--border-color)] bg-[var(--bg-surface-subtle)] py-2.5">
               {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
-                <div key={day} className="text-center text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <div key={day} className="text-center text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                   {day}
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 min-h-[500px]">
+            <div className="grid grid-cols-7 divide-x divide-y divide-[var(--border-color)] min-h-[500px]">
               {Array.from({ length: 35 }, (_, i) => {
                 const dayNum = (i % 31) + 1;
                 const dateStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
@@ -1643,18 +1814,18 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                   <div
                     key={i}
                     onClick={() => handleOpenLogModal(dateStr)}
-                    className="min-h-[100px] p-2 hover:bg-slate-50/80 cursor-pointer transition-colors flex flex-col justify-between group"
+                    className="min-h-[100px] p-2 hover:bg-[var(--bg-surface-subtle)]/80 cursor-pointer transition-colors flex flex-col justify-between group"
                   >
                     <div className="flex items-center justify-between">
                       <span
                         className={`text-xs font-semibold h-6 w-6 rounded-full flex items-center justify-center ${
-                          isToday ? 'bg-blue-600 text-white font-bold' : 'text-slate-700'
+                          isToday ? 'bg-[var(--studio-navy)] text-white font-bold' : 'text-[var(--text-secondary)]'
                         }`}
                       >
                         {dayNum}
                       </span>
                       {dayTotalHrs > 0 && (
-                        <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] font-bold text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] px-1.5 py-0.5 rounded">
                           {formatHoursHM(dayTotalHrs)}
                         </span>
                       )}
@@ -1670,15 +1841,16 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                               handleEditEntry(entry);
                             }}
                             className={`text-[10px] font-semibold p-1 rounded border truncate ${
-                              task?.colorClass || 'bg-blue-50 text-blue-700 border-blue-200'
+                              task?.colorClass || 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border-blue-200'
                             }`}
                           >
+                            {isAdmin && selectedEmployeeFilter === 'All' ? `${getInitials(entry.employeeName)} · ` : ''}
                             {entry.taskTitle}
                           </div>
                         );
                       })}
                       {dayEntries.length > 2 && (
-                        <span className="text-[9px] font-bold text-slate-400 block pl-1">
+                        <span className="text-[9px] font-bold text-[var(--text-muted)] block pl-1">
                           +{dayEntries.length - 2} more
                         </span>
                       )}
@@ -1694,10 +1866,10 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       {/* VIEW 4: LIST VIEW (Light Theme) */}
       {viewMode === 'list' && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-[var(--bg-surface)] p-3 rounded-xl border border-[var(--border-color)] shadow-sm">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">
-                Total: <strong className="text-slate-900">{filteredEntries.length} entries</strong> (
+              <span className="text-xs text-[var(--text-muted)]">
+                Total: <strong className="text-[var(--text-primary)]">{filteredEntries.length} entries</strong> (
                 {filteredEntries.reduce((sum, e) => sum + getEntryLiveHours(e), 0).toFixed(1)} hrs)
               </span>
             </div>
@@ -1725,7 +1897,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               <button
                 type="button"
                 onClick={handleExportCSV}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all"
+                className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all"
               >
                 <Download className="h-3.5 w-3.5" />
                 <span>Export CSV</span>
@@ -1733,9 +1905,9 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white overflow-x-auto shadow-sm">
+          <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-x-auto shadow-sm">
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold text-[11px] uppercase tracking-wider">
+              <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] border-b border-[var(--border-color)] font-semibold text-[11px] uppercase tracking-wider">
                 <tr>
                   {isAdmin && (
                     <th className="p-3.5 w-8">
@@ -1743,7 +1915,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                         type="checkbox"
                         checked={filteredEntries.length > 0 && selectedApprovalIds.length === filteredEntries.length}
                         onChange={(e) => setSelectedApprovalIds(e.target.checked ? filteredEntries.map((entry) => entry.id) : [])}
-                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        className="rounded border-[var(--border-strong)] text-[var(--studio-navy)] focus:ring-[var(--primary-blue)] cursor-pointer"
                       />
                     </th>
                   )}
@@ -1757,10 +1929,10 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                   <th className="p-3.5 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+              <tbody className="divide-y divide-[var(--border-color)] text-[var(--text-secondary)]">
                 {filteredEntries.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="p-8 text-center text-xs text-slate-500 font-medium">
+                    <td colSpan={9} className="p-8 text-center text-xs text-[var(--text-muted)] font-medium">
                       No timesheet entries found matching the active filters.
                     </td>
                   </tr>
@@ -1770,7 +1942,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                     return (
                       <tr
                         key={entry.id}
-                        className="hover:bg-slate-50 transition-colors cursor-pointer"
+                        className="hover:bg-[var(--bg-surface-subtle)] transition-colors cursor-pointer"
                         onClick={() => handleEditEntry(entry)}
                       >
                         {isAdmin && (
@@ -1779,18 +1951,18 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                               type="checkbox"
                               checked={selectedApprovalIds.includes(entry.id)}
                               onChange={(e) => setSelectedApprovalIds((prev) => e.target.checked ? [...prev, entry.id] : prev.filter((id) => id !== entry.id))}
-                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                              className="rounded border-[var(--border-strong)] text-[var(--studio-navy)] focus:ring-[var(--primary-blue)] cursor-pointer"
                             />
                           </td>
                         )}
-                        <td className="p-3.5 font-medium text-slate-900 whitespace-nowrap">{entry.date}</td>
-                        <td className="p-3.5 font-medium text-slate-900">{entry.employeeName}</td>
+                        <td className="p-3.5 font-medium text-[var(--text-primary)] whitespace-nowrap">{entry.date}</td>
+                        <td className="p-3.5 font-medium text-[var(--text-primary)]">{entry.employeeName}</td>
                         <td className="p-3.5">
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-blue-700">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] text-blue-700">
                             {entry.projectName || 'General'}
                           </span>
                         </td>
-                        <td className="p-3.5 font-semibold text-slate-900 max-w-[220px]">
+                        <td className="p-3.5 font-semibold text-[var(--text-primary)] max-w-[220px]">
                           <div className="flex items-center gap-2">
                             {task?.colorClass && (
                               <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${task.colorClass.split(' ')[0]}`} />
@@ -1798,27 +1970,29 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                             <span className="truncate">{entry.taskTitle}</span>
                           </div>
                         </td>
-                        <td className="p-3.5 text-slate-500 whitespace-nowrap">
+                        <td className="p-3.5 text-[var(--text-muted)] whitespace-nowrap">
                           {entry.startTime || '09:00 AM'} – {getEntryLiveEndTime(entry)}
                         </td>
-                        <td className="p-3.5 font-bold text-slate-900">{formatHoursHM(getEntryLiveHours(entry))}</td>
+                        <td className="p-3.5 font-bold text-[var(--text-primary)]">{formatHoursHM(getEntryLiveHours(entry))}</td>
                         <td className="p-3.5">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 w-max ${
+                          <span
+                            title={entry.approvedBy ? `${entry.status} by ${entry.approvedBy}` : entry.status}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1 w-max ${
                             entry.status === 'Approved'
                               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               : entry.status === 'Review' || entry.status === 'Submitted'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border-blue-200'
                               : entry.status === 'Rejected'
                               ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                              : 'bg-slate-100 text-slate-600 border border-slate-200'
+                              : 'bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] border border-[var(--border-color)]'
                           }`}>
                             {entry.status === 'Approved' ? <Check className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
-                            <span>{entry.status}</span>
+                            <span>{entry.status}{entry.approvedBy && (entry.status === 'Approved' || entry.status === 'Rejected') ? ` · ${entry.approvedBy}` : ''}</span>
                           </span>
                         </td>
                         <td className="p-3.5 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1">
-                            {isAdmin && entry.status !== 'Approved' && (
+                            {isAdmin && isPendingStatus(entry.status) && canReviewEntry(entry) && (
                               <button
                                 type="button"
                                 onClick={(e) => handleApproveSingle(entry, e)}
@@ -1828,11 +2002,11 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                                 <Check className="h-3.5 w-3.5 stroke-[2.5]" />
                               </button>
                             )}
-                            {isAdmin && (
+                            {isAdmin && isPendingStatus(entry.status) && canReviewEntry(entry) && (
                               <button
                                 type="button"
                                 onClick={(e) => handleRejectSingle(entry, e)}
-                                title="Reject & Remove Task Log"
+                                title="Reject Task Log"
                                 className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors"
                               >
                                 <X className="h-3.5 w-3.5 stroke-[2.5]" />
@@ -1842,7 +2016,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                               type="button"
                               onClick={() => handleEditEntry(entry)}
                               title="Edit Details"
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--studio-navy)] hover:bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] transition-colors"
                             >
                               <Edit3 className="h-3.5 w-3.5" />
                             </button>
@@ -1850,7 +2024,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                               type="button"
                               onClick={() => handleDeleteEntry(entry.id)}
                               title="Delete Log"
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-rose-600 hover:bg-rose-50 transition-colors"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -1869,10 +2043,14 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       {/* GOOGLE CALENDAR LOG TIME POPOVER MODAL (Light Theme) */}
       {showLogModal && (
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in duration-200">
-          <div className="relative w-full max-w-lg max-h-[92vh] overflow-hidden flex flex-col bg-white text-slate-900 rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200">
+          <div className="relative w-full max-w-lg max-h-[92vh] overflow-hidden flex flex-col bg-[var(--bg-surface)] text-[var(--text-primary)] rounded-xl sm:rounded-3xl shadow-2xl border border-[var(--border-color)] animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-5 pb-0 shrink-0">
-              <h3 className="text-base font-bold text-slate-900">
-                {logModalTab === 'schedule' ? 'Schedule Activity' : 'Log Task'}
+              <h3 className="text-base font-bold text-[var(--text-primary)]">
+                {logModalTab === 'schedule'
+                  ? isAdmin && !editingEntryId
+                    ? 'Assign meeting'
+                    : 'Schedule Activity'
+                  : 'Log Task'}
               </h3>
               <button
                 type="button"
@@ -1882,7 +2060,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                   setShowMeetingLinkInput(false);
                   setLogModalTab('task');
                 }}
-                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-full hover:bg-slate-100 cursor-pointer transition-colors shrink-0"
+                className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] p-1.5 rounded-full hover:bg-[var(--bg-surface-subtle)] cursor-pointer transition-colors shrink-0"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1900,10 +2078,15 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                       onClick={() => {
                         setLogModalTab(tab);
                         setFormType(tab === 'schedule' ? 'meeting' : 'task');
-                        if (tab === 'schedule') setLogCategory('Meeting');
+                        if (tab === 'schedule') {
+                          setLogCategory('Meeting');
+                          if (isAdmin && !editingEntryId && formEmployeeIds.length === 0 && formEmployeeId) {
+                            setFormEmployeeIds([formEmployeeId]);
+                          }
+                        }
                       }}
                       className={`relative pb-2.5 text-sm font-medium cursor-pointer transition-colors duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] ${
-                        active ? 'text-[#1a73e8]' : 'text-[#3c4043] hover:text-slate-800'
+                        active ? 'text-[#1a73e8]' : 'text-[#3c4043] hover:text-[var(--text-primary)]'
                       }`}
                     >
                       {tab === 'task' ? 'Task' : 'Schedule'}
@@ -1925,7 +2108,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               {logModalTab === 'task' ? (
                 <>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                    <label className="block text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
                       Task / Deliverable Name
                     </label>
                     {projectTasks.length > 0 ? (
@@ -1938,7 +2121,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                             const t = projectTasks.find((task) => task.id === selectedId);
                             if (t) setFormTitle(t.title);
                           }}
-                          className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 pr-8 text-xs font-semibold text-slate-900 outline-none focus:border-blue-500 transition-colors shadow-2xs cursor-pointer"
+                          className="w-full appearance-none rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 pr-8 text-xs font-semibold text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors shadow-2xs cursor-pointer"
                         >
                           <option value="">Select a project task...</option>
                           {projectTasks.map((t) => (
@@ -1947,7 +2130,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                             </option>
                           ))}
                         </select>
-                        <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+                        <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-[var(--text-muted)] pointer-events-none" />
                       </div>
                     ) : (
                       <input
@@ -1955,18 +2138,18 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                         placeholder="What did you work on? (e.g. API Integration, Client Meeting)"
                         value={formTitle}
                         onChange={(e) => setFormTitle(e.target.value)}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-blue-500 transition-colors shadow-2xs"
+                        className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-semibold text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors shadow-2xs"
                         required
                       />
                     )}
                   </div>
 
                   <div className="flex items-start gap-3 pt-1">
-                    <Clock className="h-5 w-5 text-slate-500 shrink-0 mt-2" />
+                    <Clock className="h-5 w-5 text-[var(--text-muted)] shrink-0 mt-2" />
                     <div className="flex-1 space-y-1.5">
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
                             Date
                           </label>
                           <input
@@ -1974,35 +2157,35 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                             value={formDate}
                             max={TODAY_DATE}
                             onChange={(e) => setFormDate(e.target.value)}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 cursor-pointer transition-colors"
+                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] cursor-pointer transition-colors"
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
                             Start Time
                           </label>
                           <input
                             type="time"
                             value={formStartTime}
                             onChange={(e) => handleTimeChange(e.target.value, formEndTime)}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 transition-colors"
+                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors"
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
                             End Time
                           </label>
                           <input
                             type="time"
                             value={formEndTime}
                             onChange={(e) => handleTimeChange(formStartTime, e.target.value)}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 transition-colors"
+                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors"
                           />
                         </div>
                       </div>
-                      <p className="text-[11px] text-slate-500 font-medium">
+                      <p className="text-[11px] text-[var(--text-muted)] font-medium">
                         Duration:{' '}
-                        <strong className="text-slate-800 font-bold">
+                        <strong className="text-[var(--text-primary)] font-bold">
                           {formatHoursHM(parseFloat(formDurationHours) || 0)}
                         </strong>{' '}
                         ({formDurationHours} hrs)
@@ -2013,7 +2196,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               ) : (
                 <>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                    <label className="block text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
                       Activity / Meeting Title
                     </label>
                     <input
@@ -2021,52 +2204,52 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                       placeholder="e.g. Sprint planning, Client sync, Design review"
                       value={formTitle}
                       onChange={(e) => setFormTitle(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-[#1a73e8] transition-colors shadow-2xs"
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-semibold text-[var(--text-primary)] outline-none focus:border-[#1a73e8] transition-colors shadow-2xs"
                       required
                     />
                   </div>
 
                   <div className="flex items-start gap-3 pt-1">
-                    <Clock className="h-5 w-5 text-slate-500 shrink-0 mt-2" />
+                    <Clock className="h-5 w-5 text-[var(--text-muted)] shrink-0 mt-2" />
                     <div className="flex-1 space-y-1.5">
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
                             Date
                           </label>
                           <input
                             type="date"
                             value={formDate}
                             onChange={(e) => setFormDate(e.target.value)}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-[#1a73e8] cursor-pointer transition-colors"
+                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[#1a73e8] cursor-pointer transition-colors"
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
                             Start
                           </label>
                           <input
                             type="time"
                             value={formStartTime}
                             onChange={(e) => handleTimeChange(e.target.value, formEndTime)}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-[#1a73e8] transition-colors"
+                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[#1a73e8] transition-colors"
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
                             End
                           </label>
                           <input
                             type="time"
                             value={formEndTime}
                             onChange={(e) => handleTimeChange(formStartTime, e.target.value)}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-[#1a73e8] transition-colors"
+                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[#1a73e8] transition-colors"
                           />
                         </div>
                       </div>
-                      <p className="text-[11px] text-slate-500 font-medium">
+                      <p className="text-[11px] text-[var(--text-muted)] font-medium">
                         Duration:{' '}
-                        <strong className="text-slate-800 font-bold">
+                        <strong className="text-[var(--text-primary)] font-bold">
                           {formatHoursHM(parseFloat(formDurationHours) || 0)}
                         </strong>
                         {formDate > TODAY_DATE && (
@@ -2077,11 +2260,11 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                   </div>
 
                   {/* Meet-style action row */}
-                  <div className="rounded-xl border border-slate-100 overflow-hidden">
+                  <div className="rounded-xl border border-[var(--border-color)] overflow-hidden">
                     <button
                       type="button"
                       onClick={() => setShowMeetingLinkInput((v) => !v)}
-                      className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-slate-50 cursor-pointer transition-colors active:scale-[0.99]"
+                      className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-[var(--bg-surface-subtle)] cursor-pointer transition-colors active:scale-[0.99]"
                     >
                       <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 via-yellow-400 to-blue-500 shrink-0">
                         <Video className="h-4 w-4 text-white" />
@@ -2094,13 +2277,13 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                     </button>
                     {showMeetingLinkInput && (
                       <div className="px-3.5 pb-3 flex items-center gap-2 border-t border-slate-50 pt-2">
-                        <Link2 className="h-4 w-4 text-slate-400 shrink-0" />
+                        <Link2 className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
                         <input
                           type="url"
                           placeholder="https://meet.google.com/..."
                           value={formMeetingLink}
                           onChange={(e) => setFormMeetingLink(e.target.value)}
-                          className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-[#1a73e8] transition-colors"
+                          className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[#1a73e8] transition-colors"
                         />
                       </div>
                     )}
@@ -2110,7 +2293,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
               {/* Shared: Project */}
               <div className="flex items-center gap-3">
-                <Briefcase className="h-5 w-5 text-slate-500 shrink-0" />
+                <Briefcase className="h-5 w-5 text-[var(--text-muted)] shrink-0" />
                 <div className="flex-1">
                   <select
                     value={formProjectId}
@@ -2118,7 +2301,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                       setFormProjectId(e.target.value);
                       setFormTaskId('');
                     }}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 transition-colors"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors"
                   >
                     <option value="">General / Standalone Project</option>
                     {activeProjects.map((p) => (
@@ -2131,7 +2314,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               </div>
 
               <div className="flex items-start gap-3">
-                <FileText className="h-5 w-5 text-slate-500 shrink-0 mt-2" />
+                <FileText className="h-5 w-5 text-[var(--text-muted)] shrink-0 mt-2" />
                 <div className="flex-1">
                   <textarea
                     rows={2}
@@ -2142,21 +2325,65 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                     }
                     value={formDescription}
                     onChange={(e) => setFormDescription(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 placeholder-slate-400 outline-none focus:border-blue-500 transition-all resize-none"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-2.5 text-xs text-[var(--text-primary)] placeholder-slate-400 outline-none focus:border-[var(--primary-blue)] transition-all resize-none"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center gap-4">
-                <CalendarIcon className="h-5 w-5 text-slate-500 shrink-0" />
-                <div className="flex-1 flex items-center justify-between text-xs">
-                  {isAdmin ? (
+              <div className="flex items-start gap-4">
+                <Users className="h-5 w-5 text-[var(--text-muted)] shrink-0 mt-2" />
+                <div className="flex-1 text-xs">
+                  {isAdmin && logModalTab === 'schedule' && !editingEntryId ? (
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">People</p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {formEmployeeIds.length === 0 && (
+                          <span className="text-[11px] font-medium text-[var(--text-muted)]">Select who should attend</span>
+                        )}
+                        {formEmployeeIds.map((id) => {
+                          const person = accessibleEmployees.find((e) => e.id === id);
+                          return (
+                            <span
+                              key={id}
+                              className="inline-flex items-center gap-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] py-0.5 pl-2 pr-0.5 text-[11px] font-semibold text-[var(--text-primary)]"
+                            >
+                              {person?.name || 'Unknown'}
+                              <button
+                                type="button"
+                                onClick={() => setFormEmployeeIds((prev) => prev.filter((item) => item !== id))}
+                                className="rounded-full px-1 text-[var(--text-muted)] hover:bg-rose-50 hover:text-rose-600 cursor-pointer"
+                                aria-label={`Remove ${person?.name || 'person'}`}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          );
+                        })}
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) setFormEmployeeIds((prev) => [...prev, e.target.value]);
+                          }}
+                          className="rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-2 py-1 text-[11px] font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)]"
+                        >
+                          <option value="">{formEmployeeIds.length ? '+ Add another person' : '+ Add people'}</option>
+                          {accessibleEmployees
+                            .filter((emp) => !formEmployeeIds.includes(emp.id) && !isTestEntity(emp.name))
+                            .map((emp) => (
+                              <option key={emp.id} value={emp.id}>
+                                {emp.name}{emp.designation ? ` (${emp.designation})` : ''}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+                  ) : isAdmin ? (
                     <select
                       value={formEmployeeId}
                       onChange={(e) => setFormEmployeeId(e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-900 outline-none focus:border-blue-500 focus:bg-white cursor-pointer transition-colors"
+                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:bg-[var(--bg-surface)] cursor-pointer transition-colors"
                     >
-                      {state.employees.map((emp) => (
+                      {accessibleEmployees.filter((emp) => !isTestEntity(emp.name)).map((emp) => (
                         <option key={emp.id} value={emp.id}>
                           {emp.name} ({emp.designation})
                         </option>
@@ -2164,10 +2391,10 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                     </select>
                   ) : (
                     <div>
-                      <span className="font-semibold text-slate-800">
+                      <span className="font-semibold text-[var(--text-primary)]">
                         {state.currentPersona?.name || 'Rajesh Sharma'}
                       </span>
-                      <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                      <p className="text-[11px] text-[var(--text-muted)] mt-0.5 font-medium">
                         {logModalTab === 'schedule'
                           ? 'Visible on dashboard Schedules'
                           : 'Default visibility • Recorded on timesheet'}
@@ -2177,7 +2404,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+              <div className="flex items-center justify-between pt-4 border-t border-[var(--border-color)]">
                 {editingEntryId ? (
                   <button
                     type="button"
@@ -2196,7 +2423,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                       setShowMeetingLinkInput(false);
                       setLogModalTab('task');
                     }}
-                    className="px-4 py-2 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-full font-semibold cursor-pointer transition-colors"
+                    className="px-4 py-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-subtle)] rounded-full font-semibold cursor-pointer transition-colors"
                   >
                     Cancel
                   </button>
@@ -2205,19 +2432,24 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                 <div className="flex items-center gap-3">
                   <button
                     type="submit"
-                    disabled={logModalTab === 'task' && formDate > TODAY_DATE}
+                    disabled={
+                      (logModalTab === 'task' && formDate > TODAY_DATE) ||
+                      (logModalTab === 'schedule' && isAdmin && !editingEntryId && formEmployeeIds.length === 0)
+                    }
                     className={`px-6 py-2 rounded-full text-white text-xs font-bold shadow-sm transition-[transform,background-color] duration-160 ease-out active:scale-[0.97] ${
                       logModalTab === 'task' && formDate > TODAY_DATE
                         ? 'bg-slate-300 cursor-not-allowed'
                         : logModalTab === 'task' && formDate < TODAY_DATE
                           ? 'bg-amber-600 hover:bg-amber-700 cursor-pointer'
-                          : 'bg-[#1a73e8] hover:bg-blue-700 cursor-pointer'
+                          : 'bg-[#1a73e8] hover:bg-[var(--studio-navy-hover)] cursor-pointer'
                     }`}
                   >
                     {logModalTab === 'schedule'
                       ? editingEntryId
                         ? 'Update Schedule'
-                        : 'Save Schedule'
+                        : formEmployeeIds.length > 1
+                          ? `Assign to ${formEmployeeIds.length} people`
+                          : 'Save Schedule'
                       : formDate > TODAY_DATE
                         ? 'Future Date Not Allowed'
                         : formDate < TODAY_DATE

@@ -80,3 +80,26 @@ export async function registerDocument(req: Request, res: Response): Promise<voi
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
 }
+
+export async function listDocuments(req: Request, res: Response): Promise<void> {
+  try {
+    const result = await req.tenantQuery!(
+      `SELECT
+         d.id,
+         d.employee_id,
+         d.document_type,
+         d.file_name,
+         d.s3_key,
+         d.file_size_bytes,
+         d.uploaded_at,
+         TRIM(COALESCE(e.first_name, '') || ' ' || COALESCE(NULLIF(e.last_name, 'User'), e.last_name, '')) AS owner_name
+       FROM employee_documents d
+       LEFT JOIN employees e ON e.id = d.employee_id
+       ORDER BY d.uploaded_at DESC
+       LIMIT 200`
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}

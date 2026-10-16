@@ -1,2543 +1,591 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Plus,
-  Check,
-  ArrowRight,
-  ArrowLeft,
-  Trash2,
-  Shield,
+  FileSpreadsheet, Plus, Trash2, Upload, X,
 } from 'lucide-react';
-import { OfficeLocationPickerMap } from '@/components/common/OfficeLocationPickerMap';
+import { PixbeWordmark } from '@/components/common/PixbeBrand';
+import { SetupWorkplaceStep } from './SetupWorkplaceStep';
 import {
-  DEFAULT_GEO_COORDINATES,
-  DEFAULT_OFFICE_RADIUS_METERS,
-  MAX_GEOFENCE_LIMIT_METERS,
-  MIN_GEOFENCE_LIMIT_METERS,
-} from '@/config/constants';
+  DEFAULT_EMPLOYMENT_TYPES,
+  DEFAULT_SHIFT,
+  SetupWorkPatternsStep,
+  shiftSummary,
+  type EmploymentTypeCategory,
+} from './SetupWorkPatternsStep';
+import './workspace-setup.css';
+import { DEFAULT_OFFICE_RADIUS_METERS, MAX_GEOFENCE_LIMIT_METERS, MIN_GEOFENCE_LIMIT_METERS } from '@/config/constants';
 import { useApp } from '@/context/AppContext';
-import { Employee, DepartmentName, Role } from '@/types';
 import { api } from '@/services/apiClient';
-import { saveStoredState } from '@/services/store';
-import { inferApiRoleFromDesignation } from '@/utils/roleMapping';
-import { getCurrentPosition } from '@/lib/native';
+import { toApiAuthRoleFromJobLevel } from '@/utils/roleMapping';
+import type { WorkShift } from '@/types';
 
-interface TempOffice {
-  id: string;
-  name: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-  radiusMeters: number;
-  geofencingStatus: 'Active' | 'Inactive';
-  clockingDevices: string;
-  policyDescription?: string;
-}
-
-interface TempJobRole {
-  id: string;
-  title: string;
-  department: string;
-  permissionLevel: 'Employee' | 'HR' | 'Manager' | 'Admin';
-  description?: string;
-  canApproveTimesheets?: boolean;
-  canAssignTasks?: boolean;
-  canApproveLeaves?: boolean;
-}
-
-interface TempEmployee {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  designation: string;
-  department: string;
-  officeName: string;
-  joiningDate: string;
-  employmentType: 'Full-time' | 'Part-time' | 'Contract' | 'Intern';
-  shift: string;
-}
-
-interface DepartmentAssignment {
-  department: string;
-  teamLeadId: string;
-  memberIds: string[];
-}
-
-const COMMON_DEPARTMENTS = [
-  'Engineering',
-  'Product',
-  'Design',
-  'Marketing',
-  'Sales',
-  'Human Resources',
-  'Finance',
-  'Operations',
+type Step = 1 | 2 | 3 | 4 | 5;
+type Mode = 'remote' | 'onsite' | 'hybrid';
+type Office = { id?: string; name: string; address: string; latitude: number; longitude: number; radius: number; timezone: string; saved: boolean };
+type Department = { id?: string; name: string; saved: boolean };
+type JobLevel = 'Employee' | 'Manager' | 'HR' | 'Admin';
+type JobRole = { id?: string; title: string; department: string; level: JobLevel; saved: boolean };
+const JOB_LEVELS: Array<{ value: JobLevel; label: string }> = [
+  { value: 'Employee', label: 'Employee — standard access' },
+  { value: 'Manager', label: 'Manager — approver & lead' },
+  { value: 'HR', label: 'HR — operations & records' },
+  { value: 'Admin', label: 'Admin — full system access' },
 ];
+type Person = { id: string; firstName: string; lastName: string; email: string; phone: string; department: string; role: string; office: string; managerEmail: string; employmentType: string; shiftId: string; startDate: string; saved?: boolean };
 
-function readOnboardingStatus(): string {
-  if (typeof document === 'undefined') return 'NOT_STARTED';
-  const raw = document.cookie
-    .split('; ')
-    .find((row) => row.startsWith('BOS_ONBOARDING_STATUS='))
-    ?.split('=')[1];
-  return raw ? decodeURIComponent(raw) : 'NOT_STARTED';
-}
-
-function setOnboardingCookie(status: string): void {
-  if (typeof document === 'undefined') return;
-  document.cookie = `BOS_ONBOARDING_STATUS=${encodeURIComponent(status)}; path=/; max-age=86400; SameSite=Lax`;
-}
-
-function onboardingStatusToStep(status: string): 1 | 2 | 3 | 4 | 5 {
-  const normalized = String(status || 'NOT_STARTED').trim().toUpperCase();
-  switch (normalized) {
-    case 'OFFICE_SETUP':
-      return 2;
-    case 'DEPARTMENTS_SETUP':
-      return 3;
-    case 'ROLES_SETUP':
-      return 4;
-    case 'TEAM_SETUP':
-      return 5;
-    case 'COMPLETED':
-      // Completed workspaces should not sit in the wizard — treat as done.
-      return 5;
-    case 'NOT_STARTED':
-    case 'PENDING':
-    case '':
-    default:
-      return 1;
-  }
-}
-
-function isSetupCompleteStatus(status: string): boolean {
-  return String(status || '').trim().toUpperCase() === 'COMPLETED';
-}
-
-const ToggleSwitch: React.FC<{
-  checked: boolean;
-  onChange: (val: boolean) => void;
-  id?: string;
-}> = ({ checked, onChange, id }) => {
-  return (
-    <button
-      type="button"
-      id={id}
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-150 ease-in-out outline-none ${checked ? 'bg-[#2563eb]' : 'bg-[#cbd5e1]'
-        }`}
-    >
-      <span
-        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-150 ease-in-out mt-0.5 ${checked ? 'translate-x-4.5' : 'translate-x-0.5'
-          }`}
-      />
-    </button>
-  );
+const suggestions = ['Management', 'Engineering', 'People', 'Sales'];
+const isExecutiveTitle = (title: string) => /ceo|founder|executive owner|\bowner\b|principal|dean/i.test(title);
+const setupJobLevel = (level?: string): JobLevel => {
+  const value = clean(level).toLowerCase();
+  if (value === 'admin') return 'Admin';
+  if (value === 'hr') return 'HR';
+  if (value === 'manager') return 'Manager';
+  return 'Employee';
 };
+const leadershipDepartment = (industry?: string) => /institut|educat|school|college/i.test(String(industry || '')) ? 'Administration' : 'Management';
+const withDefaultStructure = (departments: Department[], roles: JobRole[], industry?: string, ownerTitle?: string) => {
+  const deptName = leadershipDepartment(industry);
+  const orphanExecutive = roles.some((role) => isExecutiveTitle(role.title) && !role.department);
+  const shouldSeed = !departments.length || orphanExecutive;
+  const nextDepartments = !shouldSeed || departments.some((item) => key(item.name) === key(deptName))
+    ? departments
+    : [{ name: deptName, saved: false }, ...departments];
+  let nextRoles = roles.map((role) => {
+    const executive = isExecutiveTitle(role.title);
+    return { ...role, department: role.department || (executive ? deptName : role.department), level: setupJobLevel(role.level) };
+  });
+  const title = ownerTitle && validLabel(ownerTitle) ? ownerTitle : (deptName === 'Administration' ? 'Principal / Dean' : 'CEO / Executive Owner');
+  if (shouldSeed && !nextRoles.some((role) => isExecutiveTitle(role.title))) {
+    nextRoles = [{ title, department: deptName, level: 'Employee', saved: false }, ...nextRoles];
+  }
+  return { departments: nextDepartments, roles: nextRoles };
+};
+const steps = [
+  ['Workplace', 'Where your team works'],
+  ['Structure', 'Departments and job roles'],
+  ['Hours', 'Types, shifts, and days'],
+  ['People', 'Your first invitations'],
+  ['Review', 'Launch your workspace'],
+] as const;
+const clean = (value: unknown) => String(value || '').trim();
+const key = (value: unknown) => clean(value).toLowerCase();
+const validLabel = (value: string) => value.length >= 2 && value.length <= 80 && /\p{L}/u.test(value);
+const validEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+const validTimezone = (value: string) => {
+  try { new Intl.DateTimeFormat('en', { timeZone: value }); return true; }
+  catch { return false; }
+};
+const isPlaceholderOffice = (item: { name: string; address?: string }) =>
+  /^(bengaluru|bangalore)\s+hq$/i.test(clean(item.name)) && (!clean(item.address) || key(item.address) === key(item.name));
+const today = () => new Date().toISOString().slice(0, 10);
+const codeFor = (prefix: string, value: string, index: number) => `${prefix}-${value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20) || prefix}-${index + 1}`.slice(0, 32);
+const toStep = (status: unknown): Step => {
+  switch (clean(status).toUpperCase()) {
+    case 'OFFICE_SETUP': case 'DEPARTMENTS_SETUP': return 2;
+    case 'ROLES_SETUP': return 3;
+    case 'WORK_PATTERNS_SETUP': return 4;
+    case 'TEAM_SETUP': return 5;
+    default: return 1;
+  }
+};
+const setCookie = (value: string) => { document.cookie = `BOS_ONBOARDING_STATUS=${encodeURIComponent(value)}; path=/; max-age=86400; SameSite=Lax`; };
+const draftPeopleKey = () => {
+  const tenant = api.getTenantId();
+  return tenant ? `PIXBE_SETUP_PEOPLE_${tenant}` : null;
+};
+
+function parseCsv(source: string) {
+  const rows: string[][] = [];
+  let row: string[] = [], cell = '', quoted = false;
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === '"') { if (quoted && source[i + 1] === '"') { cell += char; i += 1; } else quoted = !quoted; }
+    else if (char === ',' && !quoted) { row.push(cell.trim()); cell = ''; }
+    else if ((char === '\n' || char === '\r') && !quoted) { if (char === '\r' && source[i + 1] === '\n') i += 1; row.push(cell.trim()); if (row.some(Boolean)) rows.push(row); row = []; cell = ''; }
+    else cell += char;
+  }
+  row.push(cell.trim()); if (row.some(Boolean)) rows.push(row);
+  if (rows.length < 2) return [] as Record<string, string>[];
+  const headers = rows[0].map((item) => key(item).replace(/\s+/g, '_'));
+  return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, clean(values[index])])));
+}
+
+function downloadTemplate() {
+  const content = 'first_name,last_name,email,department,job_title,permission_level,employment_type,office,manager_email,start_date\nAsha,Patel,asha@company.com,Engineering,Software Engineer,Employee,Full-time,London HQ,manager@company.com;colead@company.com,2026-10-07';
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'pixbe-employee-import.csv'; link.click(); URL.revokeObjectURL(url);
+}
 
 export const WorkspaceSetupWizard: React.FC = () => {
   const router = useRouter();
   const { state, updateState, triggerToast, syncWithBackend, backendStatus } = useApp();
-
-  const persistSetupStep = async (request: Promise<{ success: boolean; error?: { message?: string } }>, label: string) => {
-    try {
-      const response = await request;
-      if (response.success) return true;
-
-      triggerToast({
-        title: `${label} was not saved`,
-        message: response.error?.message || 'Unable to reach the server. Please try again.',
-        type: 'error',
-      });
-      return false;
-    } catch (e: any) {
-      triggerToast({
-        title: `${label} was not saved`,
-        message: e?.message || 'Unable to reach the server. Please try again.',
-        type: 'error',
-      });
-      return false;
-    }
-  };
-
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
-  const hasRestoredSetupProgress = useRef(false);
-  const lastAppliedOnboardingStatus = useRef<string | null>(null);
-
-  // STEP 1: Offices (Features from AddOfficeModal)
-  useEffect(() => {
-    if (!state.isAuthenticated || !api.getToken()) {
-      triggerToast({
-        title: 'Authentication Required',
-        message: 'Please authenticate with valid credentials before accessing workspace setup.',
-        type: 'warning',
-      });
-      router.replace('/login');
-    }
-  }, [state.isAuthenticated, router, triggerToast]);
-
-  const initialOfficesList: TempOffice[] = (() => {
-    const existing = (state.customOptions?.offices || []).filter(
-      (o) => o && o !== 'Main Headquarters' && o !== 'Corporate Headquarters' && o !== 'Office Location'
-    );
-    if (existing.length > 0) {
-      return existing.map((o, idx) => ({
-        id: `off_${idx}`,
-        name: o,
-        address: state.organization?.officeLocation?.address || '',
-        latitude: state.organization?.officeLocation?.latitude || DEFAULT_GEO_COORDINATES.latitude,
-        longitude: state.organization?.officeLocation?.longitude || DEFAULT_GEO_COORDINATES.longitude,
-        radiusMeters: state.organization?.officeLocation?.allowedRadiusMeters || DEFAULT_OFFICE_RADIUS_METERS,
-        geofencingStatus: 'Active' as const,
-        clockingDevices: 'Desktop, Mobile',
-        policyDescription: 'Strict clock-in within geofence perimeter',
-      }));
-    }
-    return [];
-  })();
-
-  const [offices, setOffices] = useState<TempOffice[]>(initialOfficesList);
-
-  const [officeName, setOfficeName] = useState(initialOfficesList[0]?.name || '');
-  const [officeAddress, setOfficeAddress] = useState(initialOfficesList[0]?.address || state.organization?.officeLocation?.address || '');
-  const [officeLatitude, setOfficeLatitude] = useState<number>(initialOfficesList[0]?.latitude || state.organization?.officeLocation?.latitude || DEFAULT_GEO_COORDINATES.latitude);
-  const [officeLongitude, setOfficeLongitude] = useState<number>(initialOfficesList[0]?.longitude || state.organization?.officeLocation?.longitude || DEFAULT_GEO_COORDINATES.longitude);
-  const [officeRadius, setOfficeRadius] = useState<number>(initialOfficesList[0]?.radiusMeters || 150);
-  const [officeStatus, setOfficeStatus] = useState<'Active' | 'Inactive'>(initialOfficesList[0]?.geofencingStatus || 'Active');
-  const [officeDevices, setOfficeDevices] = useState(initialOfficesList[0]?.clockingDevices || 'Desktop, Mobile');
-  const [officeError, setOfficeError] = useState('');
-  const [editingOfficeId, setEditingOfficeId] = useState<string | null>(initialOfficesList[0]?.id || null);
-
-  // Geolocation detection on mount (Capacitor on device, browser API on web)
-  useEffect(() => {
-    void getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 })
-      .then((pos) => {
-        setOfficeLatitude(pos.latitude);
-        setOfficeLongitude(pos.longitude);
-      })
-      .catch(() => {
-        setOfficeLatitude(DEFAULT_GEO_COORDINATES.latitude);
-        setOfficeLongitude(DEFAULT_GEO_COORDINATES.longitude);
-      });
-  }, []);
-
-  // STEP 2: Departments
-  const [departments, setDepartments] = useState<string[]>(() => {
-    const existing = state.customOptions?.departments || [];
-    if (existing.length > 0) return existing;
-    return state.organization?.industry?.toLowerCase().includes('inst') ? ['Administration'] : ['Operations'];
-  });
+  const loaded = useRef(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [step, setStep] = useState<Step>(1);
+  const [mode, setMode] = useState<Mode>('remote');
+  const [offices, setOffices] = useState<Office[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [roles, setRoles] = useState<JobRole[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [leads, setLeads] = useState<Record<string, string[]>>({});
+  const [busy, setBusy] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [message, setMessage] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [officeForm, setOfficeForm] = useState<{ name: string; address: string; latitude: number | null; longitude: number | null; radius: number; timezone: string }>({ name: '', address: '', latitude: null, longitude: null, radius: DEFAULT_OFFICE_RADIUS_METERS, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' });
   const [departmentInput, setDepartmentInput] = useState('');
+  const [roleForm, setRoleForm] = useState({ title: '', department: '', level: 'Employee' as JobLevel });
+  const [employmentTypes, setEmploymentTypes] = useState<EmploymentTypeCategory[]>(DEFAULT_EMPLOYMENT_TYPES);
+  const [shifts, setShifts] = useState<WorkShift[]>([DEFAULT_SHIFT]);
+  const [personForm, setPersonForm] = useState({ firstName: '', lastName: '', email: '', phone: '', department: '', role: '', office: '', managerEmail: '', employmentType: 'Full-time', shiftId: DEFAULT_SHIFT.id, startDate: today() });
+  const employmentTypeOptions = employmentTypes.map((item) => item.name);
 
-  // STEP 3: Job Roles
-  const [jobRoles, setJobRoles] = useState<TempJobRole[]>(() => {
-    const existing = state.customOptions?.designations || [];
-    if (existing.length > 0) {
-      return existing.map((title, idx) => {
-        const lowerTitle = title.toLowerCase();
-        const isLeader =
-          lowerTitle.includes('admin') ||
-          lowerTitle.includes('founder') ||
-          lowerTitle.includes('ceo') ||
-          lowerTitle.includes('owner') ||
-          lowerTitle.includes('chief') ||
-          lowerTitle.includes('president') ||
-          lowerTitle.includes('principal') ||
-          lowerTitle.includes('dean') ||
-          lowerTitle.includes('head') ||
-          lowerTitle.includes('director') ||
-          lowerTitle.includes('exec');
+  const ownerEmail = key(state.currentPersona?.email);
+  const ownerName = clean(state.currentPersona?.name) || 'Workspace owner';
+  const departmentNames = useMemo(() => departments.map((item) => item.name), [departments]);
+  const roleNames = useMemo(() => roles.map((item) => item.title), [roles]);
+  const personRoleNames = useMemo(() => roles.filter((item) => key(item.department) === key(personForm.department || departmentNames[0])).map((item) => item.title), [roles, personForm.department, departmentNames]);
+  const officeNames = useMemo(() => offices.map((item) => item.name), [offices]);
+  const timezones = useMemo(() => {
+    const current = officeForm.timezone;
+    return [...new Set([current, 'UTC', ...Intl.supportedValuesOf('timeZone')])].sort();
+  }, [officeForm.timezone]);
+  const leadOptions = useMemo(() => [{ value: ownerEmail, label: `${ownerName} (workspace owner)` }, ...people.map((person) => ({ value: person.email, label: `${person.firstName} ${person.lastName} · ${person.role}` }))].filter((item) => item.value), [ownerEmail, ownerName, people]);
 
-        const permLevel: 'Employee' | 'HR' | 'Manager' | 'Admin' = isLeader
-          ? 'Admin'
-          : lowerTitle.includes('manager') || lowerTitle.includes('lead')
-            ? 'Manager'
-            : lowerTitle.includes('hr') || lowerTitle.includes('people')
-              ? 'HR'
-              : 'Employee';
+  const notify = useCallback((kind: 'error' | 'success', text: string) => {
+    setMessage({ kind, text });
+    triggerToast({ title: kind === 'error' ? 'Setup needs attention' : 'Saved', message: text, type: kind });
+  }, [triggerToast]);
+  const updateStatus = useCallback((status: string) => { setCookie(status); updateState((previous) => ({ ...previous, onboardingStatus: status } as any)); }, [updateState]);
 
-        return {
-          id: `job_${idx}`,
-          title,
-          department: departments[0] || (state.organization?.industry?.toLowerCase().includes('inst') ? 'Administration' : 'Operations'),
-          permissionLevel: permLevel,
-          description: 'Standard workspace position',
-          canApproveTimesheets: permLevel === 'Admin' || permLevel === 'Manager',
-          canAssignTasks: true,
-          canApproveLeaves: permLevel === 'Admin' || permLevel === 'Manager' || permLevel === 'HR',
-        };
-      });
+  const hydrate = useCallback(async () => {
+    setDataLoaded(false);
+    const settingsRes = await api.setup.getSettings();
+    const [officeRes, departmentRes, roleRes, employeeRes] = await Promise.all([api.org.getOffices(), api.org.getDepartments(), api.org.getJobRoles(), api.identity.getEmployees()]);
+    if (officeRes.success) {
+      const items = ((officeRes.data as any[]) || []).map((item) => ({ id: item.id, name: clean(item.name), address: clean(item.address), latitude: Number(item.latitude), longitude: Number(item.longitude), radius: Number(item.geofence_radius_meters) || DEFAULT_OFFICE_RADIUS_METERS, timezone: clean(item.timezone) || 'UTC', saved: true }));
+      const placeholders = items.filter(isPlaceholderOffice);
+      const kept = items.filter((item) => !isPlaceholderOffice(item));
+      setOffices(kept);
+      await Promise.all(placeholders.map((office) => office.id ? api.org.deleteOffice(office.id).catch(() => undefined) : Promise.resolve()));
     }
-    if (state.currentPersona) {
-      const title = state.currentPersona.designation || (state.currentPersona.role === 'student' ? 'Student' : 'Super Admin');
-      return [
-        {
-          id: 'job_0',
-          title: title,
-          department: departments[0] || (state.organization?.industry?.toLowerCase().includes('inst') ? 'Administration' : 'Operations'),
-          permissionLevel: 'Admin',
-          description: 'Workspace Owner / Admin',
-          canApproveTimesheets: true,
-          canAssignTasks: true,
-          canApproveLeaves: true,
+    const storedTypes = (settingsRes.data as any)?.['employment-types']?.employmentTypes;
+    if (Array.isArray(storedTypes) && storedTypes.length) {
+      setEmploymentTypes(storedTypes.map((item: any, index: number) => (
+        typeof item === 'string'
+          ? { id: `et_${index + 1}`, name: clean(item), hasBenefits: /full|part/i.test(item), isPermanent: /full/i.test(item) }
+          : { id: clean(item.id) || `et_${index + 1}`, name: clean(item.name), hasBenefits: Boolean(item.hasBenefits), isPermanent: Boolean(item.isPermanent) }
+      )).filter((item: EmploymentTypeCategory) => item.name));
+    }
+    const storedShifts = (settingsRes.data as any)?.attendance?.shifts;
+    if (Array.isArray(storedShifts) && storedShifts.length) {
+      setShifts(storedShifts.filter((item: WorkShift) => clean(item?.name)));
+    }
+    const storedMode = (settingsRes.data as any)?.general?.workplaceMode;
+    if (['remote', 'onsite', 'hybrid'].includes(storedMode)) setMode(storedMode);
+    else if (officeRes.success && ((officeRes.data as any[]) || []).filter((item) => !isPlaceholderOffice({ name: clean(item.name), address: clean(item.address) })).length) setMode('onsite');
+    const loadedDepartments = departmentRes.success
+      ? ((departmentRes.data as any[]) || []).map((item) => ({ id: item.id, name: clean(item.name), saved: true })).filter((item, index, list) => item.name && list.findIndex((candidate) => key(candidate.name) === key(item.name)) === index)
+      : [];
+    const loadedRoles = roleRes.success
+      ? ((roleRes.data as any[]) || []).map((item) => ({ id: item.id, title: clean(item.title), department: clean(item.department_name), level: setupJobLevel(item.level), saved: true })).filter((item, index, list) => item.title && list.findIndex((candidate) => key(candidate.title) === key(item.title) && key(candidate.department) === key(item.department)) === index)
+      : [];
+    const seeded = withDefaultStructure(loadedDepartments, loadedRoles, (state.organization as any)?.industry, clean((state.currentPersona as any)?.designation));
+    setDepartments(seeded.departments);
+    setRoles(seeded.roles);
+    if (departmentRes.success && employeeRes.success) {
+      const emailById = new Map(((employeeRes.data as any[]) || []).map((item) => [String(item.id), key(item.email)]));
+      const saved = Object.fromEntries(((departmentRes.data as any[]) || []).map((item) => [clean(item.name), (Array.isArray(item.leads) ? item.leads : []).map((lead: any) => emailById.get(String(lead.id)) || '').filter(Boolean) as string[]]).filter(([, emails]) => (emails as string[]).length));
+      setLeads((previous) => ({ ...saved, ...Object.fromEntries(Object.entries(previous).filter(([, emails]) => emails.length)) }));
+    }
+    if (employeeRes.success) {
+      const savedPeople: Person[] = ((employeeRes.data as any[]) || []).filter((item) => key(item.email) !== ownerEmail && key(item.role) !== 'super_admin').map((item) => ({ id: clean(item.id) || `saved-${item.email}`, firstName: clean(item.first_name || item.firstName), lastName: clean(item.last_name || item.lastName), email: key(item.email), phone: clean(item.phone), department: clean(item.department_name || item.department), role: clean(item.job_role_title || item.designation || item.jobRole), office: clean(item.office_name || item.officeName || item.location), managerEmail: '', employmentType: clean(item.employment_type || item.employmentType) || 'Full-time', shiftId: clean(item.shift_id || item.shiftId || item.shiftTiming?.shiftId), startDate: clean(item.date_of_joining || item.dateOfJoining) || today(), saved: true }));
+      let drafts: Person[] = [];
+      try {
+        const stored = draftPeopleKey();
+        const parsed = stored ? JSON.parse(sessionStorage.getItem(stored) || '[]') : [];
+        if (Array.isArray(parsed)) drafts = parsed.filter((item) => validEmail(key(item?.email)) && clean(item?.firstName) && clean(item?.lastName) && !item.saved).map((item) => ({ ...item, shiftId: clean(item.shiftId) }));
+      } catch { /* Ignore stale or invalid session drafts. */ }
+      setPeople([...savedPeople, ...drafts.filter((item) => item.email !== ownerEmail && !savedPeople.some((saved) => saved.email === item.email))]);
+    }
+    setDataLoaded(true);
+  }, [ownerEmail, state.currentPersona, state.organization]);
+  useEffect(() => {
+    if (!dataLoaded) return;
+    const stored = draftPeopleKey();
+    if (!stored) return;
+    try { sessionStorage.setItem(stored, JSON.stringify(people.filter((item) => !item.saved))); }
+    catch { /* Session storage can be disabled by the browser. */ }
+  }, [dataLoaded, people]);
+
+  useEffect(() => {
+    if (!state.isAuthenticated || !api.getToken()) { router.replace('/login'); return; }
+    if (loaded.current) return; loaded.current = true;
+    void hydrate()
+      .catch(() => notify('error', 'We could not load the latest workspace data. Refresh and try again.'))
+      .finally(() => setDataLoaded(true));
+  }, [hydrate, notify, router, state.isAuthenticated]);
+  useEffect(() => {
+    if (!loaded.current || backendStatus === 'syncing') return;
+    const status = clean((state as any).onboardingStatus).toUpperCase();
+    if (status === 'COMPLETED') { setCookie('COMPLETED'); router.replace('/dashboard'); return; }
+    setStep(toStep(status));
+  }, [backendStatus, router, state.onboardingStatus]);
+
+  const persistStructure = async () => {
+    let departmentSnapshot = departments;
+    const freshDepartments = departments.filter((item) => !item.saved);
+    if (freshDepartments.length) {
+      const result: any = await api.setup.saveDepartments({ departments: freshDepartments.map((item, index) => ({ name: item.name, code: codeFor('DEP', item.name, index) })) });
+      if (!result.success) throw new Error(result.error?.message || 'Departments could not be saved.');
+      departmentSnapshot = departments.map((item) => ({ ...item, ...(result.data || []).find((created: any) => key(created.name) === key(item.name)), saved: item.saved || Boolean((result.data || []).find((created: any) => key(created.name) === key(item.name))) }));
+      setDepartments(departmentSnapshot); updateStatus('DEPARTMENTS_SETUP');
+    }
+    const ids = new Map(departmentSnapshot.map((item) => [key(item.name), item.id]));
+    for (const role of roles.filter((item) => item.saved && item.id)) {
+      const departmentId = ids.get(key(role.department));
+      if (!departmentId) continue;
+      const result: any = await api.org.updateJobRole(role.id, { departmentId, level: role.level });
+      if (!result.success) throw new Error(result.error?.message || `${role.title} could not be updated.`);
+    }
+    const freshRoles = roles.filter((item) => !item.saved);
+    if (freshRoles.length) {
+      const result: any = await api.setup.saveRoles({ roles: freshRoles.map((item, index) => ({ title: item.title, code: codeFor('ROLE', `${item.department}-${item.title}`, index), departmentId: ids.get(key(item.department)), level: item.level })) });
+      if (!result.success) throw new Error(result.error?.message || 'Job roles could not be saved.');
+      setRoles((previous) => previous.map((item) => ({ ...item, ...(result.data || []).find((created: any) => key(created.title) === key(item.title)), saved: item.saved || Boolean((result.data || []).find((created: any) => key(created.title) === key(item.title))) })));
+      updateStatus('ROLES_SETUP');
+    } else if (roles.length) {
+      updateStatus('ROLES_SETUP');
+    }
+  };
+
+  const saveWorkplace = async () => {
+    setMessage(null);
+    if (mode !== 'remote' && !offices.length) { notify('error', 'Add a workplace with a selected map location to continue with on-site or hybrid work.'); return; }
+    setBusy(true);
+    try {
+      for (const [index, office] of (mode === 'remote' ? [] : offices).entries()) {
+        if (office.saved) continue;
+        const result: any = await api.setup.saveOffice({ name: office.name, code: codeFor('OFF', office.name, index), address: office.address, latitude: office.latitude, longitude: office.longitude, geofenceRadiusMeters: office.radius, timezone: office.timezone });
+        if (!result.success) throw new Error(result.error?.message || `${office.name} could not be saved.`);
+      }
+      const result: any = await api.setup.saveWorkplaceMode({ mode });
+      if (!result.success) throw new Error(result.error?.message || 'Work arrangement could not be saved.');
+      await hydrate(); updateStatus('OFFICE_SETUP'); setStep(2); notify('success', 'Work arrangement saved. Next, add departments and job roles.');
+    } catch (cause: any) { notify('error', cause?.message || 'We could not save your workplaces.'); } finally { setBusy(false); }
+  };
+  const saveStructure = async () => {
+    if (!departmentNames.length || !roleNames.length) { notify('error', 'Add at least one department and one job role before continuing.'); return; }
+    setBusy(true); try { await persistStructure(); await hydrate(); setStep(3); notify('success', 'Departments and job roles are saved. Next, set employment types and shift hours.'); } catch (cause: any) { notify('error', cause?.message || 'We could not save the organisation structure.'); } finally { setBusy(false); }
+  };
+  const saveWorkPatterns = async () => {
+    if (!employmentTypes.length) { notify('error', 'Add at least one employment type before continuing.'); return; }
+    if (!shifts.length) { notify('error', 'Add at least one shift with working days before continuing.'); return; }
+    if (shifts.some((shift) => !(shift.workingDays || []).length)) { notify('error', 'Each shift needs at least one working day.'); return; }
+    setBusy(true);
+    try {
+      const shiftsResult: any = await api.setup.saveAttendanceSettings({ shifts });
+      if (!shiftsResult.success) throw new Error(shiftsResult.error?.message || 'Shifts could not be saved.');
+      const typesResult: any = await api.setup.saveEmploymentTypes({ employmentTypes });
+      if (!typesResult.success) throw new Error(typesResult.error?.message || 'Employment types could not be saved.');
+      updateStatus('WORK_PATTERNS_SETUP');
+      updateState((previous) => ({
+        ...previous,
+        customOptions: {
+          ...previous.customOptions,
+          employmentTypes: employmentTypes.map((item) => item.name),
+          employmentTypeCategories: employmentTypes,
+          shifts,
         },
-      ];
-    }
-    return [];
-  });
-
-  // After a hard reload, restore offices/departments/roles + wizard step from the API
-  // (localStorage intentionally does not keep setup business data).
-  useEffect(() => {
-    const syncedOffices = (state.customOptions?.offices || []).filter(
-      (o) => o && o !== 'Main Headquarters' && o !== 'Corporate Headquarters' && o !== 'Office Location'
-    );
-    const syncedDepartments = state.customOptions?.departments || [];
-    const syncedRoles = state.customOptions?.designations || [];
-
-    // Only hydrate empty local lists from the API — never clobber in-progress edits.
-    if (syncedOffices.length > 0) {
-      setOffices((prev) => {
-        if (prev.length > 0) return prev;
-        return syncedOffices.map((name, idx) => ({
-          id: `off_synced_${idx}`,
-          name,
-          address: state.organization?.officeLocation?.address || name,
-          latitude: state.organization?.officeLocation?.latitude || DEFAULT_GEO_COORDINATES.latitude,
-          longitude: state.organization?.officeLocation?.longitude || DEFAULT_GEO_COORDINATES.longitude,
-          radiusMeters: state.organization?.officeLocation?.allowedRadiusMeters || DEFAULT_OFFICE_RADIUS_METERS,
-          geofencingStatus: 'Active' as const,
-          clockingDevices: 'Desktop, Mobile',
-          policyDescription: 'Strict clock-in within geofence perimeter',
-        }));
-      });
-    }
-
-    if (syncedDepartments.length > 0) {
-      setDepartments((prev) => {
-        const onlyDefaults =
-          prev.length === 0 ||
-          prev.every((d) => d === 'Operations' || d === 'Administration');
-        if (!onlyDefaults) return prev;
-        // Avoid new array identity when contents already match (prevents auto-save loops).
-        if (
-          prev.length === syncedDepartments.length &&
-          prev.every((d, i) => d === syncedDepartments[i])
-        ) {
-          return prev;
-        }
-        return syncedDepartments;
-      });
-    }
-
-    if (syncedRoles.length > 0) {
-      setJobRoles((prev) => {
-        let changed = false;
-        const merged = [...prev];
-        for (const title of syncedRoles) {
-          if (!merged.some((r) => r.title.toLowerCase() === title.toLowerCase())) {
-            changed = true;
-            merged.push({
-              id: `job_synced_${merged.length}`,
-              title,
-              department: syncedDepartments[0] || 'Operations',
-              permissionLevel: 'Employee',
-              description: 'Standard workspace position',
-            });
-          }
-        }
-        return changed ? merged : prev;
-      });
-    }
-
-    const syncedEmployees = state.employees || [];
-    if (syncedEmployees.length > 0) {
-      setEmployees((prev) => {
-        const merged = [...prev];
-        for (const emp of syncedEmployees) {
-          const name = emp.name || `${(emp as any).firstName || ''} ${(emp as any).lastName || ''}`.trim();
-          const email = emp.email || '';
-          if (!name && !email) continue;
-          if (merged.some((e) => (email && e.email.toLowerCase() === email.toLowerCase()) || e.name === name)) {
-            continue;
-          }
-          merged.push({
-            id: emp.id || `emp_synced_${merged.length}`,
-            name: name || email,
-            email,
-            phone: emp.phone || '',
-            designation: emp.designation || (emp as any).role || 'Employee',
-            department: emp.department || syncedDepartments[0] || 'Operations',
-            officeName: (emp as any).location || (emp as any).officeName || offices[0]?.name || '',
-            joiningDate: (emp as any).joiningDate || new Date().toISOString().substring(0, 10),
-            employmentType: 'Full-time',
-            shift: 'General Day Shift (09:00 - 18:00)',
-          });
-        }
-        return merged;
-      });
-    }
-  }, [state.customOptions, state.organization, state.employees, backendStatus]);
-
-  // Resume wizard step once from backend onboarding status.
-  // Keep this effect free of setState→dep loops (no updateState, stable deps only).
-  useEffect(() => {
-    if (backendStatus === 'syncing') return;
-    if (hasRestoredSetupProgress.current) return;
-
-    const statusFromMe = (state as any).onboardingStatus as string | undefined;
-    // Wait until sync has settled so we don't apply a stale cookie mid-flight.
-    if (backendStatus !== 'connected' && backendStatus !== 'disconnected') return;
-    if (!statusFromMe && backendStatus === 'connected') {
-      // Connected but /me has not provided status yet — use cookie once.
-    }
-
-    const status = String(statusFromMe || readOnboardingStatus() || 'NOT_STARTED');
-    if (lastAppliedOnboardingStatus.current === status) {
-      hasRestoredSetupProgress.current = true;
-      return;
-    }
-
-    if (isSetupCompleteStatus(status)) {
-      hasRestoredSetupProgress.current = true;
-      lastAppliedOnboardingStatus.current = status;
-      setOnboardingCookie('COMPLETED');
-      window.location.assign('/dashboard');
-      return;
-    }
-
-    let nextStep = onboardingStatusToStep(status);
-
-    // Stale TEAM_SETUP/ROLES with no org data → stay on step 1 (cookie only, no setState loop).
-    const officesCount = (state.customOptions?.offices || []).filter(
-      (o: string) => o && o !== 'Main Headquarters' && o !== 'Corporate Headquarters'
-    ).length;
-    const deptsCount = (state.customOptions?.departments || []).length;
-    if (nextStep >= 4 && officesCount === 0 && deptsCount === 0) {
-      nextStep = 1;
-      setOnboardingCookie('NOT_STARTED');
-    }
-
-    setCurrentStep(nextStep);
-    lastAppliedOnboardingStatus.current = status;
-    hasRestoredSetupProgress.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot resume after sync settles
-  }, [backendStatus, (state as any).onboardingStatus]);
-
-  const [jobTitleInput, setJobTitleInput] = useState('');
-  const [jobDeptInput, setJobDeptInput] = useState('');
-  const [jobPermissionInput, setJobPermissionInput] = useState<'Employee' | 'HR' | 'Manager' | 'Admin'>('Employee');
-  const [jobDescriptionInput, setJobDescriptionInput] = useState('');
-  const [jobCanApproveTimesheets, setJobCanApproveTimesheets] = useState(false);
-  const [jobCanAssignTasks, setJobCanAssignTasks] = useState(true);
-  const [jobCanApproveLeaves, setJobCanApproveLeaves] = useState(false);
-  const [jobError, setJobError] = useState('');
-  const [editingJobId, setEditingJobId] = useState<string | null>(null);
-
-  const [employees, setEmployees] = useState<TempEmployee[]>(() => {
-    const existingEmployees = state.employees || [];
-    if (existingEmployees.length > 0) {
-      return existingEmployees.map(emp => ({
-        id: emp.id,
-        name: emp.name,
-        email: emp.email,
-        phone: emp.phone || '',
-        designation: emp.designation || emp.role || 'Employee',
-        department: emp.department || departments[0] || 'General',
-        officeName: emp.location || emp.officeName || offices[0]?.name || '',
-        joiningDate: emp.joinDate || emp.joiningDate || new Date().toISOString().substring(0, 10),
-        employmentType: 'Full-time',
-        shift: 'General Day Shift (09:00 - 18:00)',
       }));
+      setPersonForm((previous) => ({
+        ...previous,
+        employmentType: employmentTypes.some((item) => item.name === previous.employmentType) ? previous.employmentType : employmentTypes[0].name,
+        shiftId: shifts.some((item) => item.id === previous.shiftId) ? previous.shiftId : shifts[0].id,
+      }));
+      setStep(4);
+      notify('success', 'Work patterns saved. Next, invite your first people.');
+    } catch (cause: any) {
+      notify('error', cause?.message || 'We could not save employment types and shifts.');
+    } finally {
+      setBusy(false);
     }
-    
-    // Fallback: Just the current persona if no employees exist in state
-    if (state.currentPersona) {
-      const existingEmp = existingEmployees.find(e => e.id === state.currentPersona?.id || e.email === state.currentPersona?.email);
-      const assignedDept = existingEmp?.department || departments[0] || 'Management';
-      return [{
-        id: state.currentPersona.id || `setup_emp_${Date.now()}`,
-        name: state.currentPersona.name || '',
-        email: state.currentPersona.email || '',
-        phone: existingEmp?.phone || '',
-        designation: state.currentPersona.designation || (state.currentPersona.role === 'student' ? 'Student' : 'Super Admin'),
-        department: assignedDept,
-        officeName: existingEmp?.officeName || existingEmp?.location || offices[0]?.name || '',
-        joiningDate: existingEmp?.joiningDate || new Date().toISOString().substring(0, 10),
-        employmentType: 'Full-time',
-        shift: 'General Day Shift (09:00 - 18:00)',
-      }];
+  };
+  const addOffice = () => {
+    const name = clean(officeForm.name), address = clean(officeForm.address);
+    if (!validLabel(name) || address.length < 5 || officeForm.latitude === null || officeForm.longitude === null) { notify('error', 'Enter a workplace name of at least two letters, then confirm its address on the map.'); return; }
+    if (!validTimezone(officeForm.timezone)) { notify('error', 'Choose a valid time zone for this workplace.'); return; }
+    if (!Number.isInteger(officeForm.radius) || officeForm.radius < MIN_GEOFENCE_LIMIT_METERS || officeForm.radius > MAX_GEOFENCE_LIMIT_METERS) { notify('error', 'Choose a radius between 20 and 1000 metres.'); return; }
+    if (offices.some((item) => key(item.name) === key(name))) { notify('error', 'That office is already in the setup list.'); return; }
+    setOffices((previous) => [...previous, { ...officeForm, name, address, latitude: officeForm.latitude!, longitude: officeForm.longitude!, saved: false }]); setOfficeForm((previous) => ({ ...previous, name: '', address: '', latitude: null, longitude: null }));
+  };
+  const removeOffice = async (index: number) => {
+    const office = offices[index];
+    if (!office) return;
+    if (office.saved && office.id) {
+      const result: any = await api.org.deleteOffice(office.id);
+      if (!result.success) { notify('error', result.error?.message || `${office.name} could not be removed.`); return; }
     }
-    return [];
+    setOffices((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
+  };
+  const addDepartment = (candidate = departmentInput) => {
+    const name = clean(candidate);
+    if (!validLabel(name)) { notify('error', 'Use a department name of 2–80 characters containing a letter.'); return; }
+    if (departments.some((item) => key(item.name) === key(name))) { notify('error', 'That department is already listed.'); return; }
+    setDepartments((previous) => [...previous, { name, saved: false }]); setDepartmentInput('');
+  };
+  const addRole = () => {
+    const title = clean(roleForm.title), department = clean(roleForm.department || departmentNames[0]);
+    if (!validLabel(title) || !department) { notify('error', 'Choose a department and enter a job title of 2–80 characters.'); return; }
+    if (roles.some((item) => key(item.title) === key(title) && key(item.department) === key(department))) { notify('error', 'That job role already exists for this department.'); return; }
+    setRoles((previous) => [...previous, { title, department, level: roleForm.level, saved: false }]); setRoleForm({ title: '', department, level: 'Employee' });
+  };
+  const addPerson = () => {
+    const person: Person = { id: `draft-${Date.now()}`, firstName: clean(personForm.firstName), lastName: clean(personForm.lastName), email: key(personForm.email), phone: clean(personForm.phone), department: clean(personForm.department || departmentNames[0]), role: clean(personForm.role || personRoleNames[0]), office: clean(personForm.office), managerEmail: key(personForm.managerEmail), employmentType: clean(personForm.employmentType) || employmentTypeOptions[0] || 'Full-time', shiftId: clean(personForm.shiftId) || shifts[0]?.id || '', startDate: personForm.startDate || today() };
+    if (!/\p{L}/u.test(person.firstName) || !/\p{L}/u.test(person.lastName) || !validEmail(person.email) || !person.department || !person.role) { notify('error', 'Add a first and last name, valid work email, department, and job role.'); return; }
+    if (!roles.some((item) => key(item.department) === key(person.department) && key(item.title) === key(person.role))) { notify('error', 'Choose a job role from the selected department.'); return; }
+    if (!validDate(person.startDate)) { notify('error', 'Choose a valid start date.'); return; }
+    if (mode === 'onsite' && !person.office) { notify('error', 'Assign an on-site team member to a workplace.'); return; }
+    if (person.office && !officeNames.some((item) => key(item) === key(person.office))) { notify('error', 'Choose a workplace already configured in this setup.'); return; }
+    if (person.email === ownerEmail || people.some((item) => item.email === person.email)) { notify('error', 'That work email is already part of this workspace.'); return; }
+    setPeople((previous) => [...previous, person]); setPersonForm((previous) => ({ ...previous, firstName: '', lastName: '', email: '', phone: '', managerEmail: '' }));
+    if (person.managerEmail) addLead(person.department, person.managerEmail);
+  };
+  const addLead = (department: string, email: string) => setLeads((previous) => {
+    const current = previous[department] || [];
+    return current.includes(email) ? previous : { ...previous, [department]: [...current, email] };
   });
-  const [empName, setEmpName] = useState('');
-  const [empEmail, setEmpEmail] = useState('');
-  const [empPhone, setEmpPhone] = useState('');
-  const [empDesignation, setEmpDesignation] = useState(() => jobRoles[0]?.title || '');
-  const [empDepartment, setEmpDepartment] = useState('');
-  const [empOffice, setEmpOffice] = useState('');
-  const [empJoiningDate, setEmpJoiningDate] = useState(() => new Date().toISOString().substring(0, 10));
-  const [empEmploymentType, setEmpEmploymentType] = useState<'Full-time' | 'Part-time' | 'Contract' | 'Intern'>('Full-time');
-  const [empShift, setEmpShift] = useState('General Day Shift (09:00 - 18:00)');
-  const [employeeError, setEmployeeError] = useState('');
+  const removeLead = (department: string, email: string) => setLeads((previous) => ({ ...previous, [department]: (previous[department] || []).filter((item) => item !== email) }));
 
-  // STEP 5: Finalize Departments & Team Leads
-  const [assignments, setAssignments] = useState<Record<string, DepartmentAssignment>>({});
-
-  // --- Auto-Save Hooks to prevent data loss if user quits early ---
-  // Wait until backend hydration finishes so defaults (e.g. "Operations")
-  // do not overwrite freshly synced tenant data after reload.
-  useEffect(() => {
-    if (!hasRestoredSetupProgress.current || offices.length === 0) return;
-    const nextOffices = Array.from(new Set(offices.map((o) => o.name).filter(Boolean)));
-    updateState((prev) => {
-      const prevOffices = prev.customOptions?.offices || [];
-      if (
-        prevOffices.length === nextOffices.length &&
-        prevOffices.every((o, i) => o === nextOffices[i])
-      ) {
-        return prev;
-      }
-      return {
-        ...prev,
-        organization: {
-          ...prev.organization,
-          officeLocation: {
-            address: offices[0]?.address || prev.organization?.officeLocation?.address || '',
-            latitude: offices[0]?.latitude || prev.organization?.officeLocation?.latitude || 0,
-            longitude: offices[0]?.longitude || prev.organization?.officeLocation?.longitude || 0,
-            allowedRadiusMeters: offices[0]?.radiusMeters || prev.organization?.officeLocation?.allowedRadiusMeters || 150,
-          },
-        },
-        customOptions: {
-          ...prev.customOptions,
-          offices: nextOffices,
-        },
-      };
+  const importPeople = async (file: File) => {
+    setImportErrors([]); const rows = parseCsv(await file.text()); const required = ['first_name', 'last_name', 'email'];
+    if (!rows.length || required.some((header) => !(header in rows[0]))) { setImportErrors(['Use the Pixbe template: first_name, last_name, and email are required.']); return; }
+    const problems: string[] = [], seen = new Set<string>(), newDepartments: string[] = [], newRoles: Array<[string, string, JobLevel]> = [], managersByDepartment = new Map<string, string[]>();
+    const additions = rows.map((row, index) => {
+      const line = index + 2, email = key(row.email), department = clean(row.department || departmentNames[0] || 'Management'), role = clean(row.job_title || roleNames[0] || 'Team Member'), office = clean(row.office), managerEmails = [...new Set(String(row.manager_email || '').split(';').map(key).filter(Boolean))], managerEmail = managerEmails[0] || '', startDate = clean(row.start_date || today());
+      if (!clean(row.first_name) || !clean(row.last_name) || !validEmail(email)) problems.push(`Row ${line}: add a first name, last name, and valid email.`);
+      if (seen.has(email) || email === ownerEmail || people.some((person) => person.email === email)) problems.push(`Row ${line}: ${email || 'this email'} is already in the workspace.`); seen.add(email);
+      if (office && !officeNames.some((item) => key(item) === key(office))) problems.push(`Row ${line}: ${office} is not a configured workplace.`);
+      if (!validDate(startDate)) problems.push(`Row ${line}: use a real YYYY-MM-DD date for start_date.`);
+      if (!validLabel(department) || !validLabel(role)) problems.push(`Row ${line}: department and job title must contain a name of 2–80 characters.`);
+      if (mode === 'onsite' && !office) problems.push(`Row ${line}: on-site team members need a configured workplace.`);
+      if (managerEmails.includes(email)) problems.push(`Row ${line}: a person cannot report to themself.`);
+      if (managerEmails.length) { const current = managersByDepartment.get(department) || []; managersByDepartment.set(department, [...new Set([...current, ...managerEmails])]); }
+      if (!departmentNames.some((item) => key(item) === key(department))) newDepartments.push(department);
+      if (!roles.some((item) => key(item.title) === key(role) && key(item.department) === key(department))) newRoles.push([role, department, setupJobLevel(row.permission_level || row.permission)]);
+      return { id: `import-${line}-${email}`, firstName: clean(row.first_name), lastName: clean(row.last_name), email, phone: clean(row.phone), department, role, office, managerEmail, employmentType: clean(row.employment_type) || employmentTypeOptions[0] || 'Full-time', shiftId: shifts.find((item) => key(item.name) === key(row.shift))?.id || shifts[0]?.id || '', startDate };
     });
-  }, [offices, updateState]);
-
-  useEffect(() => {
-    if (!hasRestoredSetupProgress.current || departments.length === 0) return;
-    updateState((prev) => {
-      const nextDepartments = Array.from(
-        new Set([...(prev.customOptions?.departments || []), ...departments.filter(Boolean)])
-      );
-      const prevDepartments = prev.customOptions?.departments || [];
-      if (
-        prevDepartments.length === nextDepartments.length &&
-        prevDepartments.every((d, i) => d === nextDepartments[i])
-      ) {
-        return prev;
-      }
-      return {
-        ...prev,
-        customOptions: {
-          ...prev.customOptions,
-          departments: nextDepartments,
-        },
-      };
-    });
-  }, [departments, updateState]);
-
-  useEffect(() => {
-    if (!hasRestoredSetupProgress.current || jobRoles.length === 0) return;
-    updateState((prev) => {
-      const nextDesignations = Array.from(
-        new Set([
-          ...(prev.customOptions?.designations || []),
-          ...jobRoles.map((j) => j.title).filter(Boolean),
-        ])
-      );
-      const prevDesignations = prev.customOptions?.designations || [];
-      if (
-        prevDesignations.length === nextDesignations.length &&
-        prevDesignations.every((d, i) => d === nextDesignations[i])
-      ) {
-        return prev;
-      }
-      return {
-        ...prev,
-        customOptions: {
-          ...prev.customOptions,
-          designations: nextDesignations,
-        },
-      };
-    });
-  }, [jobRoles, updateState]);
-  // ----------------------------------------------------------------
-
-  const stepsList = [
-    { num: 1, title: 'Office Locations' },
-    { num: 2, title: 'Departments' },
-    { num: 3, title: 'Job Roles' },
-    { num: 4, title: 'Team Members' },
-    { num: 5, title: 'Finalize & Managers' },
-  ];
-
-  const handleLocationChange = (lat: number, lng: number, newAddress?: string) => {
-    setOfficeLatitude(lat);
-    setOfficeLongitude(lng);
-    if (newAddress) {
-      setOfficeAddress(newAddress);
-    }
+    const allKnown = new Set([...people.map((person) => person.email), ...additions.map((person) => person.email), ownerEmail]);
+    managersByDepartment.forEach((emails) => emails.forEach((managerEmail) => { if (!allKnown.has(managerEmail)) problems.push(`${managerEmail}: manager_email must belong to this import, the invitation list, or the workspace owner.`); }));
+    if (problems.length) { setImportErrors([...new Set(problems)].slice(0, 12)); return; }
+    setDepartments((previous) => [...previous, ...newDepartments.filter((name, index, list) => list.findIndex((item) => key(item) === key(name)) === index && !previous.some((item) => key(item.name) === key(name))).map((name) => ({ name, saved: false }))]);
+    setRoles((previous) => [...previous, ...newRoles.filter(([title, department], index, list) => list.findIndex(([otherTitle, otherDepartment]) => key(otherTitle) === key(title) && key(otherDepartment) === key(department)) === index && !previous.some((item) => key(item.title) === key(title) && key(item.department) === key(department))).map(([title, department, level]) => ({ title, department, level, saved: false }))]);
+    setPeople((previous) => [...previous, ...additions]); setLeads((previous) => { const next = { ...previous }; managersByDepartment.forEach((emails, department) => { const existingKey = Object.keys(next).find((name) => key(name) === key(department)) || departmentNames.find((name) => key(name) === key(department)) || department; next[existingKey] = [...new Set([...(next[existingKey] || []), ...emails])]; }); return next; }); notify('success', `${additions.length} people are ready to review. New departments and roles will save before invitations are sent.`);
   };
-
-  const handleRadiusChange = (val: number) => {
-    const clamped = Math.min(MAX_GEOFENCE_LIMIT_METERS, Math.max(MIN_GEOFENCE_LIMIT_METERS, val));
-    setOfficeRadius(clamped);
+  const savePeople = async () => {
+    setMessage(null);
+    setStep(5);
   };
-
-  const resetOfficeForm = () => {
-    setEditingOfficeId(null);
-    setOfficeName('');
-    setOfficeAddress('');
-    setOfficeLatitude(DEFAULT_GEO_COORDINATES.latitude);
-    setOfficeLongitude(DEFAULT_GEO_COORDINATES.longitude);
-    setOfficeRadius(DEFAULT_OFFICE_RADIUS_METERS);
-    setOfficeStatus('Active');
-    setOfficeDevices('Desktop, Mobile');
-    setOfficeError('');
-  };
-
-  // Commit current office form values into offices state
-  const handleCommitCurrentOffice = (): boolean => {
-    setOfficeError('');
-    const nameTrimmed = officeName.trim();
-    if (!nameTrimmed) {
-      setOfficeError('Please enter an Office / Branch name above');
-      const el = document.getElementById('office-name-input');
-      if (el) el.focus();
-      return false;
-    }
-
-    const derivedPolicy =
-      officeStatus === 'Active'
-        ? 'Strict clock-in within geofence perimeter'
-        : 'Flexible clock-in (GPS optional)';
-
-    if (editingOfficeId) {
-      if (offices.some((o) => o.id !== editingOfficeId && o.name.toLowerCase() === nameTrimmed.toLowerCase())) {
-        setOfficeError('An office with this name already exists');
-        return false;
-      }
-      setOffices((prev) =>
-        prev.map((o) =>
-          o.id === editingOfficeId
-            ? {
-              ...o,
-              name: nameTrimmed,
-              address: officeAddress.trim() || `${officeLatitude.toFixed(4)}, ${officeLongitude.toFixed(4)}`,
-              latitude: officeLatitude,
-              longitude: officeLongitude,
-              radiusMeters: officeRadius,
-              geofencingStatus: officeStatus,
-              clockingDevices: officeDevices,
-              policyDescription: derivedPolicy,
-            }
-            : o
-        )
-      );
-    } else {
-      const existingIndex = offices.findIndex((o) => o.name.toLowerCase() === nameTrimmed.toLowerCase());
-      if (existingIndex >= 0) {
-        setOffices((prev) =>
-          prev.map((o, idx) =>
-            idx === existingIndex
-              ? {
-                ...o,
-                name: nameTrimmed,
-                address: officeAddress.trim() || `${officeLatitude.toFixed(4)}, ${officeLongitude.toFixed(4)}`,
-                latitude: officeLatitude,
-                longitude: officeLongitude,
-                radiusMeters: officeRadius,
-                geofencingStatus: officeStatus,
-                clockingDevices: officeDevices,
-                policyDescription: derivedPolicy,
-              }
-              : o
-          )
-        );
-      } else {
-        const newOff: TempOffice = {
-          id: `off_${Date.now()}`,
-          name: nameTrimmed,
-          address: officeAddress.trim() || `${officeLatitude.toFixed(4)}, ${officeLongitude.toFixed(4)}`,
-          latitude: officeLatitude,
-          longitude: officeLongitude,
-          radiusMeters: officeRadius,
-          geofencingStatus: officeStatus,
-          clockingDevices: officeDevices,
-          policyDescription: derivedPolicy,
-        };
-        setOffices((prev) => [...prev, newOff]);
-      }
-    }
-    resetOfficeForm();
-    return true;
-  };
-
-  const handleProceedToStep2 = async () => {
-    let officesSnapshot = offices;
-
-    if (officeName.trim()) {
-      const nameTrimmed = officeName.trim();
-      const derivedPolicy =
-        officeStatus === 'Active'
-          ? 'Strict clock-in within geofence perimeter'
-          : 'GPS optional — geofencing inactive';
-      const committed: TempOffice = {
-        id: editingOfficeId || `off_${Date.now()}`,
-        name: nameTrimmed,
-        address: officeAddress.trim() || `${officeLatitude.toFixed(4)}, ${officeLongitude.toFixed(4)}`,
-        latitude: officeLatitude,
-        longitude: officeLongitude,
-        radiusMeters: officeRadius,
-        geofencingStatus: officeStatus,
-        clockingDevices: officeDevices,
-        policyDescription: derivedPolicy,
-      };
-      const success = handleCommitCurrentOffice();
-      if (!success) return;
-      officesSnapshot = editingOfficeId
-        ? offices.map((o) => (o.id === editingOfficeId ? committed : o))
-        : [...offices.filter((o) => o.name.toLowerCase() !== nameTrimmed.toLowerCase()), committed];
-    } else if (officesSnapshot.length === 0) {
-      setOfficeError('Please configure at least one office location');
-      const el = document.getElementById('office-name-input');
-      if (el) el.focus();
-      return;
-    }
-
+  const launch = async () => {
+    setBusy(true);
     try {
-      if (officesSnapshot.length > 0) {
-        for (const office of officesSnapshot) {
-          const codeSeed = (office.name || 'OFF').replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase() || 'OFF';
-          const saved = await persistSetupStep(
-            api.org.createOffice({
-              name: office.name,
-              code: `${codeSeed}${Math.floor(10 + Math.random() * 90)}`,
-              address: office.address,
-              latitude: office.latitude,
-              longitude: office.longitude,
-              geofenceRadiusMeters: office.radiusMeters,
-            }),
-            'Office'
-          );
-          if (!saved) return;
-        }
-        const officeGeofencePolicies = officesSnapshot.map((o) => ({
-          id: o.id,
-          name: o.name,
-          geofencingStatus: o.geofencingStatus,
-          radiusMeters: o.radiusMeters,
-          address: o.address,
-        }));
-        const anyInactive = officesSnapshot.some((o) => o.geofencingStatus === 'Inactive');
-        const attSaved = await persistSetupStep(
-          api.setup.saveAttendanceSettings({
-            attendanceSettings: {
-              officeGeofencePolicies,
-              ...(anyInactive ? { requireLocationGPS: false, geofenceEnabled: false } : {}),
-            },
-          }),
-          'Office geofence policy'
-        );
-        if (!attSaved) return;
-        updateState((prev) => ({
-          ...prev,
-          customOptions: {
-            ...prev.customOptions,
-            attendanceSettings: {
-              ...prev.customOptions?.attendanceSettings,
-              officeGeofencePolicies,
-              ...(anyInactive ? { requireLocationGPS: false, geofenceEnabled: false } : {}),
-            },
-          },
-        }));
-        setOnboardingCookie('OFFICE_SETUP');
-      }
-    } catch (e) {
-      console.warn('Backend sync for office failed', e);
-      return;
-    }
-
-    setCurrentStep(2);
-  };
-
-  const handleAddAnotherOffice = () => {
-    if (officeName.trim()) {
-      const addedName = officeName.trim();
-      const success = handleCommitCurrentOffice();
-      if (!success) return;
-      triggerToast({
-        title: 'Office Location Added',
-        message: `Successfully configured office location "${addedName}".`,
-        type: 'success',
-      });
-    }
-    resetOfficeForm();
-  };
-
-  const handleSaveCurrentEdit = () => {
-    const success = handleCommitCurrentOffice();
-    if (!success) return;
-    resetOfficeForm();
-  };
-
-  const handleEditOffice = (off: TempOffice) => {
-    setEditingOfficeId(off.id);
-    setOfficeName(off.name);
-    setOfficeAddress(off.address);
-    setOfficeLatitude(off.latitude);
-    setOfficeLongitude(off.longitude);
-    setOfficeRadius(off.radiusMeters);
-    setOfficeStatus(off.geofencingStatus);
-    setOfficeDevices(off.clockingDevices);
-    setOfficeError('');
-    const el = document.getElementById('office-name-input');
-    if (el) el.focus();
-  };
-
-  const handleCancelEdit = () => {
-    resetOfficeForm();
-  };
-
-  const handleRemoveOffice = (idToRemove: string) => {
-    setOffices((prev) => prev.filter((o) => o.id !== idToRemove));
-    if (editingOfficeId === idToRemove) {
-      handleCancelEdit();
-    }
-  };
-
-  // Add Department Handler
-  const handleAddDepartment = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const trimmed = departmentInput.trim();
-    if (!trimmed) return;
-    if (departments.some((d) => d.toLowerCase() === trimmed.toLowerCase())) {
-      setDepartmentInput('');
-      return;
-    }
-    setDepartments((prev) => [...prev, trimmed]);
-    setDepartmentInput('');
-  };
-
-  const handleQuickAddDepartment = (dept: string) => {
-    if (departments.some((d) => d.toLowerCase() === dept.toLowerCase())) return;
-    setDepartments((prev) => [...prev, dept]);
-  };
-
-  const handleRemoveDepartment = (deptToRemove: string) => {
-    setDepartments((prev) => prev.filter((d) => d !== deptToRemove));
-    setEmployees((prev) =>
-      prev.map((emp) => (emp.department === deptToRemove ? { ...emp, department: '' } : emp))
-    );
-  };
-
-  const handleProceedToStep3 = async () => {
-    try {
-      if (departments.length > 0) {
-        for (const [i, name] of departments.entries()) {
-          const code = `${name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'DEP'}${i}${Math.floor(10 + Math.random() * 90)}`;
-          const saved = await persistSetupStep(
-            api.org.createDepartment({ name, code }),
-            'Departments'
-          );
-          if (!saved) return;
-        }
-        setOnboardingCookie('DEPARTMENTS_SETUP');
-      }
-    } catch (e) {
-      console.warn('Backend sync for departments failed', e);
-      return;
-    }
-    setCurrentStep(3);
-  };
-
-  // Job Roles Handlers
-  const handleCommitCurrentJob = (): boolean => {
-    setJobError('');
-    const titleTrimmed = jobTitleInput.trim();
-    if (!titleTrimmed) {
-      setJobError('Job title is required');
-      return false;
-    }
-
-    const assignedDept = jobDeptInput || departments[0] || 'General';
-
-    if (editingJobId) {
-      setJobRoles((prev) =>
-        prev.map((j) =>
-          j.id === editingJobId
-            ? {
-              ...j,
-              title: titleTrimmed,
-              department: assignedDept,
-              permissionLevel: jobPermissionInput,
-              description: jobDescriptionInput.trim() || undefined,
-              canApproveTimesheets: jobCanApproveTimesheets,
-              canAssignTasks: jobCanAssignTasks,
-              canApproveLeaves: jobCanApproveLeaves,
-            }
-            : j
-        )
-      );
-      setEditingJobId(null);
-    } else {
-      const existingIdx = jobRoles.findIndex(
-        (j) => j.title.toLowerCase() === titleTrimmed.toLowerCase() && j.department.toLowerCase() === assignedDept.toLowerCase()
-      );
-      if (existingIdx >= 0) {
-        setJobRoles((prev) =>
-          prev.map((j, idx) =>
-            idx === existingIdx
-              ? {
-                ...j,
-                title: titleTrimmed,
-                department: assignedDept,
-                permissionLevel: jobPermissionInput,
-                description: jobDescriptionInput.trim() || undefined,
-                canApproveTimesheets: jobCanApproveTimesheets,
-                canAssignTasks: jobCanAssignTasks,
-                canApproveLeaves: jobCanApproveLeaves,
-              }
-              : j
-          )
-        );
-      } else {
-        const newJob: TempJobRole = {
-          id: `job_${Date.now()}`,
-          title: titleTrimmed,
-          department: assignedDept,
-          permissionLevel: jobPermissionInput,
-          description: jobDescriptionInput.trim() || undefined,
-          canApproveTimesheets: jobCanApproveTimesheets,
-          canAssignTasks: jobCanAssignTasks,
-          canApproveLeaves: jobCanApproveLeaves,
-        };
-        setJobRoles((prev) => [...prev, newJob]);
-      }
-    }
-
-    setJobTitleInput('');
-    setJobDescriptionInput('');
-    setJobCanApproveTimesheets(false);
-    setJobCanAssignTasks(true);
-    setJobCanApproveLeaves(false);
-    setJobError('');
-    return true;
-  };
-
-  const handleProceedToStep4 = async () => {
-    if (jobTitleInput.trim()) {
-      const success = handleCommitCurrentJob();
-      if (!success) return;
-    } else if (jobRoles.length === 0) {
-      setJobError('Please configure at least one job role');
-      return;
-    }
-
-    try {
-      if (jobRoles.length > 0) {
-        for (const [i, role] of jobRoles.entries()) {
-          const code = `${role.title.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'ROLE'}${i}${Math.floor(10 + Math.random() * 90)}`;
-          const saved = await persistSetupStep(
-            api.org.createJobRole({
-              title: role.title,
-              code,
-              level: role.permissionLevel,
-            }),
-            'Job roles'
-          );
-          if (!saved) return;
-        }
-        setOnboardingCookie('ROLES_SETUP');
-      }
-    } catch (e) {
-      console.warn('Backend sync for roles failed', e);
-      return;
-    }
-
-    setCurrentStep(4);
-  };
-
-  const handleEditJob = (job: TempJobRole) => {
-    setEditingJobId(job.id);
-    setJobTitleInput(job.title);
-    setJobDeptInput(job.department);
-    setJobPermissionInput(job.permissionLevel);
-    setJobDescriptionInput(job.description || '');
-    setJobCanApproveTimesheets(job.canApproveTimesheets ?? false);
-    setJobCanAssignTasks(job.canAssignTasks ?? true);
-    setJobCanApproveLeaves(job.canApproveLeaves ?? false);
-    setJobError('');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleCancelJobEdit = () => {
-    setEditingJobId(null);
-    setJobTitleInput('');
-    setJobDeptInput(departments[0] || 'General');
-    setJobPermissionInput('Employee');
-    setJobDescriptionInput('');
-    setJobCanApproveTimesheets(false);
-    setJobCanAssignTasks(true);
-    setJobCanApproveLeaves(false);
-    setJobError('');
-  };
-
-  const handleRemoveJob = (idToRemove: string) => {
-    setJobRoles((prev) => prev.filter((j) => j.id !== idToRemove));
-    if (editingJobId === idToRemove) {
-      handleCancelJobEdit();
-    }
-  };
-
-  // Add Employee Handler
-  const handleAddEmployee = (e: React.FormEvent) => {
-    e.preventDefault();
-    setEmployeeError('');
-
-    if (!empName.trim()) {
-      setEmployeeError('Full name is required');
-      return;
-    }
-    if (!empEmail.trim() || !empEmail.includes('@')) {
-      setEmployeeError('Valid official email is required');
-      return;
-    }
-    const resolvedDesignation = (empDesignation || jobRoles[0]?.title || '').trim();
-    if (!resolvedDesignation) {
-      setEmployeeError('Job title / designation is required');
-      return;
-    }
-    const cleanEmail = empEmail.trim().toLowerCase();
-    const cleanName = empName.trim().toLowerCase();
-    const cleanPhone = empPhone.trim();
-
-    const isDuplicate =
-      employees.some(
-        (emp) =>
-          (emp.email && emp.email.toLowerCase() === cleanEmail) ||
-          (cleanPhone && emp.phone && emp.phone.trim() === cleanPhone) ||
-          (emp.name && emp.name.toLowerCase() === cleanName && emp.email && emp.email.toLowerCase() === cleanEmail)
-      ) ||
-      (state.employees || []).some(
-        (emp) =>
-          (emp.email && emp.email.toLowerCase() === cleanEmail) ||
-          (cleanPhone && emp.phone && emp.phone.trim() === cleanPhone) ||
-          (emp.name && emp.name.toLowerCase() === cleanName && emp.email && emp.email.toLowerCase() === cleanEmail)
-      );
-
-    if (isDuplicate) {
-      setEmployeeError('An employee with this name, email, or phone number already exists.');
-      return;
-    }
-
-    const assignedDept = empDepartment || departments[0] || 'General';
-    const assignedOffice = empOffice || (offices[0]?.name ?? (state.customOptions?.offices?.[0] || ''));
-
-    const newEmp: TempEmployee = {
-      id: `setup_emp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: empName.trim(),
-      email: empEmail.trim().toLowerCase(),
-      phone: empPhone.trim(),
-      designation: resolvedDesignation,
-      department: assignedDept,
-      officeName: assignedOffice,
-      joiningDate: empJoiningDate,
-      employmentType: empEmploymentType,
-      shift: empShift,
-    };
-
-    setEmployees((prev) => [...prev, newEmp]);
-    setEmpName('');
-    setEmpEmail('');
-    setEmpPhone('');
-    setEmpDesignation(jobRoles[0]?.title || '');
-  };
-
-  const isOwnSetupAccount = (emp: Pick<TempEmployee, 'id' | 'email'>) => {
-    const persona = state.currentPersona;
-    if (!persona) return false;
-    const personaEmail = (persona.email || '').trim().toLowerCase();
-    const empEmail = (emp.email || '').trim().toLowerCase();
-    if (personaEmail && empEmail && personaEmail === empEmail) return true;
-    if (persona.id && emp.id && persona.id === emp.id) return true;
-    return false;
-  };
-
-  const handleRemoveEmployee = (idToRemove: string) => {
-    const target = employees.find((e) => e.id === idToRemove);
-    if (target && isOwnSetupAccount(target)) {
-      triggerToast({
-        title: 'Cannot remove your account',
-        message: 'You cannot delete your own user during workspace setup.',
-        type: 'warning',
-      });
-      return;
-    }
-    setEmployees((prev) => prev.filter((e) => e.id !== idToRemove));
-    setAssignments((prev) => {
-      const next = { ...prev };
-      Object.keys(next).forEach((dept) => {
-        next[dept] = {
-          ...next[dept],
-          teamLeadId: next[dept].teamLeadId === idToRemove ? '' : next[dept].teamLeadId,
-          memberIds: next[dept].memberIds.filter((id) => id !== idToRemove),
-        };
-      });
-      return next;
-    });
-  };
-
-  const handleProceedToStep5 = async () => {
-    if (employees.length === 0) return;
-    
-    try {
-      const saved = await persistSetupStep(api.setup.saveTeam({
-        employees: employees
-          .filter((emp) => !isOwnSetupAccount(emp))
-          .map((emp) => ({
-          firstName: emp.name.split(' ')[0],
-          lastName: emp.name.split(' ').slice(1).join(' ') || '',
-          email: emp.email,
-          phone: emp.phone || undefined,
-          officeName: emp.officeName,
-          department: emp.department,
-          designation: emp.designation,
-          dateOfJoining: emp.joiningDate,
-          role: inferApiRoleFromDesignation(
-            emp.designation,
-            emp.department === 'Administration' ? 'manager' : 'employee'
-          ),
-        }))
-      }), 'Employees');
-      if (!saved) return;
-      setOnboardingCookie('TEAM_SETUP');
-    } catch (e) {
-      console.warn('Backend sync for team failed', e);
-      return;
-    }
-
-    setAssignments((prev) => {
-      const updated = { ...prev };
-      departments.forEach((dept) => {
-        if (!updated[dept]) {
-          const autoMembers = employees.filter((e) => e.department === dept).map((e) => e.id);
-          updated[dept] = {
-            department: dept,
-            teamLeadId: autoMembers[0] || '',
-            memberIds: autoMembers,
-          };
-        }
-      });
-      return updated;
-    });
-    setCurrentStep(5);
-  };
-
-  const handleToggleMember = (department: string, employeeId: string) => {
-    setAssignments((prev) => {
-      const current = prev[department] || { department, teamLeadId: '', memberIds: [] };
-      const exists = current.memberIds.includes(employeeId);
-      const updatedMembers = exists
-        ? current.memberIds.filter((id) => id !== employeeId)
-        : [...current.memberIds, employeeId];
-
-      return {
-        ...prev,
-        [department]: {
-          ...current,
-          memberIds: updatedMembers,
-          teamLeadId: exists && current.teamLeadId === employeeId ? '' : current.teamLeadId,
-        },
-      };
-    });
-  };
-
-  const handleSetTeamLead = (department: string, teamLeadId: string) => {
-    setAssignments((prev) => {
-      const current = prev[department] || { department, teamLeadId: '', memberIds: [] };
-      const memberIds =
-        teamLeadId && !current.memberIds.includes(teamLeadId)
-          ? [...current.memberIds, teamLeadId]
-          : current.memberIds;
-
-      return {
-        ...prev,
-        [department]: {
-          ...current,
-          teamLeadId,
-          memberIds,
-        },
-      };
-    });
-  };
-
-  // Finish Setup Handler
-  const handleFinishSetup = async () => {
-    const finalOffices = Array.from(new Set(offices.map((o) => o.name).filter(Boolean)));
-    const finalDepartments = Array.from(new Set(departments.filter(Boolean)));
-    const finalDesignations = Array.from(new Set(jobRoles.map((j) => j.title).filter(Boolean)));
-
-    const mappedEmployees: Employee[] = employees.map((emp, index) => {
-      const assignedDeptEntry = Object.entries(assignments).find(([_, assign]) =>
-        assign.memberIds.includes(emp.id)
-      );
-      const assignedDept = assignedDeptEntry ? assignedDeptEntry[0] : emp.department || finalDepartments[0] || 'General';
-
-      const deptLeadId = assignments[assignedDept]?.teamLeadId || '';
-      const leadObj = employees.find((e) => e.id === deptLeadId);
-
-      const isLead = deptLeadId === emp.id;
-      const role: Role = isLead ? 'manager' : 'employee';
-
-      const isCurrentPersona = Boolean(
-        (state.currentPersona?.email && emp.email?.toLowerCase().trim() === state.currentPersona.email.toLowerCase().trim()) ||
-        (state.currentPersona?.id && emp.id === state.currentPersona.id)
-      );
-
-      return {
-        id: emp.id,
-        // Temporary local id — backend assigns canonical EMP-### on save/sync.
-        employeeId: `EMP-${String(index + 2).padStart(3, '0')}`,
-        name: emp.name,
-        fullName: emp.name,
-        email: emp.email,
-        phone: emp.phone || '—',
-        avatar: '',
-        designation: emp.designation,
-        department: assignedDept as DepartmentName,
-        team: `${assignedDept} Team`,
-        role: isCurrentPersona && state.currentPersona?.role ? state.currentPersona.role : role,
-        joiningDate: emp.joiningDate,
-        employmentType: emp.employmentType,
-        location: emp.officeName,
-        officeName: emp.officeName,
-        managerId: leadObj && leadObj.id !== emp.id ? leadObj.id : '',
-        managerName: leadObj && leadObj.id !== emp.id ? leadObj.name : '',
-        lineManager:
-          leadObj && leadObj.id !== emp.id
-            ? {
-              name: leadObj.name,
-              username: `@${leadObj.name.toLowerCase().replace(/\s+/g, '')}`,
-              avatar: '',
-              designation: leadObj.designation,
-            }
-            : undefined,
-        shiftId: 'sh-1',
-        shiftTiming: {
-          shiftId: 'sh-1',
-          shiftName: emp.shift,
-          startTime: '09:00 AM',
-          endTime: '06:00 PM',
-          graceMinutes: 15,
-        },
-        skills: ['Team Member'],
-        status: isCurrentPersona ? 'Active' : 'Onboarding',
-        isActivated: isCurrentPersona,
-        accountStatus: isCurrentPersona ? 'Active' : 'Not Activated',
-        hasCompletedProfile: isCurrentPersona,
-        onboardingProgress: isCurrentPersona ? 100 : 0,
-        bankDetails: {
-          accountNumber: '—',
-          ifscCode: '—',
-          bankName: '—',
-        },
-        emergencyContact: {
-          name: '',
-          relation: '',
-          phone: '',
-        },
-        payrollSummary: {
-          status: isCurrentPersona ? 'Active' : 'Onboarding',
-          jobTitle: emp.designation,
-          employmentType: emp.employmentType,
-          jobDate: emp.joiningDate,
-          geofencing: 'Allowed',
-          lastWorkingDate: '—',
-          totalCompensation: 0,
-          salary: 0,
-          recurring: 0,
-          oneOff: 0,
-          offset1: 0,
-          offset2: 0,
-        },
-      };
-    });
-
-    // Ensure the current persona (Founder/CEO/Admin) is retained or prepended
-    const existingAdminInPrev = (state.employees || []).find(
-      (e) =>
-        e.role === 'super_admin' ||
-        e.employeeId === 'EMP001' ||
-        (state.currentPersona?.email && e.email?.toLowerCase().trim() === state.currentPersona.email.toLowerCase().trim()) ||
-        (state.currentPersona?.id && e.id === state.currentPersona.id)
-    );
-
-    const hasAdminInMapped = mappedEmployees.some(
-      (e) =>
-        e.role === 'super_admin' ||
-        (state.currentPersona?.email && e.email?.toLowerCase().trim() === state.currentPersona.email.toLowerCase().trim()) ||
-        (state.currentPersona?.id && e.id === state.currentPersona.id)
-    );
-
-    let finalEmployeesList: Employee[] = [...mappedEmployees];
-
-    if (!hasAdminInMapped) {
-      if (existingAdminInPrev) {
-        finalEmployeesList = [
-          {
-            ...existingAdminInPrev,
-            department: 'Management' as DepartmentName,
-            team: 'Executive Leadership',
-            status: 'Active',
-            isActivated: true,
-            accountStatus: 'Active',
-            hasCompletedProfile: true,
-            onboardingProgress: 100,
-            designation:
-              existingAdminInPrev.designation &&
-                existingAdminInPrev.designation !== 'Staff Member' &&
-                existingAdminInPrev.designation !== 'Team Member'
-                ? existingAdminInPrev.designation
-                : (state.currentPersona?.designation || 'Founder & CEO'),
-          },
-          ...finalEmployeesList,
-        ];
-      } else if (state.currentPersona) {
-        const resolvedAdminName = state.currentPersona.name || 'Organization Administrator';
-        const resolvedAdminEmail = state.currentPersona.email || 'admin@organization.com';
-        const resolvedAdminDesignation =
-          state.currentPersona.designation &&
-            state.currentPersona.designation !== 'Staff Member' &&
-            state.currentPersona.designation !== 'Team Member'
-            ? state.currentPersona.designation
-            : 'Founder & CEO';
-        const defaultOffice = finalOffices[0] || 'Headquarters';
-        const defaultDept = (finalDepartments[0] || state.currentPersona?.department || (state.organization?.industry?.toLowerCase().includes('inst') ? 'Administration' : 'Operations')) as DepartmentName;
-
-        const founderEmployee: Employee = {
-          id: state.currentPersona.id || `admin_founder_${Date.now()}`,
-          employeeId: 'EMP001',
-          name: resolvedAdminName,
-          fullName: resolvedAdminName,
-          email: resolvedAdminEmail,
-          phone: '—',
-          avatar: state.currentPersona.avatar || '',
-          department: defaultDept,
-          team: 'Executive Leadership',
-          designation: resolvedAdminDesignation,
-          role: 'super_admin',
-          joiningDate: new Date().toISOString().substring(0, 10),
-          employmentType: 'Full-time',
-          location: defaultOffice,
-          officeName: defaultOffice,
-          skills: ['Leadership', 'Operations', 'Strategy', 'Executive Management'],
-          managerId: '',
-          managerName: '',
-          shiftId: 'sh-1',
-          shiftTiming: {
-            shiftId: 'sh-1',
-            shiftName: 'General Day Shift (09:00 - 18:00)',
-            startTime: '09:00 AM',
-            endTime: '06:00 PM',
-            graceMinutes: 15,
-          },
-          bankDetails: {
-            accountNumber: '—',
-            ifscCode: '—',
-            bankName: '—',
-          },
-          emergencyContact: {
-            name: '',
-            relation: '',
-            phone: '',
-          },
-          salaryDetails: {
-            basic: 100000,
-            hra: 40000,
-            specialAllowance: 20000,
-            pfDeduction: 1800,
-            taxDeduction: 10000,
-            netPayable: 148200,
-          },
-          payrollSummary: {
-            status: 'Active',
-            jobTitle: resolvedAdminDesignation,
-            employmentType: 'Full-time',
-            jobDate: new Date().toISOString().substring(0, 10),
-            geofencing: 'Allowed',
-            lastWorkingDate: '—',
-            totalCompensation: 148200 * 12,
-            salary: 148200,
-            recurring: 148200,
-            oneOff: 0,
-            offset1: 0,
-            offset2: 0,
-          },
-          status: 'Active',
-          isActivated: true,
-          accountStatus: 'Active',
-          hasCompletedProfile: true,
-          onboardingProgress: 100,
-        };
-
-        finalEmployeesList = [founderEmployee, ...finalEmployeesList];
-      }
-    }
-
-    const resolvedFinalDepartments = finalDepartments.length > 0
-      ? Array.from(new Set(finalDepartments))
-      : [state.currentPersona?.department || (state.organization?.industry?.toLowerCase().includes('inst') ? 'Administration' : 'Operations')];
-
-    // Persist manager assignments before marking setup complete / redirecting.
-    const assignmentPayload = resolvedFinalDepartments.map((dept) => {
-      const assign = assignments[dept];
-      const managerEmp = employees.find((e) => e.id === assign?.teamLeadId);
-      return {
-        department: dept,
-        managerEmail: managerEmp?.email || undefined,
-        memberEmails: (assign?.memberIds || [])
-          .map((id) => employees.find((e) => e.id === id)?.email)
-          .filter((email): email is string => Boolean(email)),
-      };
-    });
-
-    const saved = await persistSetupStep(
-      api.setup.saveTeam({
+      await persistStructure();
+      const typesResult: any = await api.setup.saveEmploymentTypes({ employmentTypes });
+      if (!typesResult.success) throw new Error(typesResult.error?.message || 'Employment types could not be saved.');
+      const pending = people.filter((item) => !item.saved);
+      const assignments = departmentNames.map((department) => ({
+        department,
+        managerEmails: leads[department] || [],
+        memberEmails: people.filter((person) => key(person.department) === key(department)).map((person) => person.email),
+      }));
+      const invited: any = await api.setup.saveTeam({
         completeOnboarding: true,
-        employees: [],
-        assignments: assignmentPayload,
-      }),
-      'Workspace launch',
-    );
-    if (!saved) return;
-
-    updateState((prev) => {
-      const next = {
-        ...prev,
-        isAuthenticated: true,
-        customOptions: {
-          ...prev.customOptions,
-          offices: finalOffices,
-          departments: resolvedFinalDepartments,
-          designations: finalDesignations,
-        },
-        employees: finalEmployeesList,
-      };
-      saveStoredState(next);
-      return next;
-    });
-
-    setOnboardingCookie('COMPLETED');
-
-    triggerToast({
-      title: 'Setup Complete',
-      message: 'Workspace configured successfully.',
-      type: 'success',
-    });
-
-    if (typeof window !== 'undefined') {
-      window.location.assign('/dashboard');
-    } else {
-      router.push('/dashboard');
-    }
+        employees: pending.map((person) => {
+          const job = roles.find((item) => key(item.title) === key(person.role) && key(item.department) === key(person.department));
+          return { firstName: person.firstName, lastName: person.lastName, email: person.email, phone: person.phone || undefined, officeName: person.office || undefined, department: person.department, designation: person.role, employmentType: person.employmentType || 'Full-time', dateOfJoining: person.startDate, role: toApiAuthRoleFromJobLevel(job?.level) };
+        }),
+        assignments,
+      });
+      if (!invited.success) throw new Error(invited.error?.message || 'Workspace launch could not be completed.');
+      if (invited.partial) throw new Error(invited.message || 'Some invitations could not be delivered. Review the team and retry.');
+      const createdRows: any[] = Array.isArray(invited.data) ? invited.data : [];
+      setPeople((previous) => previous.map((person) => ({ ...person, saved: true })));
+      const employeeShiftAssignments: Record<string, string> = {};
+      for (const person of people) {
+        if (!person.shiftId) continue;
+        const created = createdRows.find((row) => key(row.email) === person.email);
+        const id = clean(created?.id) || (person.saved && !person.id.startsWith('draft-') && !person.id.startsWith('import-') ? person.id : '');
+        if (id) employeeShiftAssignments[id] = person.shiftId;
+      }
+      const shiftsResult: any = await api.setup.saveAttendanceSettings({ shifts, employeeShiftAssignments });
+      if (!shiftsResult.success) throw new Error(shiftsResult.error?.message || 'Shifts could not be saved.');
+      updateStatus('COMPLETED'); updateState((previous) => ({ ...previous, customOptions: { ...previous.customOptions, offices: officeNames, departments: departmentNames, designations: roleNames, employmentTypes: employmentTypes.map((item) => item.name), employmentTypeCategories: employmentTypes, shifts } })); await syncWithBackend().catch(() => undefined);
+      const stored = draftPeopleKey();
+      if (stored) sessionStorage.removeItem(stored);
+      triggerToast({ title: 'Workspace launched', message: 'Your team is ready to join Pixbe.', type: 'success' }); window.location.assign('/dashboard');
+    } catch (cause: any) { notify('error', cause?.message || 'We could not launch the workspace.'); setBusy(false); }
   };
 
-  return (
-    <div className="min-h-screen bg-[#f8fafc] text-[#0f172a] font-sans flex flex-col justify-between">
-      {/* Top Header */}
-      <header className="w-full bg-white border-b border-[#e2e8f0] px-5 py-3.5 flex items-center justify-between shadow-2xs">
-        <h1 className="text-sm font-bold text-[#0f172a]">Workspace Setup</h1>
-        <button
-          type="button"
-          onClick={async () => {
-            setOnboardingCookie('COMPLETED');
-            updateState((prev) => ({ ...prev, onboardingStatus: 'COMPLETED' } as any));
-            try {
-              await api.setup.saveTeam({ completeOnboarding: true, employees: [] });
-            } catch (e) {
-              console.warn('Could not persist setup completion before exit', e);
-            }
-            // Hard navigate so proxy sees the updated cookie and /me won't bounce us back.
-            window.location.assign('/dashboard');
-          }}
-          className="px-3 py-1.5 rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#f8fafc] text-xs font-semibold text-[#0f172a] transition-all cursor-pointer shadow-2xs"
-        >
-          Exit to Dashboard
-        </button>
-      </header>
+  const stage = (number: number) => number < step ? 'done' : number === step ? 'current' : 'upcoming';
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-3xl w-full mx-auto p-4 sm:p-6 space-y-4 flex flex-col justify-start">
-        {/* Stepper Progress Bar */}
-        <div className="bg-white rounded-xl border border-[#e2e8f0] p-4 shadow-2xs">
-          <div className="relative flex items-center justify-between">
-            <div className="absolute left-8 right-8 top-4 -translate-y-1/2 h-1 bg-[#e2e8f0] rounded-full z-0 overflow-hidden">
-              <div
-                className="h-full bg-[#2563eb] transition-all duration-300 rounded-full"
-                style={{
-                  width: `${((currentStep - 1) / (stepsList.length - 1)) * 100}%`,
-                }}
-              />
-            </div>
-
-            {stepsList.map((st) => {
-              const isDone = currentStep > st.num;
-              const isCurrent = currentStep === st.num;
-
-              return (
-                <div
-                  key={st.num}
-                  onClick={() => {
-                    if (st.num < currentStep) setCurrentStep(st.num as any);
-                  }}
-                  className={`relative z-10 flex flex-col items-center group ${st.num < currentStep ? 'cursor-pointer' : 'cursor-default'
-                    }`}
-                >
-                  <div
-                    className={`w-7.5 h-7.5 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${isDone
-                        ? 'bg-[#2563eb] text-white'
-                        : isCurrent
-                          ? 'bg-[#2563eb] text-white ring-3 ring-blue-100 shadow-sm'
-                          : 'bg-white border border-[#e2e8f0] text-[#64748b]'
-                      }`}
-                  >
-                    {isDone ? <Check className="w-3.5 h-3.5 stroke-[2.5]" /> : st.num}
-                  </div>
-                  <span
-                    className={`text-[11px] font-semibold mt-1.5 transition-colors hidden sm:block ${isCurrent ? 'text-[#0f172a] font-bold' : isDone ? 'text-[#2563eb]' : 'text-[#64748b]'
-                      }`}
-                  >
-                    {st.title}
-                  </span>
-                </div>
-              );
-            })}
+  return <div className="pixbe-setup">
+    <main className="pixbe-setup__main">
+      <aside className="pixbe-setup__rail">
+        <PixbeWordmark className="pixbe-setup__brand text-[15px]" markClassName="h-5 w-5" />
+        <h1>Make this workspace yours.</h1>
+        <ol className="pixbe-setup__steps">{steps.map(([label, detail], index) => { const number = index + 1; const status = stage(number); return <li key={label}><button type="button" disabled={status !== 'done'} onClick={() => setStep(number as Step)} className={status === 'current' ? 'is-current' : status === 'done' ? 'is-done' : ''} aria-current={status === 'current' ? 'step' : undefined}><span className="pixbe-setup__step-no">{status === 'done' ? '✓' : number}</span><span><strong>{label}</strong><small>{detail}</small></span></button></li>; })}</ol>
+        <div className="pixbe-setup__illustration"><img src="/pixbe-workspace-plan.png" alt="" /></div>
+      </aside>
+      <section className="pixbe-setup__content">
+        {!dataLoaded && <div className="pixbe-setup__skeleton" aria-busy="true" aria-live="polite">
+          <span className="pixbe-setup__skeleton-line pixbe-setup__skeleton-line--title" />
+          <span className="pixbe-setup__skeleton-line pixbe-setup__skeleton-line--body" />
+          <div className="pixbe-setup__skeleton-cards">
+            <span /><span /><span />
           </div>
-        </div>
-
-        {/* ==================================================== */}
-        {/* STEP 1: ADD OFFICE LOCATIONS (With AddOfficeModal features) */}
-        {/* ==================================================== */}
-        {currentStep === 1 && (
-          <div className="bg-white rounded-xl border border-[#e2e8f0] p-5 sm:p-6 shadow-2xs space-y-4 animate-in fade-in duration-200">
-            <div className="space-y-0.5">
-              <h2 className="text-lg font-bold text-[#0f172a]">Add Office Locations</h2>
-              <p className="text-[11px] text-[#64748b]">
-                Configure office locations, branch campuses, and GPS geofence boundaries for attendance tracking.
-              </p>
-            </div>
-
-            {/* Comprehensive Office Creation Form matching AddOfficeModal */}
-            <form onSubmit={(e) => { e.preventDefault(); handleCommitCurrentOffice(); }} className="space-y-3 pt-2 border-t border-[#e2e8f0]">
-              {/* Row 1: Name & Address */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <input
-                  id="office-name-input"
-                  type="text"
-                  value={officeName}
-                  onChange={(e) => {
-                    setOfficeName(e.target.value);
-                    if (officeError) setOfficeError('');
-                  }}
-                  placeholder="Office / Branch Name (e.g. Bengaluru HQ) *"
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] placeholder:text-[#64748b] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium"
-                />
-                <input
-                  type="text"
-                  readOnly
-                  value={officeAddress}
-                  placeholder="Street Address or Campus Landmark (Selected on Map) *"
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 text-xs text-[#0f172a] placeholder:text-[#64748b] outline-none cursor-default font-medium select-none"
-                />
-              </div>
-
-              {/* Row 2: Location Map */}
-              <div className="space-y-1.5">
-                <div className="px-0.5">
-                  <span className="text-xs font-semibold text-[#0f172a]">Map</span>
-                </div>
-
-                <OfficeLocationPickerMap
-                  latitude={officeLatitude}
-                  longitude={officeLongitude}
-                  radiusMeters={officeRadius}
-                  onLocationChange={handleLocationChange}
-                  className="h-80 sm:h-96 rounded-lg border border-[#e2e8f0] overflow-hidden shadow-2xs"
-                />
-              </div>
-
-              {/* Row 3: Geofence Radius Slider & Presets */}
-              <div className="p-3 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#0f172a]">
-                    Geofence Radius ({officeRadius} meters)
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="number"
-                      min={MIN_GEOFENCE_LIMIT_METERS}
-                      max={MAX_GEOFENCE_LIMIT_METERS}
-                      value={officeRadius}
-                      onChange={(e) => handleRadiusChange(Number(e.target.value))}
-                      className="w-14 h-7 text-right font-mono text-xs font-bold border border-[#e2e8f0] rounded-md px-1.5 bg-white text-[#2563eb] outline-none focus:border-[#2563eb]"
-                    />
-                    <span className="text-xs font-medium text-[#64748b]">m</span>
-                  </div>
-                </div>
-
-                <input
-                  type="range"
-                  min={25}
-                  max={MAX_GEOFENCE_LIMIT_METERS}
-                  step={25}
-                  value={officeRadius}
-                  onChange={(e) => handleRadiusChange(Number(e.target.value))}
-                  className="w-full accent-[#2563eb] cursor-pointer"
-                />
-
-                <div className="flex gap-1.5">
-                  {[50, 100, 150, 250, 500, 1000].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => handleRadiusChange(preset)}
-                      className={`flex-1 py-0.5 rounded-md text-[11px] font-semibold border transition-all cursor-pointer ${officeRadius === preset
-                          ? 'border-[#2563eb] bg-[#2563eb] text-white shadow-2xs'
-                          : 'border-[#e2e8f0] bg-white text-[#0f172a] hover:border-slate-300'
-                        }`}
-                    >
-                      {preset === 1000 ? '1km' : `${preset}m`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Row 4: Status & Allowed Devices */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <select
-                  value={officeStatus}
-                  onChange={(e) => setOfficeStatus(e.target.value as any)}
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium cursor-pointer"
-                >
-                  <option value="Active">Geofence Status: Active (Strict GPS Required)</option>
-                  <option value="Inactive">Geofence Status: Inactive (GPS Optional)</option>
-                </select>
-
-                <select
-                  value={officeDevices}
-                  onChange={(e) => setOfficeDevices(e.target.value)}
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium cursor-pointer"
-                >
-                  <option value="Desktop, Mobile">Allowed Devices: Desktop & Mobile</option>
-                  <option value="Mobile Only">Allowed Devices: Mobile Only</option>
-                  <option value="Biometric Kiosk Only">Allowed Devices: Biometric Kiosk Only</option>
-                </select>
-              </div>
-
-              {officeError && (
-                <p className="text-xs font-semibold text-rose-600">{officeError}</p>
-              )}
-
-              {/* Form Action: Explicit Add/Update Button */}
-              <div className="pt-2 flex items-center justify-between">
-                <button
-                  type="submit"
-                  className="h-9.5 px-4 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-bold transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                  {editingOfficeId ? 'Save & Update Office Location' : 'Add Office Location'}
-                </button>
-                {editingOfficeId && (
-                  <button
-                    type="button"
-                    onClick={handleCancelEdit}
-                    className="h-9.5 px-3.5 rounded-lg border border-[#e2e8f0] bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition-all cursor-pointer"
-                  >
-                    Cancel Edit
-                  </button>
-                )}
-              </div>
-            </form>
-
-            {/* Configured Offices List - Matching Settings Layout (compacted) */}
-            <div className="space-y-3 pt-3 border-t border-[#e2e8f0]">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Configured Office Locations ({offices.length})
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Physical branch locations and geofences configured for your workspace
-                  </p>
-                </div>
-              </div>
-
-              {offices.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-200 bg-white p-6 flex flex-col items-center justify-center text-center space-y-2">
-                  <h4 className="text-xs font-semibold text-slate-900">No Locations Configured</h4>
-                  <p className="text-[11px] text-slate-500 max-w-sm">
-                    Add your physical campus or office locations and geofences above to enable location-restricted check-ins.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const el = document.getElementById('office-name-input');
-                      if (el) el.focus();
-                      setOfficeError('Please type your Office / Branch name above');
-                    }}
-                    className="mt-1 h-8.5 px-3.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                    Enter Office Details Above
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {offices.map((off) => (
-                    <div
-                      key={off.id}
-                      className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5 space-y-3 transition-all hover:border-slate-300 shadow-2xs"
-                    >
-                      {/* Office Title + Action Buttons */}
-                      <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
-                        <h4 className="text-sm font-bold text-slate-900 tracking-tight">
-                          {off.name}
-                        </h4>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleEditOffice(off)}
-                            className="text-slate-500 hover:text-slate-900 font-semibold text-[11px] cursor-pointer px-2 py-0.5 transition-colors"
-                            title="Edit Location"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveOffice(off.id)}
-                            className="text-rose-500 hover:text-rose-700 font-semibold text-[11px] cursor-pointer px-2 py-0.5 transition-colors"
-                            title="Remove Location"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Details Grid */}
-                      <div className="grid grid-cols-1 md:grid-cols-12 gap-y-2 text-xs">
-                        <div className="md:col-span-4 text-slate-500 font-medium">Status</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold flex items-center gap-1.5">
-                          <span
-                            className={`h-2 w-2 rounded-full inline-block ${off.geofencingStatus === 'Active' ? 'bg-emerald-500' : 'bg-slate-300'
-                              }`}
-                          />
-                          <span>{off.geofencingStatus}</span>
-                        </div>
-
-                        <div className="md:col-span-4 text-slate-500 font-medium">Address</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold">{off.address}</div>
-
-                        <div className="md:col-span-4 text-slate-500 font-medium">Radius</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold font-mono">{off.radiusMeters}m</div>
-
-                        <div className="md:col-span-4 text-slate-500 font-medium">Policy</div>
-                        <div className="md:col-span-8 text-slate-900 font-semibold">
-                          {off.policyDescription || 'Strict clock-in within geofence perimeter'}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Step 1 Actions */}
-            <div className="pt-3 flex items-center justify-between border-t border-[#e2e8f0]">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!officeName.trim()) {
-                      const el = document.getElementById('office-name-input');
-                      if (el) el.focus();
-                      setOfficeError('Please type your Office / Branch name above');
-                    } else {
-                      handleCommitCurrentOffice();
-                    }
-                  }}
-                  className="h-9.5 px-4 rounded-lg border border-[#e2e8f0] bg-white hover:bg-slate-50 text-xs font-bold text-slate-800 transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                  Add Office Location
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleProceedToStep2}
-                className="h-9.5 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-bold transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
-              >
-                Next: Departments <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+        </div>}
+        {dataLoaded && message && <div role={message.kind === 'error' ? 'alert' : 'status'} className={`pixbe-setup__message is-${message.kind}`}><span>{message.text}</span><button type="button" onClick={() => setMessage(null)} aria-label="Dismiss message"><X className="size-4" /></button></div>}
+        {dataLoaded && step === 1 && <SetupWorkplaceStep mode={mode} setMode={setMode} offices={offices} officeForm={officeForm} setOfficeForm={setOfficeForm} timezones={timezones} addOffice={addOffice} removeOffice={removeOffice} saveWorkplace={saveWorkplace} busy={busy} />}
+        {dataLoaded && step === 3 && <SetupWorkPatternsStep employmentTypes={employmentTypes} setEmploymentTypes={setEmploymentTypes} shifts={shifts} setShifts={setShifts} saveWorkPatterns={saveWorkPatterns} goBack={() => setStep(2)} busy={busy} />}
+        {dataLoaded && step === 2 && <div className="setup-patterns">
+          <div className="setup-patterns__heading">
+            <h2>Shape your organisation.</h2>
           </div>
-        )}
-
-        {/* ==================================================== */}
-        {/* STEP 2: ADD DEPARTMENTS */}
-        {/* ==================================================== */}
-        {currentStep === 2 && (
-          <div className="bg-white rounded-xl border border-[#e2e8f0] p-5 sm:p-6 shadow-2xs space-y-4 animate-in fade-in duration-200">
-            <div className="space-y-0.5">
-              <h2 className="text-lg font-bold text-[#0f172a]">Add Departments</h2>
-              <p className="text-[11px] text-[#64748b]">
-                Structure your company teams and functional departments.
-              </p>
-              {offices.length > 0 && (
-                <p className="text-[11px] text-[#475569] pt-1">
-                  Offices ready:{' '}
-                  {offices.map((o) => (
-                    <span key={o.id} className="font-semibold text-[#0f172a]">
-                      {o.name}
-                      {offices[offices.length - 1]?.id !== o.id ? ', ' : ''}
-                    </span>
-                  ))}
-                </p>
-              )}
-            </div>
-
-            {/* Department Input */}
-            <form onSubmit={handleAddDepartment} className="flex gap-2">
-              <input
-                type="text"
-                value={departmentInput}
-                onChange={(e) => setDepartmentInput(e.target.value)}
-                placeholder="Department Name (e.g. Engineering)"
-                className="flex-1 h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] placeholder:text-[#64748b] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium"
-              />
-              <button
-                type="submit"
-                disabled={!departmentInput.trim()}
-                className="h-9.5 px-4 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Department
-              </button>
-            </form>
-
-            {/* Quick Presets */}
-            <div className="space-y-1.5 pt-1 border-t border-[#e2e8f0]">
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {COMMON_DEPARTMENTS.map((dept) => {
-                  const isAdded = departments.some((d) => d.toLowerCase() === dept.toLowerCase());
-                  return (
-                    <button
-                      key={dept}
-                      type="button"
-                      disabled={isAdded}
-                      onClick={() => handleQuickAddDepartment(dept)}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all cursor-pointer flex items-center gap-1 ${isAdded
-                          ? 'border-[#e2e8f0] bg-[#f8fafc] text-[#94a3b8] cursor-not-allowed'
-                          : 'border-[#e2e8f0] bg-white text-[#0f172a] hover:border-[#2563eb] hover:text-[#2563eb]'
-                        }`}
-                    >
-                      {isAdded ? <Check className="w-3 h-3 text-emerald-600" /> : <Plus className="w-3 h-3" />}
-                      {dept}
-                    </button>
-                  );
-                })}
+          <div className="setup-patterns__grid">
+            <section>
+              <div className="setup-patterns__section-head">
+                <h3>Departments</h3>
+                <span>{departmentNames.length}</span>
               </div>
-            </div>
-
-            {/* List of Configured Departments */}
-            <div className="space-y-2.5 pt-1">
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                {departments.map((dept) => (
-                  <div
-                    key={dept}
-                    className="p-2.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] hover:border-slate-300 transition-all flex items-center justify-between gap-2 shadow-2xs"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-6 h-6 rounded-md bg-blue-50 text-[#2563eb] flex items-center justify-center font-bold text-xs shrink-0">
-                        {dept.charAt(0)}
-                      </div>
-                      <span className="font-semibold text-xs text-[#0f172a] truncate">{dept}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveDepartment(dept)}
-                      className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
-                      title="Remove department"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+              <div className="setup-chips">{suggestions.filter((item) => !departmentNames.some((name) => key(name) === key(item))).map((item) => <button key={item} type="button" onClick={() => addDepartment(item)} className="setup-chip">+ {item}</button>)}</div>
+              <div className="setup-patterns__add">
+                <input value={departmentInput} onChange={(event) => setDepartmentInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addDepartment(); } }} placeholder="Add a department" />
+                <button type="button" onClick={() => addDepartment()} className="setup-icon-btn" aria-label="Add department"><Plus className="size-4" /></button>
               </div>
-            </div>
-
-            {/* Step 2 Actions */}
-            <div className="pt-3 flex items-center justify-between border-t border-[#e2e8f0]">
-              <button
-                type="button"
-                onClick={() => setCurrentStep(1)}
-                className="h-9.5 px-4 rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#f8fafc] text-xs font-semibold text-[#0f172a] transition-all cursor-pointer flex items-center gap-1.5"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> Back
-              </button>
-              <button
-                type="button"
-                disabled={departments.length === 0}
-                onClick={handleProceedToStep3}
-                className="h-9.5 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-              >
-                Next: Job Roles <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+              <div className="setup-patterns__rows">{departments.map((department, index) => <div key={`${department.name}-${index}`} className="setup-patterns__row"><div><strong>{department.name}</strong></div><button type="button" onClick={() => setDepartments((previous) => previous.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove ${department.name}`}><Trash2 className="size-4" /></button></div>)}</div>
+            </section>
+            <section>
+              <div className="setup-patterns__section-head">
+                <h3>Job roles</h3>
+                <span>{roles.length}</span>
+              </div>
+              <div className="setup-form-grid">
+                <label className="setup-field">Job title<input value={roleForm.title} onChange={(event) => setRoleForm((previous) => ({ ...previous, title: event.target.value }))} placeholder="e.g. Product Designer" /></label>
+                <label className="setup-field">Department<select value={roleForm.department || departmentNames[0] || ''} onChange={(event) => setRoleForm((previous) => ({ ...previous, department: event.target.value }))}>{departmentNames.map((department) => <option key={department}>{department}</option>)}</select></label>
+                <label className="setup-field">Permission<select value={roleForm.level} onChange={(event) => setRoleForm((previous) => ({ ...previous, level: event.target.value as JobLevel }))}>{JOB_LEVELS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                <button type="button" onClick={addRole} className="setup-button setup-button--secondary"><Plus className="size-4" />Add role</button>
+              </div>
+              <div className="setup-patterns__rows">{roles.map((role, index) => <div key={`${role.department}-${role.title}-${index}`} className="setup-patterns__row"><div><strong>{role.title}</strong><small>{role.department}</small></div><select className="setup-level-select" value={role.level} onChange={(event) => setRoles((previous) => previous.map((item, itemIndex) => itemIndex === index ? { ...item, level: event.target.value as JobLevel } : item))} aria-label={`Permission for ${role.title}`}>{JOB_LEVELS.map((item) => <option key={item.value} value={item.value}>{item.value}</option>)}</select><button type="button" onClick={() => setRoles((previous) => previous.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove ${role.title}`}><Trash2 className="size-4" /></button></div>)}</div>
+            </section>
           </div>
-        )}
-
-        {/* ==================================================== */}
-        {/* STEP 3: ADD JOB ROLES */}
-        {/* ==================================================== */}
-        {currentStep === 3 && (
-          <div className="bg-white rounded-xl border border-[#e2e8f0] p-5 sm:p-6 shadow-2xs space-y-5 animate-in fade-in duration-200">
-            <div className="space-y-1">
-              <h2 className="text-lg font-bold text-[#0f172a] tracking-tight">
-                {editingJobId ? 'Edit Job Role' : 'Create New Job Role'}
-              </h2>
-              <p className="text-xs text-[#64748b]">
-                Configure designation, department, permission scope, and compensation band.
-              </p>
-              {departments.length > 0 && (
-                <p className="text-[11px] text-[#475569]">
-                  Departments ready:{' '}
-                  {departments.map((dept, idx) => (
-                    <span key={dept} className="font-semibold text-[#0f172a]">
-                      {dept}{idx < departments.length - 1 ? ', ' : ''}
-                    </span>
-                  ))}
-                </p>
-              )}
+          <div className="setup-workplace__footer">
+            <button type="button" className="setup-button setup-button--secondary" onClick={() => setStep(1)}>Back</button>
+            <button type="button" className="setup-button setup-button--primary" disabled={busy} onClick={saveStructure}>{busy ? 'Saving…' : 'Save structure & continue'}<span aria-hidden="true">→</span></button>
+          </div>
+        </div>}
+        {dataLoaded && step === 4 && <div className="setup-patterns">
+          <div className="setup-step__top">
+            <div className="setup-patterns__heading">
+              <h2>Invite your first people.</h2>
             </div>
-
-            {/* Form matching user screenshot exactly */}
-            <form onSubmit={(e) => { e.preventDefault(); handleCommitCurrentJob(); }} className="space-y-4 pt-2 border-t border-[#e2e8f0]">
-              {/* Job Title */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-800">
-                  Job Title / Designation <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={jobTitleInput}
-                  onChange={(e) => {
-                    setJobTitleInput(e.target.value);
-                    if (jobError) setJobError('');
-                  }}
-                  placeholder="e.g. Senior Frontend Engineer, QA Lead, Sales Director"
-                  className="w-full h-10 rounded-lg border border-[#e2e8f0] bg-white px-3.5 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 font-medium transition-all placeholder:text-slate-400"
-                />
+            <button type="button" className="setup-button setup-button--secondary" onClick={downloadTemplate}><FileSpreadsheet className="size-4" />Get CSV template</button>
+          </div>
+          <div className="setup-people">
+            <section>
+              <div className="setup-patterns__section-head">
+                <h3>Add a person</h3>
               </div>
-
-              {/* Department & Permission Level */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-800">
-                    Department
-                  </label>
-                  <select
-                    value={jobDeptInput || (departments[0] || 'General')}
-                    onChange={(e) => setJobDeptInput(e.target.value)}
-                    className="w-full h-10 rounded-lg border border-[#e2e8f0] bg-white px-3.5 text-xs font-semibold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 cursor-pointer"
-                  >
-                    {departments.length === 0 && <option value="General">General</option>}
-                    {departments.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
+              <div className="setup-form-grid">
+                <label className="setup-field">First name<input value={personForm.firstName} onChange={(event) => setPersonForm((previous) => ({ ...previous, firstName: event.target.value }))} /></label>
+                <label className="setup-field">Last name<input value={personForm.lastName} onChange={(event) => setPersonForm((previous) => ({ ...previous, lastName: event.target.value }))} /></label>
+                <label className="setup-field is-wide">Work email<input type="email" value={personForm.email} onChange={(event) => setPersonForm((previous) => ({ ...previous, email: event.target.value }))} /></label>
+                <label className="setup-field">Phone<input value={personForm.phone} onChange={(event) => setPersonForm((previous) => ({ ...previous, phone: event.target.value }))} placeholder="Optional" /></label>
+                <label className="setup-field">Start date<input type="date" value={personForm.startDate} onChange={(event) => setPersonForm((previous) => ({ ...previous, startDate: event.target.value }))} /></label>
+                <label className="setup-field">Department<select value={personForm.department || departmentNames[0] || ''} onChange={(event) => setPersonForm((previous) => ({ ...previous, department: event.target.value, role: '' }))}>{departmentNames.map((department) => <option key={department}>{department}</option>)}</select></label>
+                <label className="setup-field">Job role<select value={personForm.role || personRoleNames[0] || ''} onChange={(event) => setPersonForm((previous) => ({ ...previous, role: event.target.value }))}>{roles.filter((item) => key(item.department) === key(personForm.department || departmentNames[0])).map((item) => <option key={`${item.department}-${item.title}`} value={item.title}>{item.title} · {item.level}</option>)}</select></label>
+                <label className="setup-field">Employment type<select value={personForm.employmentType} onChange={(event) => setPersonForm((previous) => ({ ...previous, employmentType: event.target.value }))}>{employmentTypeOptions.map((type) => <option key={type}>{type}</option>)}</select></label>
+                <label className="setup-field">Shift<select value={personForm.shiftId || shifts[0]?.id || ''} onChange={(event) => setPersonForm((previous) => ({ ...previous, shiftId: event.target.value }))}>{shifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.name}</option>)}</select></label>
+                {officeNames.length > 0 && <label className="setup-field">Workplace<select value={personForm.office} onChange={(event) => setPersonForm((previous) => ({ ...previous, office: event.target.value }))}><option value="">{mode === 'onsite' ? 'Choose workplace' : 'No assigned office'}</option>{officeNames.map((office) => <option key={office}>{office}</option>)}</select></label>}
+                <label className="setup-field is-wide">Manager<select value={personForm.managerEmail} onChange={(event) => setPersonForm((previous) => ({ ...previous, managerEmail: event.target.value }))}><option value="">Chosen later (add more at review)</option>{leadOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+              </div>
+              <button type="button" onClick={addPerson} className="setup-button setup-button--secondary"><Plus className="size-4" />Add person</button>
+            </section>
+            <section className="setup-import">
+              <div className="setup-patterns__section-head">
+                <h3>Import a CSV</h3>
+              </div>
+              <input ref={fileInput} type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPeople(file); event.currentTarget.value = ''; }} />
+              <button type="button" onClick={() => fileInput.current?.click()} className="setup-button setup-button--secondary"><Upload className="size-4" />Choose CSV</button>
+              {importErrors.length > 0 && <ul className="setup-issues">{importErrors.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
+            </section>
+          </div>
+          <div className="setup-list">
+            <div className="setup-patterns__section-head">
+              <h3>Invitation list</h3>
+              <span>{people.length}</span>
+            </div>
+            <div className="setup-patterns__rows">{people.map((person) => {
+              const job = roles.find((item) => key(item.title) === key(person.role) && key(item.department) === key(person.department));
+              return <div key={person.id} className="setup-patterns__row"><div><strong>{person.firstName} {person.lastName}</strong><small>{person.email} · {person.department} · {person.role}{job ? ` · ${job.level}` : ''} · {person.employmentType}{person.shiftId ? ` · ${shifts.find((shift) => shift.id === person.shiftId)?.name || 'Shift'}` : ''}{person.office ? ` · ${person.office}` : ''}</small></div><button type="button" disabled={person.saved} onClick={() => setPeople((previous) => previous.filter((candidate) => candidate.id !== person.id))} aria-label={`Remove ${person.firstName}`}><Trash2 className="size-4" /></button></div>;
+            })}</div>
+          </div>
+          <div className="setup-workplace__footer">
+            <button type="button" className="setup-button setup-button--secondary" onClick={() => setStep(3)}>Back</button>
+            <button type="button" className="setup-button setup-button--primary" disabled={busy} onClick={savePeople}>{busy ? 'Sending invitations…' : 'Review setup'}<span aria-hidden="true">→</span></button>
+          </div>
+        </div>}
+        {dataLoaded && step === 5 && <div className="setup-patterns">
+          <div className="setup-patterns__heading">
+            <h2>Review and launch.</h2>
+          </div>
+          <div className="setup-review-list">{departmentNames.map((department) => {
+            const members = people.filter((person) => key(person.department) === key(department));
+            return <div key={department} className="setup-review-item">
+              <div>
+                <h3>{department}</h3>
+                <p>{members.length} person to invite{members.length === 1 ? '' : 's'} · {roles.filter((role) => key(role.department) === key(department)).map((role) => `${role.title} (${role.level})`).join(', ') || 'No role assigned'}</p>
+              </div>
+              <div className="setup-review-managers">
+                <p>Managers</p>
+                {!(leads[department] || []).length && <p>No manager</p>}
+                {(leads[department] || []).length > 0 && <div className="setup-pills">{(leads[department] || []).map((email, index) => {
+                  const option = leadOptions.find((item) => item.value === email);
+                  return <span key={email} className="setup-pill"><span>{option?.label.split(' · ')[0] || email}</span>{index === 0 && (leads[department] || []).length > 1 && <small>Primary</small>}<button type="button" onClick={() => removeLead(department, email)} aria-label={`Remove ${option?.label || email} as manager`}><X className="size-3" /></button></span>;
+                })}</div>}
+                <label className="setup-field">Add manager
+                  <select value="" onChange={(event) => { if (event.target.value) addLead(department, event.target.value); }} aria-label={`Add manager for ${department}`}>
+                    <option value="">{(leads[department] || []).length ? 'Add another manager' : 'Add manager (or assign later)'}</option>
+                    {leadOptions.filter((item) => !(leads[department] || []).includes(item.value)).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-800">
-                    Permission Level <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={jobPermissionInput}
-                    onChange={(e) => setJobPermissionInput(e.target.value as any)}
-                    className="w-full h-10 rounded-lg border border-[#e2e8f0] bg-white px-3.5 text-xs font-semibold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 cursor-pointer"
-                  >
-                    <option value="Employee">Employee (Standard Access)</option>
-                    <option value="Manager">Manager (Approver & Lead)</option>
-                    <option value="HR">HR (Operations & Records)</option>
-                    <option value="Admin">Admin (Full System Access)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Role Scope & Responsibilities */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-800">
-                  Role Scope & Responsibilities
                 </label>
-                <textarea
-                  rows={3}
-                  value={jobDescriptionInput}
-                  onChange={(e) => setJobDescriptionInput(e.target.value)}
-                  placeholder="Outline the core responsibilities, deliverables, and expectations for this job title..."
-                  className="w-full rounded-lg border border-[#e2e8f0] bg-white px-3.5 py-2.5 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 font-medium resize-none placeholder:text-slate-400"
-                />
               </div>
-
-              {/* Role Capabilities & Approvals */}
-              <div className="pt-3 border-t border-[#e2e8f0] space-y-2.5">
-                <h4 className="text-xs font-bold text-[#0f172a] uppercase tracking-wider">
-                  Role Capabilities & Approvals
-                </h4>
-
-                <div className="flex items-center justify-between p-3 rounded-lg border border-[#e2e8f0] bg-[#f8fafc]">
-                  <div>
-                    <span className="text-xs font-bold text-[#0f172a] block">
-                      Can Approve Team Timesheets
-                    </span>
-                    <span className="text-[10.5px] text-[#64748b]">Direct reports submit timesheets to this role for sign-off.</span>
-                  </div>
-                  <ToggleSwitch checked={jobCanApproveTimesheets} onChange={setJobCanApproveTimesheets} />
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg border border-[#e2e8f0] bg-[#f8fafc]">
-                  <div>
-                    <span className="text-xs font-bold text-[#0f172a] block">
-                      Can Assign and Delegate Project Tasks
-                    </span>
-                    <span className="text-[10.5px] text-[#64748b]">Allows task creation and allocation in project Kanban boards.</span>
-                  </div>
-                  <ToggleSwitch checked={jobCanAssignTasks} onChange={setJobCanAssignTasks} />
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg border border-[#e2e8f0] bg-[#f8fafc]">
-                  <div>
-                    <span className="text-xs font-bold text-[#0f172a] block">
-                      Can Regularize Attendance & Review Leaves
-                    </span>
-                    <span className="text-[10.5px] text-[#64748b]">Grants authorization for leave and biometric attendance overrides.</span>
-                  </div>
-                  <ToggleSwitch checked={jobCanApproveLeaves} onChange={setJobCanApproveLeaves} />
-                </div>
-              </div>
-
-              {jobError && (
-                <p className="text-xs font-semibold text-rose-600">{jobError}</p>
-              )}
-
-              {/* Action Buttons inside Form */}
-              <div className="pt-2 flex items-center justify-end gap-2.5">
-                {(editingJobId || jobTitleInput) && (
-                  <button
-                    type="button"
-                    onClick={handleCancelJobEdit}
-                    className="px-4 py-2 rounded-lg border border-[#e2e8f0] text-xs font-bold text-slate-700 hover:bg-[#f8fafc] transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold text-xs transition-colors cursor-pointer shadow-xs"
-                >
-                  {editingJobId ? 'Save Changes' : 'Save Job Role'}
-                </button>
-              </div>
-            </form>
-
-            {/* Configured Job Roles List */}
-            <div className="space-y-3 pt-3 border-t border-[#e2e8f0]">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Configured Job Roles ({jobRoles.length})
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Job titles, permission scopes, and capabilities configured for your workspace
-                  </p>
-                </div>
-              </div>
-
-              {jobRoles.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-200 bg-white p-6 flex flex-col items-center justify-center text-center space-y-1">
-                  <h4 className="text-xs font-semibold text-slate-900">No Job Roles Configured</h4>
-                  <p className="text-[11px] text-slate-500 max-w-sm">
-                    Add job positions and roles above to assign to incoming team members.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {jobRoles.map((job) => {
-                    const activeCaps: string[] = [];
-                    if (job.canApproveTimesheets) activeCaps.push('Timesheet Approvals');
-                    if (job.canAssignTasks) activeCaps.push('Task Delegation');
-                    if (job.canApproveLeaves) activeCaps.push('Leave Regularization');
-
-                    return (
-                      <div
-                        key={job.id}
-                        className="p-3 sm:p-3.5 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-all flex items-center justify-between gap-3 shadow-2xs"
-                      >
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-xs sm:text-sm font-bold text-slate-900 tracking-tight">
-                              {job.title}
-                            </h4>
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
-                              {job.department}
-                            </span>
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                              {job.permissionLevel}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium flex-wrap">
-                            {job.description && (
-                              <span className="text-slate-600 truncate max-w-md">{job.description}</span>
-                            )}
-                            {job.description && activeCaps.length > 0 && (
-                              <span className="text-slate-300">•</span>
-                            )}
-                            {activeCaps.length > 0 && (
-                              <span className="text-slate-400">
-                                Scope: <span className="text-slate-700 font-semibold">{activeCaps.join(', ')}</span>
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleEditJob(job)}
-                            className="text-slate-500 hover:text-slate-900 font-semibold text-xs cursor-pointer px-2.5 py-1 rounded-md hover:bg-slate-50 transition-colors"
-                            title="Edit Role"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveJob(job.id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 transition-colors cursor-pointer"
-                            title="Delete Role"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Step 3 Wizard Navigation */}
-            <div className="pt-3 flex items-center justify-between border-t border-[#e2e8f0]">
-              <button
-                type="button"
-                onClick={() => setCurrentStep(2)}
-                className="h-9.5 px-4 rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#f8fafc] text-xs font-semibold text-[#0f172a] transition-all cursor-pointer flex items-center gap-1.5"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> Back: Departments
-              </button>
-
-              <button
-                type="button"
-                disabled={jobRoles.length === 0 && !jobTitleInput.trim()}
-                onClick={handleProceedToStep4}
-                className="h-9.5 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-              >
-                Next: Team Members <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            </div>;
+          })}</div>
+          <div className="setup-facts">
+            <span><strong>{offices.length || '—'}</strong> workplaces</span>
+            <span><strong>{departmentNames.length}</strong> departments</span>
+            <span><strong>{employmentTypes.length}</strong> employment types</span>
+            <span><strong>{shifts.length}</strong> shifts</span>
+            <span><strong>{people.length}</strong> people to invite</span>
+            {state.license?.planName && <span><strong>{state.license.planName}</strong> license</span>}
           </div>
-        )}
-
-        {/* ==================================================== */}
-        {/* STEP 4: ADD EMPLOYEES */}
-        {/* ==================================================== */}
-        {currentStep === 4 && (
-          <div className="bg-white rounded-xl border border-[#e2e8f0] p-5 sm:p-6 shadow-2xs space-y-4 animate-in fade-in duration-200">
-            <div className="space-y-0.5">
-              <h2 className="text-lg font-bold text-[#0f172a]">Add Team Members</h2>
-              <p className="text-[11px] text-[#64748b]">
-                Add employees and assign initial roles, designations, and branch campuses.
-              </p>
-              {jobRoles.length > 0 && (
-                <p className="text-[11px] text-[#475569] pt-1">
-                  Roles ready:{' '}
-                  {jobRoles.map((role, idx) => (
-                    <span key={role.id} className="font-semibold text-[#0f172a]">
-                      {role.title}{idx < jobRoles.length - 1 ? ', ' : ''}
-                    </span>
-                  ))}
-                </p>
-              )}
-            </div>
-
-            {/* Employee Form with same setup info as AddEmployeeModal */}
-            <form onSubmit={handleAddEmployee} className="space-y-2.5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <input
-                  type="text"
-                  value={empName}
-                  onChange={(e) => setEmpName(e.target.value)}
-                  placeholder="Full Name *"
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] placeholder:text-[#64748b] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium"
-                />
-                <input
-                  type="email"
-                  value={empEmail}
-                  onChange={(e) => setEmpEmail(e.target.value)}
-                  placeholder="Official Email *"
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] placeholder:text-[#64748b] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <input
-                  type="tel"
-                  maxLength={10}
-                  value={empPhone}
-                  onChange={(e) => setEmpPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  placeholder="Phone Number (10 digits)"
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] placeholder:text-[#64748b] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium"
-                />
-                <select
-                  value={empDesignation || (jobRoles[0]?.title || '')}
-                  onChange={(e) => {
-                    const selectedTitle = e.target.value;
-                    setEmpDesignation(selectedTitle);
-                    const matchedRole = jobRoles.find((j) => j.title === selectedTitle);
-                    if (matchedRole && matchedRole.department) {
-                      setEmpDepartment(matchedRole.department);
-                    }
-                  }}
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium cursor-pointer"
-                >
-                  {jobRoles.length === 0 && (
-                    <option value="">Job Role: None configured</option>
-                  )}
-                  {jobRoles.map((jr) => (
-                    <option key={jr.id} value={jr.title}>
-                      Job Role: {jr.title} ({jr.department})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <select
-                  value={empDepartment || departments[0] || ''}
-                  onChange={(e) => setEmpDepartment(e.target.value)}
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium cursor-pointer"
-                >
-                  {departments.map((dept) => (
-                    <option key={dept} value={dept}>
-                      Department: {dept}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={empOffice || offices[0]?.name || ''}
-                  onChange={(e) => setEmpOffice(e.target.value)}
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium cursor-pointer"
-                >
-                  {offices.map((office) => (
-                    <option key={office.id} value={office.name}>
-                      Office: {office.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <input
-                  type="date"
-                  value={empJoiningDate}
-                  onChange={(e) => setEmpJoiningDate(e.target.value)}
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium"
-                />
-
-                <select
-                  value={empEmploymentType}
-                  onChange={(e) => setEmpEmploymentType(e.target.value as any)}
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium cursor-pointer"
-                >
-                  <option value="Full-time">Full-time</option>
-                  <option value="Part-time">Part-time</option>
-                  <option value="Contract">Contract</option>
-                  <option value="Intern">Intern</option>
-                </select>
-
-                <select
-                  value={empShift}
-                  onChange={(e) => setEmpShift(e.target.value)}
-                  className="h-9.5 rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-blue-100 transition-all font-medium cursor-pointer"
-                >
-                  <option value="General Day Shift (09:00 - 18:00)">General Day Shift</option>
-                  <option value="Flexible / Hourly Shift">Flexible Shift</option>
-                </select>
-              </div>
-
-              {employeeError && (
-                <p className="text-xs text-rose-600 font-semibold">{employeeError}</p>
-              )}
-
-              <div className="flex justify-end pt-1">
-                <button
-                  type="submit"
-                  className="h-9 px-4.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-bold transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add Team Member
-                </button>
-              </div>
-            </form>
-
-            {/* Table of Added Employees */}
-            <div className="space-y-2.5 pt-2 border-t border-[#e2e8f0]">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-[#0f172a]">
-                  Configured Members ({employees.length})
-                </span>
-              </div>
-
-              {employees.length === 0 ? (
-                <div className="py-6 text-center text-xs text-[#64748b] border border-dashed border-[#e2e8f0] rounded-lg bg-[#f8fafc]">
-                  No employees added yet. Use the form above to add members.
-                </div>
-              ) : (
-                <div className="overflow-x-auto border border-[#e2e8f0] rounded-lg shadow-2xs">
-                  <table className="w-full text-left text-xs text-[#0f172a]">
-                    <thead className="bg-[#f8fafc] border-b border-[#e2e8f0] text-[#64748b] font-bold">
-                      <tr>
-                        <th className="py-2.5 px-3">Member</th>
-                        <th className="py-2.5 px-3">Designation</th>
-                        <th className="py-2.5 px-3">Department</th>
-                        <th className="py-2.5 px-3">Office</th>
-                        <th className="py-2.5 px-3">Type</th>
-                        <th className="py-2.5 px-3 text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#e2e8f0] bg-white">
-                      {employees.map((emp) => {
-                        const isYou = isOwnSetupAccount(emp);
-                        return (
-                        <tr key={emp.id} className="hover:bg-[#f8fafc] transition-colors">
-                          <td className="py-2.5 px-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-full bg-blue-100 text-[#2563eb] font-bold flex items-center justify-center text-[11px] shrink-0">
-                                {emp.name.charAt(0)}
-                              </div>
-                              <div className="min-w-0">
-                                <span className="font-semibold text-xs text-[#0f172a] block truncate">
-                                  {emp.name}
-                                  {isYou ? (
-                                    <span className="ml-1.5 text-[10px] font-bold text-[#2563eb]">(You)</span>
-                                  ) : null}
-                                </span>
-                                <span className="text-[10px] text-[#64748b] block truncate">{emp.email}</span>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-700">{emp.designation}</td>
-                          <td className="py-2.5 px-3">{emp.department || '—'}</td>
-                          <td className="py-2.5 px-3">{emp.officeName || '—'}</td>
-                          <td className="py-2.5 px-3 text-[#64748b]">{emp.employmentType}</td>
-                          <td className="py-2.5 px-3 text-right">
-                            {isYou ? (
-                              <span
-                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400 px-1"
-                                title="Your account cannot be removed"
-                              >
-                                <Shield className="w-3.5 h-3.5" />
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveEmployee(emp.id)}
-                                className="text-slate-400 hover:text-rose-600 transition-colors p-1"
-                                title="Remove member"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Step 4 Actions */}
-            <div className="pt-3 flex items-center justify-between border-t border-[#e2e8f0]">
-              <button
-                type="button"
-                onClick={() => setCurrentStep(3)}
-                className="h-9.5 px-4 rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#f8fafc] text-xs font-semibold text-[#0f172a] transition-all cursor-pointer flex items-center gap-1.5"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> Back
-              </button>
-              <button
-                type="button"
-                disabled={employees.length === 0}
-                onClick={handleProceedToStep5}
-                className="h-9.5 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-              >
-                Next: Finalize Departments <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+          <div className="setup-facts-detail">
+            {employmentTypes.map((item) => <p key={item.id}><strong>{item.name}</strong>{item.hasBenefits ? ' · benefits' : ''}</p>)}
+            {shifts.map((shift) => <p key={shift.id}><strong>{shift.name}</strong> · {shiftSummary(shift)}</p>)}
           </div>
-        )}
-
-        {/* ==================================================== */}
-        {/* STEP 5: FINALIZE DEPARTMENTS & TEAM LEADS */}
-        {/* ==================================================== */}
-        {currentStep === 5 && (
-          <div className="bg-white rounded-xl border border-[#e2e8f0] p-5 sm:p-6 shadow-2xs space-y-4 animate-in fade-in duration-200">
-            <div className="space-y-0.5">
-              <h2 className="text-lg font-bold text-[#0f172a]">Finalize Departments & Managers</h2>
-              <p className="text-[11px] text-[#64748b]">
-                Assign members to their departments and designate a Manager for each department team.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              {departments.map((dept) => {
-                const currentAssign = assignments[dept] || {
-                  department: dept,
-                  teamLeadId: '',
-                  memberIds: [],
-                };
-                const availableEmployees = employees;
-
-                return (
-                  <div
-                    key={dept}
-                    className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5 space-y-3.5 shadow-2xs"
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-100 pb-3">
-                      <div>
-                        <h3 className="font-bold text-sm text-slate-900">{dept}</h3>
-                        <p className="text-[11px] text-slate-500">
-                          {currentAssign.memberIds.length} member{currentAssign.memberIds.length !== 1 ? 's' : ''} assigned
-                        </p>
-                      </div>
-
-                      {/* Department Manager Selector */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-slate-700 shrink-0">
-                          Manager:
-                        </span>
-                        <select
-                          value={currentAssign.teamLeadId}
-                          onChange={(e) => handleSetTeamLead(dept, e.target.value)}
-                          className="h-8.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-blue-600 font-medium cursor-pointer min-w-[160px] max-w-[220px]"
-                        >
-                          <option value="">No Manager Selected</option>
-                          {availableEmployees.map((emp) => (
-                            <option key={emp.id} value={emp.id}>
-                              {emp.name} ({emp.designation})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Member Assignment Grid */}
-                    <div className="space-y-1.5">
-                      <span className="text-[11px] font-semibold text-slate-600">
-                        Assign Members to {dept}:
-                      </span>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-0.5">
-                        {availableEmployees.map((emp) => {
-                          const isAssigned = currentAssign.memberIds.includes(emp.id);
-                          const isLead = currentAssign.teamLeadId === emp.id;
-
-                          return (
-                            <div
-                              key={emp.id}
-                              onClick={() => handleToggleMember(dept, emp.id)}
-                              className={`p-2.5 rounded-lg border text-xs transition-all cursor-pointer flex items-center justify-between gap-2 select-none ${isAssigned
-                                  ? 'border-slate-300 bg-slate-50/70 shadow-2xs'
-                                  : 'border-slate-200 bg-white hover:border-slate-300'
-                                }`}
-                            >
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <div
-                                  className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 ${isAssigned
-                                      ? 'border-blue-600 bg-blue-600 text-white'
-                                      : 'border-slate-300 bg-white'
-                                    }`}
-                                >
-                                  {isAssigned && <Check className="w-3 h-3 stroke-[3]" />}
-                                </div>
-                                <div className="min-w-0">
-                                  <span className="font-semibold text-xs text-slate-900 block truncate">
-                                    {emp.name}
-                                  </span>
-                                  <span className="text-[10px] text-slate-500 block truncate">
-                                    {emp.designation}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {isLead && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100 shrink-0 flex items-center gap-1">
-                                  <Shield className="w-2.5 h-2.5" /> Manager
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Step 5 Actions */}
-            <div className="pt-3 flex items-center justify-between border-t border-[#e2e8f0]">
-              <button
-                type="button"
-                onClick={() => setCurrentStep(4)}
-                className="h-9.5 px-4 rounded-lg border border-[#e2e8f0] bg-white hover:bg-[#f8fafc] text-xs font-semibold text-[#0f172a] transition-all cursor-pointer flex items-center gap-1.5"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> Back
-              </button>
-              <button
-                type="button"
-                onClick={handleFinishSetup}
-                className="h-9.5 px-6 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-bold transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
-              >
-                Finish Setup & Launch Workspace <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+          <div className="setup-next">
+            <h3>What happens next</h3>
+            <p>When you launch, invitations are sent to the people listed here. Then you can configure attendance, leave, payroll, and documents from the workspace.</p>
           </div>
-        )}
-      </main>
-    </div>
-  );
+          <div className="setup-workplace__footer">
+            <button type="button" className="setup-button setup-button--secondary" onClick={() => setStep(4)}>Back</button>
+            <button type="button" className="setup-button setup-button--primary" disabled={busy} onClick={launch}>{busy ? 'Launching…' : people.length ? 'Launch & send invitations' : 'Launch workspace'}<span aria-hidden="true">→</span></button>
+          </div>
+        </div>}
+      </section>
+    </main>
+  </div>;
 };

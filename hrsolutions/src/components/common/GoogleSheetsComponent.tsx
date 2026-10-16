@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { openExternalUrl } from '@/lib/native';
 import {
   FileSpreadsheet,
   Plus,
@@ -595,12 +594,9 @@ export const GoogleSheetsComponent: React.FC<GoogleSheetsComponentProps> = ({
                 {activeSpreadsheetId && (
                   <a
                     href={`https://docs.google.com/spreadsheets/d/${activeSpreadsheetId}`}
+                    target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-1.5 text-xs font-bold hover:bg-emerald-100 transition-all"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      void openExternalUrl(`https://docs.google.com/spreadsheets/d/${activeSpreadsheetId}`);
-                    }}
                   >
                     <ExternalLink className="h-3.5 w-3.5" /> Open in Google Sheets
                   </a>

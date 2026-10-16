@@ -3,6 +3,10 @@ import {
   getProjects,
   createProject,
   updateProject,
+  getUnbilledWork,
+  listProjectInvoices,
+  createProjectInvoice,
+  updateInvoice,
   getTasks,
   createTask,
   bulkCreateTasks,
@@ -26,6 +30,10 @@ projectRoutes.use(requireTenantContext);
 
 projectRoutes.get('/projects', getProjects);
 projectRoutes.post('/projects', requireRole(['super_admin', 'manager']), createProject);
+projectRoutes.get('/projects/:id/unbilled', requireRole(['super_admin', 'manager', 'hr_manager']), getUnbilledWork);
+projectRoutes.get('/projects/:id/invoices', requireRole(['super_admin', 'manager', 'hr_manager']), listProjectInvoices);
+projectRoutes.post('/projects/:id/invoices', requireRole(['super_admin', 'manager', 'hr_manager']), createProjectInvoice);
+projectRoutes.patch('/invoices/:id', requireRole(['super_admin', 'manager', 'hr_manager']), updateInvoice);
 projectRoutes.patch('/projects/:id', requireRole(['super_admin', 'manager', 'hr_manager']), updateProject);
 
 projectRoutes.get('/tasks', getTasks);

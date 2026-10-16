@@ -21,6 +21,17 @@ export interface ApiResponse<T = any> {
 
 import { API_CONFIG } from '@/config/constants';
 import { DISABLE_LOCAL_STORAGE } from './store';
+import type {
+  ChatAttachmentInput,
+  ChatConversation,
+  ChatMe,
+  ChatMessage,
+  ChatPerson,
+  ConversationType,
+  TicketPriority,
+  TicketStatus,
+} from './chatTypes';
+import type { SupportMessage, SupportStatus, SupportThread } from './supportTypes';
 
 export class ApiClientError extends Error {
   code: string;
@@ -334,6 +345,14 @@ class ApiClient {
       contactPhone?: string;
       designation?: string;
       adminRoleTitle?: string;
+      verificationToken: string;
+      planId: string;
+      billingCycle?: 'monthly' | 'annual';
+      address?: string;
+      city?: string;
+      stateProvince?: string;
+      postalCode?: string;
+      country?: string;
       }) =>
         this.request<{
           token: string;
@@ -343,11 +362,52 @@ class ApiClient {
 
     me: () => this.request('/auth/me', { method: 'GET' }),
 
-    resetPassword: (payload: { email: string; newPassword: string }) =>
-      this.request<{ message: string }>('/auth/reset-password', {
+    listLicensePlans: () => this.request('/license-plans', { method: 'GET' }),
+
+    sendVerificationCode: (payload: { email: string; name?: string }) =>
+      this.request<{ expiresAt: string }>('/auth/send-verification-code', {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+
+    verifyEmail: (payload: { email: string; code: string }) =>
+      this.request<{ verificationToken: string; email: string }>('/auth/verify-email', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    getInvite: (token: string) =>
+      this.request<{
+        email: string;
+        firstName: string;
+        tenantName: string;
+        role: string;
+        invitedBy: string;
+        expiresAt: string;
+      }>(`/auth/invite/${encodeURIComponent(token)}`, { method: 'GET' }),
+
+    acceptInvite: (payload: { token: string; password: string }) =>
+      this.request<{ email: string }>('/auth/accept-invite', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    forgotPassword: (payload: { email: string }) =>
+      this.request<undefined>('/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    resetPassword: (payload: { token: string; password: string }) =>
+      this.request<{ email: string }>('/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+  };
+
+  public license = {
+    current: () => this.request('/license', { method: 'GET' }),
+    events: () => this.request('/license/events', { method: 'GET' }),
   };
 
   // =========================================================================
@@ -360,8 +420,11 @@ class ApiClient {
       adminEmail: string;
       adminName?: string;
       plan?: string;
+      planId?: string;
       maxEmployees?: number;
+      billingCycle?: 'monthly' | 'annual';
       industry?: string;
+      contactPhone?: string;
     }) => this.request('/control-plane/tenants', { method: 'POST', body: JSON.stringify(payload) }),
 
     listTenants: () =>
@@ -376,10 +439,52 @@ class ApiClient {
         body: JSON.stringify({ status }),
       }),
 
-    updateTenantPlan: (id: string, payload: { plan: string; maxSeats: number }) =>
+    updateTenantPlan: (
+      id: string,
+      payload: {
+        plan?: string;
+        planId?: string;
+        maxSeats?: number;
+        billingCycle?: 'monthly' | 'annual';
+        extendDays?: number;
+        periodEnd?: string;
+        revoke?: boolean;
+      }
+    ) =>
       this.request(`/control-plane/tenants/${id}/plan`, {
         method: 'PATCH',
         body: JSON.stringify(payload),
+      }),
+
+    listLicensePlans: () => this.request('/control-plane/license-plans', { method: 'GET' }),
+
+    createLicensePlan: (payload: {
+      name: string;
+      key?: string;
+      description?: string;
+      priceMonthly?: number;
+      priceAnnual?: number;
+      maxSeats?: number;
+      trialDays?: number;
+      features?: string[];
+      isActive?: boolean;
+      isPublic?: boolean;
+      sortOrder?: number;
+    }) => this.request('/control-plane/license-plans', { method: 'POST', body: JSON.stringify(payload) }),
+
+    updateLicensePlan: (id: string, payload: Record<string, unknown>) =>
+      this.request(`/control-plane/license-plans/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      }),
+
+    deactivateLicensePlan: (id: string) =>
+      this.request(`/control-plane/license-plans/${id}`, { method: 'DELETE' }),
+
+    deleteTenant: (id: string, confirmName: string) =>
+      this.request(`/control-plane/tenants/${id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ confirmName, confirmSlug: confirmName }),
       }),
 
     listDatabaseSchemas: () =>
@@ -396,6 +501,9 @@ class ApiClient {
 
     mapGlobalUser: (payload: { cognitoSub: string; email: string; tenantId: string; role: string }) =>
       this.request('/control-plane/users/map', { method: 'POST', body: JSON.stringify(payload) }),
+
+    deleteGlobalUser: (mappingId: string) =>
+      this.request(`/control-plane/users/${mappingId}`, { method: 'DELETE' }),
 
     startImpersonation: (tenantId: string) =>
       this.request<{
@@ -415,6 +523,26 @@ class ApiClient {
 
     listAuditLogs: (limit = 100) =>
       this.request(`/control-plane/audit-logs?limit=${limit}`, { method: 'GET' }),
+
+    listSupportTickets: (status?: SupportStatus) => {
+      const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+      return this.request<SupportThread[]>(`/control-plane/support-tickets${qs}`, { method: 'GET' });
+    },
+
+    getSupportTicket: (id: string) =>
+      this.request<SupportThread>(`/control-plane/support-tickets/${encodeURIComponent(id)}`, { method: 'GET' }),
+
+    replySupportTicket: (id: string, body: string) =>
+      this.request<SupportThread>(`/control-plane/support-tickets/${encodeURIComponent(id)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ body }),
+      }),
+
+    updateSupportTicket: (id: string, payload: { status: SupportStatus }) =>
+      this.request<SupportThread>(`/control-plane/support-tickets/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      }),
   };
 
 
@@ -437,10 +565,10 @@ class ApiClient {
     getDepartments: () =>
       this.request('/org/departments', { method: 'GET' }),
 
-    createDepartment: (payload: { name: string; code: string; leadEmployeeId?: string }) =>
+    createDepartment: (payload: { name: string; code: string; shortCode?: string; description?: string; leadEmployeeId?: string; leadEmployeeIds?: string[] }) =>
       this.request('/org/departments', { method: 'POST', body: JSON.stringify(payload) }),
 
-    updateDepartment: (id: string, payload: Partial<{ name: string; leadEmployeeId: string }>) =>
+    updateDepartment: (id: string, payload: Partial<{ name: string; shortCode: string; description: string; leadEmployeeId: string; leadEmployeeIds: string[] }>) =>
       this.request(`/org/departments/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 
     deleteDepartment: (id: string) =>
@@ -449,10 +577,10 @@ class ApiClient {
     getTeams: (departmentId?: string) =>
       this.request(`/org/teams${departmentId ? `?departmentId=${departmentId}` : ''}`, { method: 'GET' }),
 
-    createTeam: (payload: { departmentId: string; name: string; leadEmployeeId?: string }) =>
+    createTeam: (payload: { departmentId: string; name: string; leadEmployeeId?: string; leadEmployeeIds?: string[] }) =>
       this.request('/org/teams', { method: 'POST', body: JSON.stringify(payload) }),
 
-    updateTeam: (id: string, payload: Partial<{ name: string; leadEmployeeId: string }>) =>
+    updateTeam: (id: string, payload: Partial<{ name: string; leadEmployeeId: string; leadEmployeeIds: string[] }>) =>
       this.request(`/org/teams/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 
     deleteTeam: (id: string) =>
@@ -469,6 +597,9 @@ class ApiClient {
 
     deleteJobRole: (id: string) =>
       this.request(`/org/job-roles/${id}`, { method: 'DELETE' }),
+
+    syncReporting: () =>
+      this.request('/org/reporting/sync', { method: 'POST' }),
   };
 
   // =========================================================================
@@ -503,9 +634,12 @@ class ApiClient {
       jobTitle?: string;
       role?: string;
       reportingManagerId?: string;
+      managerIds?: string[];
+      employmentType?: string;
       employmentStatus?: string;
       accountStatus?: string;
       dateOfJoining?: string;
+      sendInvite?: boolean;
     }) => this.request('/identity/employees', { method: 'POST', body: JSON.stringify(payload) }),
 
     updateEmployee: (id: string, payload: {
@@ -534,6 +668,8 @@ class ApiClient {
       status?: string;
       reportingManagerId?: string;
       managerId?: string;
+      managerIds?: string[];
+      employmentType?: string;
       dateOfJoining?: string | null;
       dateOfBirth?: string | null;
       gender?: string;
@@ -559,6 +695,12 @@ class ApiClient {
       bankName: string;
       routingOrIfscCode: string;
     }) => this.request(`/identity/employees/${employeeId}/bank-details`, { method: 'PUT', body: JSON.stringify(payload) }),
+
+    resendInvite: (employeeId: string) =>
+      this.request<{ email: string; accountStatus: string }>(
+        `/identity/employees/${encodeURIComponent(employeeId)}/resend-invite`,
+        { method: 'POST' }
+      ),
   };
 
   // =========================================================================
@@ -572,7 +714,38 @@ class ApiClient {
       latitude?: number;
       longitude?: number;
       deviceInfo?: string;
+      selfiePhoto?: string | null;
+      qrToken?: string;
+      workFromHome?: boolean;
     }) => this.request('/attendance/punches', { method: 'POST', body: JSON.stringify(payload) }),
+
+    verifyWorkplaceLocation: (payload: {
+      latitude: number;
+      longitude: number;
+      accuracy?: number;
+    }) =>
+      this.request<{
+        clockedIn: boolean;
+        clockedOut: boolean;
+        skipped?: boolean;
+        reason?: string;
+        isWithinGeofence?: boolean;
+        distanceMeters?: number;
+        radiusMeters?: number;
+        officeName?: string;
+        message?: string;
+      }>('/attendance/location-check', { method: 'POST', body: JSON.stringify(payload) }),
+
+    getOfficeQrToken: (officeId?: string) => {
+      const query = officeId ? `?officeId=${encodeURIComponent(officeId)}` : '';
+      return this.request<{
+        token: string;
+        expiresAt: string;
+        officeId: string;
+        officeName: string;
+        refreshSeconds: number;
+      }>(`/attendance/qr-token${query}`, { method: 'GET' });
+    },
 
     getPunches: (params?: { employeeId?: string; date?: string }) => {
       const query = new URLSearchParams(params as any).toString();
@@ -647,8 +820,14 @@ class ApiClient {
       year?: number;
     }) => this.request('/attendance/leave-balances/adjust', { method: 'POST', body: JSON.stringify(payload) }),
 
-    requestRegularization: (payload: any) =>
-      this.request('/attendance/regularizations', { method: 'POST', body: JSON.stringify(payload) }),
+    requestRegularization: (payload: {
+      employeeId: string;
+      date: string;
+      requestedCheckIn?: string;
+      requestedCheckOut?: string;
+      reason: string;
+      remarks?: string;
+    }) => this.request('/attendance/regularizations', { method: 'POST', body: JSON.stringify(payload) }),
 
     getRegularizations: (params?: { employeeId?: string; status?: string }) => {
       const query = new URLSearchParams(params as any).toString();
@@ -676,6 +855,27 @@ class ApiClient {
   };
 
   // =========================================================================
+  // 4b. REPORTS MODULE API (server-scoped reporting aggregates and exports)
+  // =========================================================================
+  public reports = {
+    getSummary: (params: { startDate: string; endDate: string; departmentId?: string }) => {
+      const query = new URLSearchParams();
+      query.set('startDate', params.startDate);
+      query.set('endDate', params.endDate);
+      if (params.departmentId) query.set('departmentId', params.departmentId);
+      const path = `/reports/summary?${query.toString()}`;
+      return this.coalesceGet(`GET:${path}`, () => this.request(path, { method: 'GET' }));
+    },
+    exportAttendanceCsvUrl: (params: { startDate: string; endDate: string; departmentId?: string }) => {
+      const query = new URLSearchParams();
+      query.set('startDate', params.startDate);
+      query.set('endDate', params.endDate);
+      if (params.departmentId) query.set('departmentId', params.departmentId);
+      return `${this.baseUrl}/reports/attendance.csv?${query.toString()}`;
+    },
+  };
+
+  // =========================================================================
   // 5. PROJECTS MODULE API (Projects, Tasks, Timesheets)
   // =========================================================================
   public projects = {
@@ -687,6 +887,7 @@ class ApiClient {
       code: string;
       description?: string;
       clientName?: string;
+      clientId?: string;
       managerId: string;
       startDate?: string;
       endDate?: string;
@@ -706,8 +907,14 @@ class ApiClient {
       title: string;
       description?: string;
       assignedToEmployeeId?: string;
+      assignedToEmployeeIds?: string[];
       priority?: 'low' | 'medium' | 'high' | 'urgent';
-      dueDate?: string;
+      dueDate?: string | null;
+      billable?: boolean;
+      billingType?: 'deliverable' | 'hourly';
+      unitPrice?: number;
+      clientId?: string | null;
+      recurrence?: { frequency: string; weekday?: number; count?: number; endDate?: string | null } | null;
     }) => this.request('/projects/tasks', { method: 'POST', body: JSON.stringify(payload) }),
 
     updateTask: (taskId: string, payload: {
@@ -716,7 +923,17 @@ class ApiClient {
       title?: string;
       description?: string;
       assignedToEmployeeId?: string;
-      dueDate?: string;
+      assignedToEmployeeIds?: string[];
+      dueDate?: string | null;
+      timeSpentSeconds?: number;
+      timerStartedAt?: number | null;
+      billable?: boolean;
+      billingType?: 'deliverable' | 'hourly';
+      unitPrice?: number;
+      clientId?: string | null;
+      applyTo?: 'occurrence' | 'future';
+      recurrenceEnd?: string | null;
+      attachedDocs?: Array<{ id: string; name: string; size?: string; type?: string; s3Key?: string; owner?: string }>;
     }) => this.request(`/projects/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 
     deleteTask: (taskId: string) =>
@@ -733,7 +950,8 @@ class ApiClient {
     logTimesheet: (payload: {
       projectId: string;
       taskId?: string;
-      employeeId: string;
+      employeeId?: string;
+      employeeIds?: string[];
       workDate: string;
       hoursSpent: number;
       description: string;
@@ -744,7 +962,28 @@ class ApiClient {
       category?: string;
       meetingLink?: string;
       billable?: boolean;
+      status?: string;
     }) => this.request('/projects/timesheets', { method: 'POST', body: JSON.stringify(payload) }),
+
+    getUnbilledWork: (projectId: string) =>
+      this.request(`/projects/projects/${projectId}/unbilled`, { method: 'GET' }),
+
+    listProjectInvoices: (projectId: string) =>
+      this.request(`/projects/projects/${projectId}/invoices`, { method: 'GET' }),
+
+    createProjectInvoice: (projectId: string, payload: {
+      dueDate?: string;
+      lines: Array<{
+        description: string;
+        quantity: number;
+        unitPrice: number;
+        sourceTaskId?: string;
+        sourceTimesheetId?: string;
+      }>;
+    }) => this.request(`/projects/projects/${projectId}/invoices`, { method: 'POST', body: JSON.stringify(payload) }),
+
+    updateInvoice: (invoiceId: string, payload: { status: string }) =>
+      this.request(`/projects/invoices/${invoiceId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 
     getTimesheets: (params?: { employeeId?: string; projectId?: string; entryType?: 'task' | 'schedule' }) => {
       const query = new URLSearchParams(params as any).toString();
@@ -787,6 +1026,56 @@ class ApiClient {
     },
   };
 
+  public billing = {
+    getClients: () => this.request('/billing/clients', { method: 'GET' }),
+    createClient: (payload: {
+      name: string;
+      companyName?: string;
+      email?: string;
+      phone?: string;
+      billingAddress?: string;
+      gstin?: string;
+      currency?: string;
+      paymentTermsDays?: number;
+      defaultHourlyRate?: number | null;
+      notes?: string;
+      status?: 'active' | 'inactive';
+    }) => this.request('/billing/clients', { method: 'POST', body: JSON.stringify(payload) }),
+    updateClient: (id: string, payload: Record<string, unknown>) =>
+      this.request(`/billing/clients/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+    getUnbilled: (params?: { clientId?: string; projectId?: string; from?: string; to?: string }) => {
+      const query = new URLSearchParams();
+      if (params?.clientId) query.set('clientId', params.clientId);
+      if (params?.projectId) query.set('projectId', params.projectId);
+      if (params?.from) query.set('from', params.from);
+      if (params?.to) query.set('to', params.to);
+      const qs = query.toString();
+      return this.request(`/billing/unbilled${qs ? `?${qs}` : ''}`, { method: 'GET' });
+    },
+    getInvoices: (params?: { clientId?: string }) => {
+      const query = params?.clientId ? `?clientId=${encodeURIComponent(params.clientId)}` : '';
+      return this.request(`/billing/invoices${query}`, { method: 'GET' });
+    },
+    getInvoice: (id: string) => this.request(`/billing/invoices/${id}`, { method: 'GET' }),
+    createInvoice: (payload: {
+      clientId: string;
+      kind: 'monthly' | 'project';
+      projectId?: string;
+      periodStart?: string;
+      periodEnd?: string;
+      dueDate?: string;
+      lines: Array<{
+        description: string;
+        quantity: number;
+        unitPrice: number;
+        sourceTaskId?: string | null;
+        sourceTimesheetId?: string | null;
+      }>;
+    }) => this.request('/billing/invoices', { method: 'POST', body: JSON.stringify(payload) }),
+    updateInvoice: (id: string, payload: { status: string }) =>
+      this.request(`/billing/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  };
+
   // =========================================================================
   // 7. AUDIT & COMMS API (Announcements, Notifications, Audit Logs)
   // =========================================================================
@@ -800,6 +1089,9 @@ class ApiClient {
       authorEmployeeId: string;
       targetDepartmentId?: string;
       priority?: 'normal' | 'important' | 'urgent';
+      category?: 'GENERAL' | 'HR_POLICY' | 'EVENT' | 'ACADEMIC' | 'IT_ALERT';
+      pinToHeaderBanner?: boolean;
+      tags?: string[];
     }) => this.request('/audit-comms/announcements', { method: 'POST', body: JSON.stringify(payload) }),
 
     markAnnouncementRead: (id: string, employeeId: string) =>
@@ -858,24 +1150,38 @@ class ApiClient {
   // =========================================================================
   public storage = {
     getPresignedUploadUrl: (payload: {
-      module: 'identity' | 'payroll' | 'documents' | 'attendance';
+      module: 'identity' | 'payroll' | 'documents' | 'attendance' | 'chat';
       fileName: string;
       contentType: string;
       fileSizeBytes?: number;
     }) => this.request('/storage/presigned-upload', { method: 'POST', body: JSON.stringify(payload) }),
 
     uploadFileToS3: async (uploadUrl: string, file: File) => {
+      // Method must be PUT (opening the URL in a tab is GET and fails signature).
+      // Content-Type must match the value used when the URL was signed.
+      // Do not send checksum or SSE headers unless they are part of the signed URL.
+      const contentType = file.type || 'application/octet-stream';
+      const headers: Record<string, string> = { 'Content-Type': contentType };
+      const signedHeaders = new URL(uploadUrl).searchParams.get('X-Amz-SignedHeaders') || '';
+      if (signedHeaders.split(';').includes('x-amz-server-side-encryption')) {
+        headers['x-amz-server-side-encryption'] = 'aws:kms';
+      }
       const res = await fetch(uploadUrl, {
         method: 'PUT',
-        headers: { 'Content-Type': file.type },
+        headers,
         body: file,
       });
-      if (!res.ok) throw new Error(`S3 upload failed with status ${res.status}`);
+      if (!res.ok) {
+        const detail = (await res.text()).slice(0, 300);
+        throw new Error(`S3 upload failed with status ${res.status}${detail ? `: ${detail}` : ''}`);
+      }
       return true;
     },
 
     getPresignedDownloadUrl: (s3Key: string) =>
       this.request(`/storage/presigned-download?s3Key=${encodeURIComponent(s3Key)}`, { method: 'GET' }),
+
+    listDocuments: () => this.request('/storage/documents', { method: 'GET' }),
 
     registerDocument: (payload: {
       employeeId: string;
@@ -951,15 +1257,164 @@ class ApiClient {
       checkInTime?: string;
       checkOutTime?: string;
       remarks?: string;
+      latitude?: number;
+      longitude?: number;
+      selfiePhoto?: string | null;
     }) => this.request('/institute/attendance', { method: 'POST', body: JSON.stringify(payload) }),
   };
 
   // =========================================================================
-  // 10. SETUP API (Atomic Setup Stepper)
+  // 10. CHAT API (Team channels, group/direct chats, Ask HR)
+  // =========================================================================
+  public chat = {
+    me: () => this.request<ChatMe>('/chat/me', { method: 'GET' }),
+
+    people: (params?: { search?: string; hrOnly?: boolean; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.search) query.set('search', params.search);
+      if (params?.hrOnly) query.set('hrOnly', 'true');
+      if (params?.limit) query.set('limit', String(params.limit));
+      const qs = query.toString();
+      return this.request<ChatPerson[]>(`/chat/people${qs ? `?${qs}` : ''}`, { method: 'GET' });
+    },
+
+    presence: () => this.request<{ online: string[] }>('/chat/presence', { method: 'GET' }),
+
+    listConversations: (params?: { type?: ConversationType; includeArchived?: boolean }) => {
+      const query = new URLSearchParams();
+      if (params?.type) query.set('type', params.type);
+      if (params?.includeArchived) query.set('includeArchived', 'true');
+      const qs = query.toString();
+      return this.request<ChatConversation[]>(`/chat/conversations${qs ? `?${qs}` : ''}`, { method: 'GET' });
+    },
+
+    getConversation: (id: string) =>
+      this.request<ChatConversation>(`/chat/conversations/${encodeURIComponent(id)}`, { method: 'GET' }),
+
+    createConversation: (payload: {
+      type: 'group' | 'direct';
+      participantIds: string[];
+      name?: string;
+      description?: string;
+    }) => this.request<ChatConversation>('/chat/conversations', { method: 'POST', body: JSON.stringify(payload) }),
+
+    updateConversation: (
+      id: string,
+      payload: { name?: string; description?: string | null; isArchived?: boolean; muted?: boolean }
+    ) =>
+      this.request<ChatConversation>(`/chat/conversations/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      }),
+
+    addParticipants: (id: string, employeeIds: string[]) =>
+      this.request<ChatConversation>(`/chat/conversations/${encodeURIComponent(id)}/participants`, {
+        method: 'POST',
+        body: JSON.stringify({ employeeIds }),
+      }),
+
+    removeParticipant: (id: string, employeeId: string) =>
+      this.request<{ removed: boolean }>(
+        `/chat/conversations/${encodeURIComponent(id)}/participants/${encodeURIComponent(employeeId)}`,
+        { method: 'DELETE' }
+      ),
+
+    listMessages: (id: string, params?: { before?: string; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (params?.before) query.set('before', params.before);
+      if (params?.limit) query.set('limit', String(params.limit));
+      const qs = query.toString();
+      return this.request<{ messages: ChatMessage[]; hasMore: boolean }>(
+        `/chat/conversations/${encodeURIComponent(id)}/messages${qs ? `?${qs}` : ''}`,
+        { method: 'GET' }
+      );
+    },
+
+    sendMessage: (
+      id: string,
+      payload: { body?: string; parentMessageId?: string | null; attachments?: ChatAttachmentInput[]; clientId?: string }
+    ) =>
+      this.request<ChatMessage>(`/chat/conversations/${encodeURIComponent(id)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    markRead: (id: string) =>
+      this.request(`/chat/conversations/${encodeURIComponent(id)}/read`, { method: 'POST' }),
+
+    editMessage: (messageId: string, body: string) =>
+      this.request<ChatMessage>(`/chat/messages/${encodeURIComponent(messageId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ body }),
+      }),
+
+    addReaction: (messageId: string, emoji: string) =>
+      this.request<{ conversationId: string; messageId: string; reactions: ChatMessage['reactions'] }>(
+        `/chat/messages/${encodeURIComponent(messageId)}/reactions`,
+        { method: 'POST', body: JSON.stringify({ emoji }) }
+      ),
+
+    removeReaction: (messageId: string, emoji: string) =>
+      this.request<{ conversationId: string; messageId: string; reactions: ChatMessage['reactions'] }>(
+        `/chat/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(emoji)}`,
+        { method: 'DELETE' }
+      ),
+
+    getAttachmentUrl: (attachmentId: string) =>
+      this.request<{ downloadUrl: string; fileName: string; mimeType: string | null }>(
+        `/chat/attachments/${encodeURIComponent(attachmentId)}/url`,
+        { method: 'GET' }
+      ),
+
+    createHrTicket: (payload: {
+      subject: string;
+      category: string;
+      priority?: TicketPriority;
+      body: string;
+      attachments?: ChatAttachmentInput[];
+    }) => this.request<ChatConversation>('/chat/hr-tickets', { method: 'POST', body: JSON.stringify(payload) }),
+
+    listHrTickets: (params?: { status?: TicketStatus; assigned?: 'me' | 'unassigned' | 'all' }) => {
+      const query = new URLSearchParams();
+      if (params?.status) query.set('status', params.status);
+      if (params?.assigned) query.set('assigned', params.assigned);
+      const qs = query.toString();
+      return this.request<ChatConversation[]>(`/chat/hr-tickets${qs ? `?${qs}` : ''}`, { method: 'GET' });
+    },
+
+    updateHrTicket: (
+      id: string,
+      payload: { status?: TicketStatus; assignedHrId?: string | null; priority?: TicketPriority; category?: string }
+    ) =>
+      this.request<ChatConversation>(`/chat/hr-tickets/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      }),
+  };
+
+  public support = {
+    listThreads: () => this.request<SupportThread[]>('/support/threads', { method: 'GET' }),
+
+    createThread: (payload: { subject: string; body: string }) =>
+      this.request<SupportThread>('/support/threads', { method: 'POST', body: JSON.stringify(payload) }),
+
+    listMessages: (id: string) =>
+      this.request<SupportMessage[]>(`/support/threads/${encodeURIComponent(id)}/messages`, { method: 'GET' }),
+
+    sendMessage: (id: string, body: string) =>
+      this.request<SupportThread>(`/support/threads/${encodeURIComponent(id)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ body }),
+      }),
+  };
+
+  // =========================================================================
+  // 11. SETUP API (Atomic Setup Stepper)
   // =========================================================================
   public setup = {
     getSettings: () => this.request('/setup/settings', { method: 'GET' }),
     saveOffice: (payload: any) => this.request('/setup/office', { method: 'POST', body: JSON.stringify(payload) }),
+    saveWorkplaceMode: (payload: { mode: 'remote' | 'onsite' | 'hybrid' }) => this.request('/setup/workplace-mode', { method: 'POST', body: JSON.stringify(payload) }),
     saveDepartments: (payload: any) => this.request('/setup/departments', { method: 'POST', body: JSON.stringify(payload) }),
     saveRoles: (payload: any) => this.request('/setup/roles', { method: 'POST', body: JSON.stringify(payload) }),
     saveTeam: (payload: any) => this.request('/setup/team', { method: 'POST', body: JSON.stringify(payload) }),
@@ -968,6 +1423,8 @@ class ApiClient {
     saveGeneralSettings: (payload: any) => this.request('/setup/general', { method: 'POST', body: JSON.stringify(payload) }),
     savePayrollSettings: (payload: any) => this.request('/setup/payroll', { method: 'POST', body: JSON.stringify(payload) }),
     saveAttendanceSettings: (payload: any) => this.request('/setup/attendance', { method: 'POST', body: JSON.stringify(payload) }),
+    saveIdCardTemplates: (payload: { templates: unknown[]; defaults: { employee?: string; student?: string } }) =>
+      this.request('/setup/id-card-templates', { method: 'POST', body: JSON.stringify(payload) }),
   };
 }
 
