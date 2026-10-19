@@ -280,7 +280,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   const [newTaskRepeat, setNewTaskRepeat] = useState<'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly'>('none');
   const [newTaskWeekday, setNewTaskWeekday] = useState(() => new Date().getDay());
   const [newTaskRecurrenceEnd, setNewTaskRecurrenceEnd] = useState('');
-  const [newTaskBillable, setNewTaskBillable] = useState(true);
+  const [newTaskBillable, setNewTaskBillable] = useState(false);
   const [newTaskBillingType, setNewTaskBillingType] = useState<'deliverable' | 'hourly'>('deliverable');
   const [newTaskPrice, setNewTaskPrice] = useState('');
   const [newTaskClientId, setNewTaskClientId] = useState('');
@@ -298,17 +298,23 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   const [projectInvoices, setProjectInvoices] = useState<any[]>([]);
   const [billingModeDraft, setBillingModeDraft] = useState<'deliverable' | 'hourly'>('deliverable');
   const [hourlyRateDraft, setHourlyRateDraft] = useState('');
+  const hasBillableClients = billingClients.length > 0;
 
   useEffect(() => {
     let cancelled = false;
     void api.billing.getClients().then((res) => {
       if (cancelled || !res.success || !Array.isArray(res.data)) return;
       setBillingClients(res.data);
+      if (!res.data.length) setNewTaskBillable(false);
     });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!hasBillableClients) setNewTaskBillable(false);
+  }, [hasBillableClients]);
 
   useEffect(() => {
     const proj = state.projects.find((p) => p.id === newTaskProj);
@@ -540,6 +546,25 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       }));
     } catch (err: any) {
       notifyApiError(err?.message || 'Could not send the invoice.');
+    }
+  };
+
+  const deleteUnbilledProjectTask = async (line: (typeof billLines)[number]) => {
+    const project = selectedProjectForDetails;
+    const taskId = String(line.sourceTaskId || '').trim();
+    if (!project || !taskId) return;
+    if (!ensureCanManageProject(project.id)) return;
+    if (!window.confirm(`Delete unbilled task “${line.description}”? This cannot be undone.`)) return;
+    try {
+      await api.projects.deleteTask(taskId);
+      setBillLines((prev) => prev.filter((row) => row.sourceTaskId !== taskId));
+      onUpdateState((prev) => ({
+        ...prev,
+        tasks: prev.tasks.filter((t) => t.id !== taskId),
+      }));
+      await loadProjectBilling(project);
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Could not delete the task.');
     }
   };
 
@@ -1756,12 +1781,19 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     setNewTaskTitle('');
     setNewTaskDescription('');
     setNewTaskPriority('High');
+    setNewTaskBillable(billingClients.length > 0);
     setShowCreateTaskModal(true);
   };
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
+
+    const canBillTask = hasBillableClients && newTaskBillable;
+    if (newTaskBillable && !hasBillableClients) {
+      flashPermissionNotice('Add a billable client before creating billable tasks.');
+      return;
+    }
 
     const today = new Date().toISOString().split('T')[0];
     const isStandalone = !newTaskProj || newTaskProj === 'standalone';
@@ -1803,10 +1835,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         assignedToEmployeeIds: targetAssigneeIds.filter((id) => id && id !== 'user_admin'),
         priority: newTaskPriority?.toLowerCase() as any,
         dueDate: newTaskDueDate || null,
-        billable: newTaskBillable,
+        billable: canBillTask,
         billingType: newTaskBillingType,
         unitPrice: Number(newTaskPrice) || 0,
-        clientId: newTaskClientId || undefined,
+        clientId: canBillTask ? newTaskClientId || undefined : undefined,
         recurrence: newTaskRepeat === 'none' ? null : {
           frequency: newTaskRepeat,
           weekday: newTaskWeekday,
@@ -1843,10 +1875,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         status: 'To Do',
         startDate: today,
         dueDate: mapped?.dueDate,
-        billable: mapped?.billable ?? newTaskBillable,
+        billable: mapped?.billable ?? canBillTask,
         billingType: mapped?.billingType || newTaskBillingType,
         unitPrice: mapped?.unitPrice ?? (Number(newTaskPrice) || 0),
-        clientId: mapped?.clientId || newTaskClientId || undefined,
+        clientId: mapped?.clientId || (canBillTask ? newTaskClientId || undefined : undefined),
         recurrenceRule: mapped?.recurrenceRule || (newTaskRepeat === 'none' ? null : { frequency: newTaskRepeat, weekday: newTaskWeekday }),
         recurrenceSeriesId: mapped?.recurrenceSeriesId,
         recurrenceEnd: mapped?.recurrenceEnd,
@@ -1902,7 +1934,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       setNewTaskRepeat('none');
       setNewTaskRecurrenceEnd('');
       setNewTaskPrice('');
-      setNewTaskBillable(true);
+      setNewTaskBillable(billingClients.length > 0);
       setNewTaskBillingType('deliverable');
     } catch (e) {
       console.error('Task creation failed', e);
@@ -4053,25 +4085,40 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={newTaskBillable}
-                      onChange={(e) => setNewTaskBillable(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-[var(--studio-navy)]"
-                    />
-                    Billable to client
-                  </label>
+                  <div>
+                    <label
+                      className={`flex items-center gap-2 text-xs font-semibold ${hasBillableClients ? 'text-slate-700' : 'text-slate-400'}`}
+                      title={!hasBillableClients ? 'Add a billable client first' : undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={hasBillableClients && newTaskBillable}
+                        disabled={!hasBillableClients}
+                        onChange={(e) => {
+                          if (!hasBillableClients) return;
+                          setNewTaskBillable(e.target.checked);
+                        }}
+                        className="h-4 w-4 rounded border-slate-300 text-[var(--studio-navy)] disabled:cursor-not-allowed"
+                      />
+                      Billable to client
+                    </label>
+                    {!hasBillableClients && (
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Add a billable client first to enable this.
+                      </p>
+                    )}
+                  </div>
                   <select
                     value={newTaskBillingType}
                     onChange={(e) => setNewTaskBillingType(e.target.value as 'deliverable' | 'hourly')}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
+                    disabled={!hasBillableClients || !newTaskBillable}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                   >
                     <option value="deliverable">Fixed deliverable price</option>
                     <option value="hourly">Hourly</option>
                   </select>
                 </div>
-                {newTaskBillable && (
+                {hasBillableClients && newTaskBillable && (
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Charge to client</label>
                     <select
@@ -4088,7 +4135,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                     </select>
                   </div>
                 )}
-                {newTaskBillable && (
+                {hasBillableClients && newTaskBillable && (
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
                       {newTaskBillingType === 'deliverable' ? 'Fixed price' : 'Hourly rate'}
@@ -4466,7 +4513,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   ) : (
                     <div className="space-y-2">
                       {billLines.map((line, index) => (
-                        <div key={line.key} className="grid grid-cols-[auto_1fr_4.5rem_5rem] gap-2 items-center">
+                        <div key={line.key} className="grid grid-cols-[auto_1fr_4.5rem_5rem_auto] gap-2 items-center">
                           <input
                             type="checkbox"
                             checked={line.included}
@@ -4489,6 +4536,17 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                             onChange={(e) => setBillLines((prev) => prev.map((row, i) => i === index ? { ...row, unitPrice: Number(e.target.value) || 0 } : row))}
                             className="rounded-md border border-slate-200 px-1.5 py-1 text-[11px]"
                           />
+                          {line.sourceTaskId ? (
+                            <button
+                              type="button"
+                              onClick={() => void deleteUnbilledProjectTask(line)}
+                              className="text-[11px] font-semibold text-rose-700 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          ) : (
+                            <span />
+                          )}
                         </div>
                       ))}
                       <div className="text-[11px] text-slate-600 font-medium">

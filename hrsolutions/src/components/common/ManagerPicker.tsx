@@ -12,31 +12,51 @@ export const ManagerPicker: React.FC<{
 }> = ({ selectedIds, employees, onChange, disabled, label }) => {
   const nameOf = (id: string) => employees.find((e) => e.id === id)?.name || 'Unknown employee';
   const available = employees.filter((e) => !selectedIds.includes(e.id));
+
+  const makePrimary = (id: string) => {
+    if (disabled || selectedIds[0] === id) return;
+    onChange([id, ...selectedIds.filter((x) => x !== id)]);
+  };
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       {selectedIds.length === 0 && (
         <span className="text-[12px] font-medium text-[var(--text-muted)]">No manager</span>
       )}
-      {selectedIds.map((id, index) => (
-        <span
-          key={id}
-          className="inline-flex items-center gap-1 rounded-[8px] border border-[var(--border-color,#dde4e9)] bg-white py-1 pl-2.5 pr-1 text-[12px] font-semibold text-[#172234]"
-        >
-          {nameOf(id)}
-          {index === 0 && selectedIds.length > 1 && (
-            <span className="rounded px-1 text-[12px] font-bold text-[var(--text-muted)]">Primary</span>
-          )}
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(selectedIds.filter((x) => x !== id))}
-            className="inline-flex h-6 w-6 items-center justify-center rounded-[7px] text-[var(--text-muted)] hover:bg-[#faeeee] hover:text-[#8b3133] cursor-pointer disabled:cursor-not-allowed"
-            aria-label={`Remove ${nameOf(id)} as manager of ${label}`}
+      {selectedIds.map((id, index) => {
+        const isPrimary = index === 0 && selectedIds.length > 1;
+        return (
+          <span
+            key={id}
+            className="inline-flex items-center gap-1 rounded-[8px] border border-[var(--border-color,#dde4e9)] bg-white py-1 pl-2.5 pr-1 text-[12px] font-semibold text-[#172234]"
           >
-            ×
-          </button>
-        </span>
-      ))}
+            {nameOf(id)}
+            {isPrimary && (
+              <span className="rounded px-1 text-[12px] font-bold text-[var(--text-muted)]">Primary</span>
+            )}
+            {!isPrimary && selectedIds.length > 1 && (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => makePrimary(id)}
+                className="rounded px-1 text-[11px] font-bold text-[#2d628e] hover:bg-[#eef4f9] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={`Make ${nameOf(id)} the primary manager of ${label}`}
+              >
+                Make primary
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange(selectedIds.filter((x) => x !== id))}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-[7px] text-[var(--text-muted)] hover:bg-[#faeeee] hover:text-[#8b3133] cursor-pointer disabled:cursor-not-allowed"
+              aria-label={`Remove ${nameOf(id)} as manager of ${label}`}
+            >
+              ×
+            </button>
+          </span>
+        );
+      })}
       <select
         value=""
         disabled={disabled || available.length === 0}

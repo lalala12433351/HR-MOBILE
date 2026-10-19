@@ -36,6 +36,10 @@ const config: CapacitorConfig = {
     Keyboard: {
       resizeOnFullScreen: true,
     },
+    LocalNotifications: {
+      iconColor: '#2563eb',
+      sound: 'default',
+    },
   },
   android: {
     allowMixedContent: serverUrl.startsWith('http://'),

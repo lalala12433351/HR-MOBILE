@@ -58,6 +58,7 @@ async function ensureEmployeeExtraColumns(query: (sql: string, params?: any[]) =
   try {
     await query(`
       ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_type VARCHAR(64) DEFAULT 'Full-time';
+      ALTER TABLE employees ADD COLUMN IF NOT EXISTS bio TEXT;
     `);
   } catch (_) {}
 }
@@ -68,21 +69,7 @@ async function notifyEmployeeOfInfoChange(input: {
   actorName?: string;
 }): Promise<void> {
   const email = String(input.employee?.email || '').trim();
-  const employeeId = input.employee?.id;
-  if (!employeeId) return;
-  const title = 'Your profile was updated';
-  const message = input.actorName
-    ? `${input.actorName} updated information on your employee profile.`
-    : 'HR updated information on your employee profile.';
-  try {
-    await input.query(
-      `INSERT INTO notifications (recipient_employee_id, title, message, category, priority, is_read)
-       VALUES ($1, $2, $3, 'HR', 'medium', false)`,
-      [employeeId, title, message]
-    );
-  } catch (err) {
-    log.warn('Could not write profile-update notification', err);
-  }
+  // Skip in-app noise for routine profile edits; email alone is enough for awareness.
   if (!email) return;
   try {
     const rendered = employeeInfoUpdatedEmail({
@@ -698,10 +685,12 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
       country,
       personalTaxId,
       socialInsurance,
+      healthInsurance,
       emergencyContact,
       customFieldValues,
       uploadedDocuments,
       avatar,
+      bio,
     } = req.body;
 
     const reportingManagerId = rawReportingManagerId !== undefined ? rawReportingManagerId : managerId;
@@ -755,11 +744,13 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS country VARCHAR(64);
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS personal_tax_id VARCHAR(64);
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS social_insurance VARCHAR(64);
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS health_insurance VARCHAR(128);
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS emergency_contact JSONB;
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS custom_field_values JSONB;
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS uploaded_documents JSONB;
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS avatar TEXT;
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+        ALTER TABLE employees ADD COLUMN IF NOT EXISTS bio TEXT;
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS account_status VARCHAR(32) DEFAULT 'Not Activated';
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_completed_profile BOOLEAN DEFAULT false;
         ALTER TABLE employees ADD COLUMN IF NOT EXISTS onboarding_progress INTEGER DEFAULT 0;
@@ -888,7 +879,9 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
       updates.push(`date_of_birth = $${values.length}`);
     }
     if (gender !== undefined) {
-      values.push(gender);
+      const cleanGender =
+        gender === null || gender === '' || gender === '—' || gender === 'None' ? null : gender;
+      values.push(cleanGender);
       updates.push(`gender = $${values.length}`);
     }
     if (bloodGroup !== undefined) {
@@ -930,6 +923,10 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
     if (socialInsurance !== undefined) {
       values.push(socialInsurance);
       updates.push(`social_insurance = $${values.length}`);
+    }
+    if (healthInsurance !== undefined) {
+      values.push(healthInsurance || null);
+      updates.push(`health_insurance = $${values.length}`);
     }
     if (emergencyContact !== undefined) {
       if (emergencyContact === null || emergencyContact === '' || emergencyContact === '—') {
@@ -984,6 +981,11 @@ export async function updateEmployee(req: Request, res: Response): Promise<void>
       updates.push(`avatar = $${values.length}`);
       // Keep schema avatar_url in sync — auth /me and login read it
       updates.push(`avatar_url = $${values.length}`);
+    }
+    if (bio !== undefined) {
+      const cleaned = bio === null || bio === '' ? null : String(bio).trim() || null;
+      values.push(cleaned);
+      updates.push(`bio = $${values.length}`);
     }
     const incomingStatus = accountStatus || status;
     const isSelfUpdate =

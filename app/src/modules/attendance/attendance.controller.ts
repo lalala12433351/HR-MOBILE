@@ -227,6 +227,20 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
     }
 
     const isRemote = workFromHome === true || String(deviceInfo || '').toLowerCase().includes('wfh') || String(deviceInfo || '').toLowerCase().includes('remote');
+    if (isRemote) {
+      const approvedWfh = await hasApprovedWfhRegularization(req, validEmpId);
+      if (!approvedWfh) {
+        res.status(403).json({
+          success: false,
+          error: {
+            code: 'WFH_NOT_APPROVED',
+            message:
+              'Work from home requires an approved regularization for today. Submit a WFH request under Attendance → Regularizations and wait for manager approval.',
+          },
+        });
+        return;
+      }
+    }
     const usedQr = Boolean(qrToken);
     if (usedQr) {
       if (!officeAllowsQr(policy, office)) {
@@ -1373,12 +1387,45 @@ function combineDateAndTime(dateStr: string, timeStr: string): Date | null {
   return isNaN(dt.getTime()) ? null : dt;
 }
 
+function isWfhReasonText(value?: string | null): boolean {
+  const text = String(value || '').toLowerCase();
+  return text.includes('work from home') || /\bwfh\b/.test(text);
+}
+
+async function hasApprovedWfhRegularization(
+  req: Request,
+  employeeId: string,
+  dateStr?: string | null
+): Promise<boolean> {
+  const params: any[] = [employeeId];
+  let dateClause = 'r.date = CURRENT_DATE';
+  if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr).slice(0, 10))) {
+    params.push(String(dateStr).slice(0, 10));
+    dateClause = `r.date = $${params.length}::date`;
+  }
+  const res = await req.tenantQuery!(
+    `SELECT r.id
+     FROM attendance_regularizations r
+     WHERE r.employee_id = $1
+       AND ${dateClause}
+       AND LOWER(r.status) = 'approved'
+       AND (
+         LOWER(COALESCE(r.reason, '')) LIKE '%work from home%'
+         OR LOWER(COALESCE(r.reason, '')) LIKE '%wfh%'
+       )
+     LIMIT 1`,
+    params
+  );
+  return Boolean(res.rows[0]);
+}
+
 async function upsertDayPunches(
   req: Request,
   employeeId: string,
   dateStr: string,
   checkIn?: string | null,
-  checkOut?: string | null
+  checkOut?: string | null,
+  opts?: { deviceInfo?: string; withinGeofence?: boolean }
 ): Promise<void> {
   const officeRes = await req.tenantQuery!(`SELECT id, latitude, longitude FROM offices ORDER BY created_at ASC NULLS LAST LIMIT 1`);
   const office = officeRes.rows[0];
@@ -1386,6 +1433,8 @@ async function upsertDayPunches(
   const safeLat = clampCoord(Number(office?.latitude), -90, 90);
   const safeLng = clampCoord(Number(office?.longitude), -180, 180);
   const ip = clientIp(req) || req.ip || '127.0.0.1';
+  const deviceInfo = opts?.deviceInfo || 'Manual Edit';
+  const withinGeofence = opts?.withinGeofence !== false && !isWfhReasonText(deviceInfo);
 
   await req.tenantQuery!(
     `DELETE FROM attendance_punches
@@ -1400,8 +1449,8 @@ async function upsertDayPunches(
         `INSERT INTO attendance_punches (
           employee_id, office_id, punch_type, punch_timestamp, latitude, longitude,
           distance_from_office_meters, is_within_geofence, device_info, ip_address
-         ) VALUES ($1, $2, 'check_in', $3, $4, $5, 0, true, 'Manual Edit', $6)`,
-        [employeeId, officeId, inTs.toISOString(), safeLat, safeLng, ip]
+         ) VALUES ($1, $2, 'check_in', $3, $4, $5, 0, $7, $8, $6)`,
+        [employeeId, officeId, inTs.toISOString(), safeLat, safeLng, ip, withinGeofence, deviceInfo]
       );
     }
   }
@@ -1413,8 +1462,8 @@ async function upsertDayPunches(
         `INSERT INTO attendance_punches (
           employee_id, office_id, punch_type, punch_timestamp, latitude, longitude,
           distance_from_office_meters, is_within_geofence, device_info, ip_address
-         ) VALUES ($1, $2, 'check_out', $3, $4, $5, 0, true, 'Manual Edit', $6)`,
-        [employeeId, officeId, outTs.toISOString(), safeLat, safeLng, ip]
+         ) VALUES ($1, $2, 'check_out', $3, $4, $5, 0, $7, $8, $6)`,
+        [employeeId, officeId, outTs.toISOString(), safeLat, safeLng, ip, withinGeofence, deviceInfo]
       );
     }
   }
@@ -1570,6 +1619,46 @@ export async function updateRegularizationStatus(req: Request, res: Response): P
       }
     }
 
+    const wfh = isWfhReasonText(reg.reason);
+    const rawDate = String(reg.date_str || '');
+    const dateStr = /^\d{4}-\d{2}-\d{2}/.test(rawDate)
+      ? rawDate.slice(0, 10)
+      : String(reg.date || '').slice(0, 10);
+
+    if (
+      mapped === 'approved' &&
+      wfh &&
+      String(reg.status || '').toLowerCase() !== 'approved'
+    ) {
+      try {
+        const year = Number(dateStr.slice(0, 4)) || new Date().getFullYear();
+        const schema = String(req.dbSchema || '');
+        if (schema) {
+          await withTenantTransaction(schema, async (query) => {
+            await assertSufficientBalance(query, reg.employee_id, 'wfh', 1, year);
+            await adjustLeaveBalance(query, {
+              employeeId: reg.employee_id,
+              leaveType: 'wfh',
+              delta: -1,
+              actorId: me?.id || null,
+              year,
+              notes: 'Debit on WFH regularization approval',
+            });
+            return null;
+          });
+        }
+      } catch (balanceErr: any) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'INSUFFICIENT_WFH_BALANCE',
+            message: balanceErr?.message || 'Insufficient WFH balance to approve this request.',
+          },
+        });
+        return;
+      }
+    }
+
     const result = await req.tenantQuery!(
       `UPDATE attendance_regularizations
        SET status = $1, approver_id = $2
@@ -1579,15 +1668,14 @@ export async function updateRegularizationStatus(req: Request, res: Response): P
     );
 
     if (mapped === 'approved') {
-      const rawDate = String(reg.date_str || '');
-      const dateStr = /^\d{4}-\d{2}-\d{2}/.test(rawDate)
-        ? rawDate.slice(0, 10)
-        : String(reg.date || '').slice(0, 10);
       const checkIn = valueToSqlTime(reg.requested_check_in);
       const checkOut = valueToSqlTime(reg.requested_check_out);
       try {
         if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-          await upsertDayPunches(req, reg.employee_id, dateStr, checkIn, checkOut);
+          await upsertDayPunches(req, reg.employee_id, dateStr, checkIn, checkOut, {
+            deviceInfo: wfh ? 'Work From Home' : 'Manual Edit',
+            withinGeofence: !wfh,
+          });
         }
       } catch {
         // Keep the decision even if rewriting punches fails (coords/schema drift).

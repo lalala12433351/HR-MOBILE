@@ -82,6 +82,30 @@ function hourlyRate(task: any, project: any, client: any): number {
   return 0;
 }
 
+/** Seller (issuing company) details from tenant registration address. */
+function sellerFromTenant(req: Request) {
+  const t = req.tenant;
+  const street = String(t?.address || '').trim();
+  const city = String(t?.city || '').trim();
+  const stateProvince = String(t?.stateProvince || '').trim();
+  const postalCode = String(t?.postalCode || '').trim();
+  const country = String(t?.country || '').trim();
+  const parts = [street, [city, stateProvince].filter(Boolean).join(', '), postalCode, country].filter(Boolean);
+  return {
+    seller_name: String(t?.name || '').trim() || null,
+    seller_address: street || null,
+    seller_city: city || null,
+    seller_state_province: stateProvince || null,
+    seller_postal_code: postalCode || null,
+    seller_country: country || null,
+    seller_address_formatted: parts.length ? parts.join('\n') : null,
+  };
+}
+
+function withSeller(req: Request, invoice: any) {
+  return { ...invoice, ...sellerFromTenant(req) };
+}
+
 export async function listClients(req: Request, res: Response): Promise<void> {
   try {
     await ensureBillingSchema(req);
@@ -385,7 +409,8 @@ export async function listInvoices(req: Request, res: Response): Promise<void> {
        ORDER BY i.created_at DESC`,
       params
     );
-    res.json({ success: true, data: await attachInvoiceLines(req, invoices.rows) });
+    const withLines = await attachInvoiceLines(req, invoices.rows);
+    res.json({ success: true, data: withLines.map((inv) => withSeller(req, inv)) });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
@@ -417,7 +442,7 @@ export async function getInvoice(req: Request, res: Response): Promise<void> {
       return;
     }
     const [grouped] = await attachInvoiceLines(req, invoices.rows);
-    res.json({ success: true, data: grouped });
+    res.json({ success: true, data: withSeller(req, grouped) });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
@@ -583,7 +608,10 @@ export async function createInvoice(req: Request, res: Response): Promise<void> 
       }
     }
 
-    res.status(201).json({ success: true, data: { ...invoice.rows[0], lines: savedLines } });
+    res.status(201).json({
+      success: true,
+      data: withSeller(req, { ...invoice.rows[0], lines: savedLines }),
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }

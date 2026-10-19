@@ -976,7 +976,8 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                     ref={fileInputRef}
                     onChange={handleFileSelect}
                     accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
-                    className="hidden"
+                    className="sr-only"
+                    tabIndex={-1}
                   />
 
                   {attachedFile || newAttachmentName ? (

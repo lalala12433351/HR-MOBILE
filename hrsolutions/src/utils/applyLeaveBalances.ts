@@ -1,5 +1,9 @@
 import { Employee } from '@/types';
 
+function balanceEmployeeId(b: any): string {
+  return String(b?.employeeId || b?.employee_id || '').trim();
+}
+
 /** Merge GET /attendance/leave-balances rows onto employees for leaveRules. */
 export function applyLeaveBalancesToEmployees(
   employees: Employee[],
@@ -10,19 +14,20 @@ export function applyLeaveBalancesToEmployees(
 
   const byEmp = new Map<string, any>();
   for (const b of list) {
-    if (b?.employeeId) byEmp.set(String(b.employeeId), b);
+    const id = balanceEmployeeId(b);
+    if (id) byEmp.set(id, b);
   }
 
   return employees.map((emp) => {
-    const bal = byEmp.get(String(emp.id));
+    const bal = byEmp.get(String(emp.id)) || (emp.employeeId ? byEmp.get(String(emp.employeeId)) : undefined);
     if (!bal) return emp;
     return {
       ...emp,
       leaveBalancesFromServer: true,
       leaveBalances: {
-        casualLeave: Number(bal.casualLeave ?? 0),
-        sickLeave: Number(bal.sickLeave ?? 0),
-        earnedLeave: Number(bal.earnedLeave ?? 0),
+        casualLeave: Number(bal.casualLeave ?? bal.casual_leave ?? 0),
+        sickLeave: Number(bal.sickLeave ?? bal.sick_leave ?? 0),
+        earnedLeave: Number(bal.earnedLeave ?? bal.earned_leave ?? 0),
         compOff: Number(bal.wfh ?? bal.compOff ?? 0),
       },
       leaveBalanceTotals: bal.totals

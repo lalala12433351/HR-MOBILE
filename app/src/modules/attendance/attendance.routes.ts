@@ -3,6 +3,7 @@ import {
   recordPunch,
   getPunches,
   getOfficeQrToken,
+  verifyWorkplaceLocation,
   requestLeave,
   getLeaves,
   decideLeave,
@@ -18,7 +19,6 @@ import {
   updateRegularizationStatus,
   updateAttendanceRecord,
   toggleBreak,
-  verifyWorkplaceLocation,
 } from './attendance.controller.js';
 import {
   recordPunchSchema,
@@ -44,12 +44,12 @@ attendanceRoutes.use(authenticateToken);
 attendanceRoutes.use(requireTenantContext);
 
 attendanceRoutes.post('/punches', validateRequest({ body: recordPunchSchema }), recordPunch);
+attendanceRoutes.get('/punches', getPunches);
 attendanceRoutes.post(
   '/location-check',
   validateRequest({ body: workplaceLocationCheckSchema }),
   verifyWorkplaceLocation
 );
-attendanceRoutes.get('/punches', getPunches);
 attendanceRoutes.get(
   '/qr-token',
   requireRole(['super_admin', 'hr_manager', 'manager', 'faculty']),

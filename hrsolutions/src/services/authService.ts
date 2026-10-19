@@ -25,20 +25,20 @@ export class AuthService {
       if ((window as any).__BOS_AUTH_SESSION__) {
         return (window as any).__BOS_AUTH_SESSION__;
       }
-      if (typeof document !== 'undefined') {
-        const cookieStr = document.cookie.split('; ').find((row) => row.startsWith(`${this.STORAGE_KEY}=`));
-        if (cookieStr) {
-          const val = decodeURIComponent(cookieStr.split('=')[1]);
-          return JSON.parse(val);
-        }
-      }
       try {
         const sessionRaw = sessionStorage.getItem(this.STORAGE_KEY);
         if (sessionRaw) return JSON.parse(sessionRaw);
       } catch (_) {}
       if (!DISABLE_LOCAL_STORAGE) {
         const raw = localStorage.getItem(this.STORAGE_KEY);
-        return raw ? JSON.parse(raw) : null;
+        if (raw) return JSON.parse(raw);
+      }
+      if (typeof document !== 'undefined') {
+        const cookieStr = document.cookie.split('; ').find((row) => row.startsWith(`${this.STORAGE_KEY}=`));
+        if (cookieStr) {
+          const val = decodeURIComponent(cookieStr.split('=')[1]);
+          if (val && val.startsWith('{')) return JSON.parse(val);
+        }
       }
       return null;
     } catch {
@@ -58,6 +58,7 @@ export class AuthService {
     dbSchema?: string;
     name?: string;
     persist?: boolean;
+    refreshToken?: string | null;
   }): UserAuthSession {
     const persist = params.persist !== false;
     const session: UserAuthSession = {
@@ -69,10 +70,6 @@ export class AuthService {
       name: params.name || params.email,
       token: params.token,
     };
-
-    if (typeof document !== 'undefined') {
-      document.cookie = `${this.STORAGE_KEY}=${encodeURIComponent(JSON.stringify(session))}; path=/; max-age=${persist ? 86400 : 0}; SameSite=Lax`;
-    }
 
     if (typeof window !== 'undefined') {
       (window as any).__BOS_AUTH_SESSION__ = session;
@@ -89,7 +86,11 @@ export class AuthService {
           }
         }
       } catch (_) {}
-      api.setAuth(params.token, params.tenantId, { persist });
+      api.setAuth(params.token, params.tenantId, {
+        persist,
+        refreshToken: params.refreshToken,
+        email: params.email,
+      });
     }
 
     return session;

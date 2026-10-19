@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyCognitoToken } from '../config/cognito.js';
+import crypto from 'crypto';
+import { verifyCognitoToken, CognitoTokenPayload } from '../config/cognito.js';
 import { UserRole } from '../types/index.js';
 import { pool } from '../config/database.js';
 import { sanitizeSchemaName } from '../db/queryRunner.js';
@@ -31,8 +32,37 @@ type AuthIdentityCacheEntry = {
   schemaName: string;
 };
 
-const AUTH_IDENTITY_TTL_MS = 60_000;
+const AUTH_IDENTITY_TTL_MS = 5 * 60_000;
 const authIdentityCache = new Map<string, AuthIdentityCacheEntry>();
+
+type VerifiedTokenCacheEntry = { payload: CognitoTokenPayload; expiresAt: number };
+const VERIFIED_TOKEN_TTL_MS = 5 * 60_000;
+const verifiedTokenCache = new Map<string, VerifiedTokenCacheEntry>();
+
+function tokenFingerprint(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+async function verifyCognitoTokenCached(token: string): Promise<CognitoTokenPayload> {
+  const key = tokenFingerprint(token);
+  const hit = verifiedTokenCache.get(key);
+  if (hit && hit.expiresAt > Date.now() + 5_000) {
+    return hit.payload;
+  }
+  const payload = await verifyCognitoToken(token);
+  const expMs = typeof payload.exp === 'number' ? payload.exp * 1000 : Date.now() + VERIFIED_TOKEN_TTL_MS;
+  verifiedTokenCache.set(key, {
+    payload,
+    expiresAt: Math.min(expMs, Date.now() + VERIFIED_TOKEN_TTL_MS),
+  });
+  if (verifiedTokenCache.size > 5_000) {
+    const now = Date.now();
+    for (const [k, entry] of verifiedTokenCache) {
+      if (entry.expiresAt <= now) verifiedTokenCache.delete(k);
+    }
+  }
+  return payload;
+}
 
 function getCachedIdentity(sub: string): AuthIdentityCacheEntry | null {
   const hit = authIdentityCache.get(sub);
@@ -256,7 +286,7 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
     }
 
     // 1. Validate token signature, expiration, and issuer using AWS Cognito Verifier
-    const payload = await verifyCognitoToken(token);
+    const payload = await verifyCognitoTokenCached(token);
 
     if (!payload || !payload.sub) {
       log.auth('Token Verification', { status: 'FAILED', reason: 'Invalid or missing user sub in token' });
@@ -413,25 +443,15 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
       return;
     }
 
-    log.auth('Token Verification', {
-      email,
-      sub,
-      role: effectiveRole,
-      tenantId,
-      status: 'VERIFIED',
-    });
-
-    log.tenant('Active Tenant Schema Context', {
-      tenantId,
-      schemaName,
-      userEmail: email,
-      userRole: effectiveRole,
-      reason: tenantRecord
-        ? cached
-          ? 'Resolved via short-TTL auth identity cache'
-          : 'Resolved via public.global_auth_mapping'
-        : 'Resolved via JWT / Header fallback',
-    });
+    if (!cached) {
+      log.auth('Token Verification', {
+        email,
+        sub,
+        role: effectiveRole,
+        tenantId,
+        status: 'VERIFIED',
+      });
+    }
 
     // 3. Attach Tenant & User Context to the Request
     req.tenant = {
@@ -528,6 +548,39 @@ export function resolveAuthContext(token: string): Promise<ResolvedAuthContext> 
 async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promise<void> {
   const sub = appJwt.sub!;
   const email = (appJwt.email || '').trim().toLowerCase();
+  const cached = getCachedIdentity(sub);
+  if (cached) {
+    if (cached.tenantRecord?.tenant_status === 'suspended') {
+      const err: any = new Error('TENANT_SUSPENDED');
+      err.code = 'TENANT_SUSPENDED';
+      throw err;
+    }
+    if (cached.tenantRecord?.is_active === false) {
+      const err: any = new Error('ACCOUNT_DEACTIVATED');
+      err.code = 'ACCOUNT_DEACTIVATED';
+      throw err;
+    }
+    req.tenant = {
+      id: cached.tenantRecord?.tenant_uuid || cached.tenantId,
+      schema: cached.schemaName,
+      userSub: sub,
+      slug: cached.tenantRecord?.tenant_slug || cached.tenantId,
+      name: cached.tenantRecord?.tenant_name || undefined,
+      industry: cached.tenantRecord?.tenant_industry || undefined,
+    };
+    req.user = {
+      sub,
+      email: email || `${sub}@student.local`,
+      role: 'student',
+      tenant_id: cached.tenantId,
+      db_schema: cached.schemaName,
+      name: appJwt.name || email,
+    };
+    req.tenantId = cached.tenantId;
+    req.dbSchema = cached.schemaName;
+    return;
+  }
+
   let tenantId = appJwt.tenant_id || 'demo';
   let schemaName = appJwt.db_schema || `tenant_${tenantId}`;
   let tenantUuid: string | undefined;
@@ -593,12 +646,18 @@ async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promis
     throw err;
   }
 
-  log.auth('Token Verification', {
-    email,
-    sub,
-    role: 'student',
+  setCachedIdentity(sub, {
+    tenantRecord: {
+      tenant_uuid: tenantUuid,
+      tenant_slug: tenantId,
+      tenant_status: tenantStatus,
+      is_active: mappingActive,
+      tenant_name: tenantName,
+      tenant_industry: tenantIndustry,
+    },
+    effectiveRole: 'student',
     tenantId,
-    status: 'VERIFIED',
+    schemaName,
   });
 
   req.tenant = {

@@ -1,0 +1,35 @@
+{
+  "title": "Profile peek redesign",
+  "question": "Confirm what this coworker profile modal must do so the redesign hits the right shape.",
+  "options": [
+    {
+      "id": "peek-contact",
+      "label": "Quick peek + contact",
+      "kicker": "MOST LIKELY",
+      "thesis": "See who someone is, grab email or phone, optionally open the full profile. Dismiss with X or backdrop.",
+      "viewport": "Compact card: identity, contact, org context, one optional primary action.",
+      "risk": "If overbuilt, it fights the full employee detail page."
+    },
+    {
+      "id": "manage-first",
+      "label": "Manager / HR action hub",
+      "thesis": "Admins open this to manage, invite, or jump to full edit. Contact is secondary.",
+      "viewport": "Identity plus strong Manage / Invite actions; denser org context.",
+      "risk": "Feels heavy for everyday coworkers."
+    },
+    {
+      "id": "directory-card",
+      "label": "Rich directory card",
+      "thesis": "A fuller mini-profile: bio, reports, manager, location — almost a panel, not a peek.",
+      "viewport": "Taller sheet with bio and hierarchy emphasized.",
+      "risk": "Duplicates the Public Profile tab."
+    }
+  ],
+  "steer": true,
+  "reroll": false,
+  "canon": false,
+  "buildPath": {
+    "value": "code",
+    "toggle": false
+  }
+}

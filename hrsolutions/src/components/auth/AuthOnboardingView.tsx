@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { UserPersona, Role, Employee, Student, LicensePlan } from '@/types';
 
-import { api } from '@/services/apiClient';
+import { api, ApiClientError } from '@/services/apiClient';
+import { AuthService } from '@/services/authService';
 import { getDefaultState, AppState, saveStoredState } from '@/services/store';
 import { CognitoPasswordPolicyGuide } from '@/components/auth/CognitoPasswordPolicyGuide';
 import { evaluateCognitoPassword } from '@/utils/cognitoPasswordPolicy';
-import { fromApiAuthRole } from '@/utils/roleMapping';
+import { fromApiAuthRole, toAuthSessionRole } from '@/utils/roleMapping';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { PixbeWordmark } from '@/components/common/PixbeBrand';
 import '@/components/modules/setup/workspace-setup.css';
@@ -149,6 +150,14 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
         setLoginEmail(savedEmail);
       }
     } catch (_) {}
+    try {
+      if (typeof window !== 'undefined') {
+        const reason = new URLSearchParams(window.location.search).get('reason');
+        if (reason === 'session') {
+          setLoginError('Your previous session could not be restored. Please sign in again.');
+        }
+      }
+    } catch (_) {}
   }, []);
 
   // Signup State
@@ -203,7 +212,7 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [licensePlans, setLicensePlans] = useState<LicensePlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState('');
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual' | 'trial'>('trial');
   const [plansLoading, setPlansLoading] = useState(false);
 
   // Onboarding Form State
@@ -338,161 +347,199 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
     setIsSubmitting(true);
 
     try {
-      // 1. Authenticate staff / admin with live PostgreSQL backend
-      let res: any = null;
-      try {
-        res = await api.auth.login({ email: cleanEmail, password: cleanPassword });
-      } catch (err) {
-        console.debug('Backend auth unreachable, falling back to local verification:', err);
+      const res = await api.auth.login({ email: cleanEmail, password: cleanPassword });
+
+      if (!res?.success || !res.data) {
+        setLoginError('Authentication failed. Please try again.');
+        return;
       }
 
-      if (res && res.success && res.data) {
-        const { token, tenant, user } = res.data;
-        api.setAuth(token, tenant.slug, { persist: rememberMe });
+      const { token, tenant, user } = res.data;
+      api.setAuth(token, tenant.slug, {
+        persist: rememberMe,
+        refreshToken: (res.data as any).refreshToken,
+        email: user.email,
+      });
+      AuthService.setSession({
+        token,
+        sub: (user as any).sub || user.id,
+        email: user.email,
+        role: toAuthSessionRole(user.role),
+        tenantId: tenant.slug,
+        dbSchema: (tenant as any).schema,
+        name: user.name,
+        persist: rememberMe,
+        refreshToken: (res.data as any).refreshToken,
+      });
 
-        const resolvedRole = fromApiAuthRole(user.role);
-        const isSuper = resolvedRole === 'super_admin';
-        const isWorkspaceAdmin = resolvedRole === 'super_admin' || resolvedRole === 'hr_manager';
-        const resolvedDesignation =
-          (user.designation && user.designation !== 'Staff Member' && user.designation !== 'Team Member')
-            ? user.designation
-            : (isSuper ? 'Founder & CEO' : (user.designation || 'Team Member'));
+      const resolvedRole = fromApiAuthRole(user.role);
+      const isSuper = resolvedRole === 'super_admin';
+      const isWorkspaceAdmin = resolvedRole === 'super_admin' || resolvedRole === 'hr_manager';
+      const resolvedDesignation =
+        (user.designation && user.designation !== 'Staff Member' && user.designation !== 'Team Member')
+          ? user.designation
+          : (isSuper ? 'Founder & CEO' : (user.designation || 'Team Member'));
 
-        const backendOnboardingStatus = String(
-          (user as any).onboardingStatus || (user as any).onboarding_status || ''
-        )
-          .trim()
-          .toUpperCase();
-        const backendHasCompletedProfile = (user as any).hasCompletedProfile;
-        const backendOnboardingProgress =
-          typeof (user as any).onboardingProgress === 'number'
-            ? (user as any).onboardingProgress
-            : undefined;
+      const backendOnboardingStatus = String(
+        (user as any).onboardingStatus || (user as any).onboarding_status || ''
+      )
+        .trim()
+        .toUpperCase();
+      const backendHasCompletedProfile = (user as any).hasCompletedProfile;
+      const backendOnboardingProgress =
+        typeof (user as any).onboardingProgress === 'number'
+          ? (user as any).onboardingProgress
+          : undefined;
 
-        const activePersona: UserPersona = {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: resolvedRole,
-          designation: resolvedDesignation,
-          department: (user.department as any) || (isSuper ? 'Management' : 'General Operations'),
-          avatar: user.avatar || '',
-        };
+      const activePersona: UserPersona = {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: resolvedRole,
+        designation: resolvedDesignation,
+        department: (user.department as any) || (isSuper ? 'Management' : 'General Operations'),
+        avatar: user.avatar || '',
+      };
 
-        const updatedOrg = {
-          ...(state.organization || {}),
-          name: tenant.name,
-          domain: tenant.slug,
-          industry: (tenant as any).industry || state.organization?.industry || 'Corporate / Technology',
-        };
+      const updatedOrg = {
+        ...(state.organization || {}),
+        name: tenant.name,
+        domain: tenant.slug,
+        industry: (tenant as any).industry || state.organization?.industry || 'Corporate / Technology',
+      };
 
-        const matchedEmp = (state.employees || []).find(
-          (e) => e.email?.toLowerCase() === activePersona.email.toLowerCase()
-        );
-        const profileCompleteFromBackend =
-          backendHasCompletedProfile === true ||
-          (typeof backendOnboardingProgress === 'number' && backendOnboardingProgress >= 100);
-        const profileCompleteFromLocal =
-          matchedEmp &&
-          (matchedEmp.hasCompletedProfile === true || (matchedEmp.onboardingProgress || 0) >= 100);
-        // Prefer backend flags; only fall back to local when backend omitted them
-        const profileIsComplete =
-          backendHasCompletedProfile !== undefined || backendOnboardingProgress !== undefined
-            ? profileCompleteFromBackend
-            : Boolean(profileCompleteFromLocal);
+      const matchedEmp = (state.employees || []).find(
+        (e) => e.email?.toLowerCase() === activePersona.email.toLowerCase()
+      );
+      const profileCompleteFromBackend =
+        backendHasCompletedProfile === true ||
+        (typeof backendOnboardingProgress === 'number' && backendOnboardingProgress >= 100);
+      const profileCompleteFromLocal =
+        matchedEmp &&
+        (matchedEmp.hasCompletedProfile === true || (matchedEmp.onboardingProgress || 0) >= 100);
+      // Prefer backend flags; only fall back to local when backend omitted them
+      const profileIsComplete =
+        backendHasCompletedProfile !== undefined || backendOnboardingProgress !== undefined
+          ? profileCompleteFromBackend
+          : Boolean(profileCompleteFromLocal);
 
-        const updatedEmployees = (state.employees || []).map((emp) => {
-          const isEmpMatch =
-            emp.email?.toLowerCase() === activePersona.email.toLowerCase() ||
-            (isSuper && (emp.role === 'super_admin' || emp.employeeId === 'EMP001'));
-          if (isEmpMatch) {
-            return {
-              ...emp,
-              // Trust backend login activation; don't force Active before profile is complete
-              isActivated: profileIsComplete ? true : emp.isActivated,
-              isDeactivated: false,
-              accountStatus: profileIsComplete
+      const updatedEmployees = (state.employees || []).map((emp) => {
+        const isEmpMatch =
+          emp.email?.toLowerCase() === activePersona.email.toLowerCase() ||
+          (isSuper && (emp.role === 'super_admin' || emp.employeeId === 'EMP001'));
+        if (isEmpMatch) {
+          return {
+            ...emp,
+            // Trust backend login activation; don't force Active before profile is complete
+            isActivated: profileIsComplete ? true : emp.isActivated,
+            isDeactivated: false,
+            accountStatus: profileIsComplete
+              ? ('Active' as const)
+              : emp.accountStatus === 'Activated'
                 ? ('Active' as const)
-                : emp.accountStatus === 'Activated'
-                  ? ('Active' as const)
-                  : emp.accountStatus,
-              hasCompletedProfile: profileIsComplete,
-              onboardingProgress: profileIsComplete
-                ? 100
-                : backendOnboardingProgress ?? emp.onboardingProgress ?? 0,
-              status: emp.status === 'Onboarding' && profileIsComplete
-                ? ('Active' as const)
-                : (emp.status || ('Active' as const)),
-              designation: resolvedDesignation,
-              role: resolvedRole,
-            };
-          }
-          return emp;
-        });
-
-        const nextFullState: AppState = {
-          ...state,
-          isAuthenticated: true,
-          organization: updatedOrg,
-          currentPersona: activePersona,
-          employees: updatedEmployees,
-          ...(backendOnboardingStatus
-            ? ({ onboardingStatus: backendOnboardingStatus } as any)
-            : {}),
-        };
-
-        selectPersona(activePersona);
-        updateState((prev) => ({
-          ...prev,
-          isAuthenticated: true,
-          organization: updatedOrg,
-          currentPersona: activePersona,
-          employees: updatedEmployees,
-          ...(backendOnboardingStatus
-            ? ({ onboardingStatus: backendOnboardingStatus } as any)
-            : {}),
-        }));
-        saveStoredState(nextFullState);
-
-        const workspaceSetupIncomplete =
-          isWorkspaceAdmin &&
-          backendOnboardingStatus &&
-          backendOnboardingStatus !== 'COMPLETED';
-        const needsEmployeeOnboarding =
-          !isSuper && !profileIsComplete;
-
-        // Navigate immediately — don't block the spinner on the heavy post-login sync fan-out.
-        setIsSubmitting(false);
-        if (onComplete) {
-          if (activePersona.role === 'student') {
-            onComplete('/student-attendance');
-          } else if (workspaceSetupIncomplete) {
-            onComplete('/setup');
-          } else if (needsEmployeeOnboarding) {
-            onComplete('/employee-onboarding');
-          } else {
-            onComplete('/dashboard');
-          }
+                : emp.accountStatus,
+            hasCompletedProfile: profileIsComplete,
+            onboardingProgress: profileIsComplete
+              ? 100
+              : backendOnboardingProgress ?? emp.onboardingProgress ?? 0,
+            status: emp.status === 'Onboarding' && profileIsComplete
+              ? ('Active' as const)
+              : (emp.status || ('Active' as const)),
+            designation: resolvedDesignation,
+            role: resolvedRole,
+          };
         }
-        void syncWithBackend(nextFullState).catch((syncErr) => {
-          console.debug('Post-login sync note:', syncErr);
-        });
-        return;
-      } else if (res?.error?.code === 'ACCOUNT_DEACTIVATED') {
-        setLoginError(res.error.message || 'Your account has been deactivated. Please contact your workspace administrator.');
-        setIsSubmitting(false);
-        return;
-      } else if (res?.error?.code === 'TENANT_SUSPENDED') {
-        setLoginError(res.error.message || 'Your organization workspace is currently suspended.');
-        setIsSubmitting(false);
-        return;
+        return emp;
+      });
+
+      const nextFullState: AppState = {
+        ...state,
+        isAuthenticated: true,
+        organization: updatedOrg,
+        currentPersona: activePersona,
+        employees: updatedEmployees,
+        ...(backendOnboardingStatus
+          ? ({ onboardingStatus: backendOnboardingStatus } as any)
+          : {}),
+      };
+
+      selectPersona(activePersona);
+      updateState((prev) => ({
+        ...prev,
+        isAuthenticated: true,
+        organization: updatedOrg,
+        currentPersona: activePersona,
+        employees: updatedEmployees,
+        ...(backendOnboardingStatus
+          ? ({ onboardingStatus: backendOnboardingStatus } as any)
+          : {}),
+      }));
+      saveStoredState(nextFullState);
+
+      const workspaceSetupIncomplete =
+        isWorkspaceAdmin &&
+        backendOnboardingStatus &&
+        backendOnboardingStatus !== 'COMPLETED';
+      const needsEmployeeOnboarding =
+        !isSuper && !profileIsComplete;
+
+      // Navigate immediately — don't block the spinner on the heavy post-login sync fan-out.
+      setIsSubmitting(false);
+      if (onComplete) {
+        if (activePersona.role === 'student') {
+          onComplete('/student-attendance');
+        } else if (workspaceSetupIncomplete) {
+          onComplete('/setup');
+        } else if (needsEmployeeOnboarding) {
+          onComplete('/employee-onboarding');
+        } else {
+          onComplete('/dashboard');
+        }
       }
-
-
-      setLoginError(res?.error?.message || 'Incorrect email or password. Please verify your credentials.');
-    } catch (apiErr: any) {
-      console.error('Login error:', apiErr.message || apiErr);
-      setLoginError(apiErr.message || 'Authentication failed. Please verify your credentials.');
+      void syncWithBackend(nextFullState).catch((syncErr) => {
+        console.debug('Post-login sync note:', syncErr);
+      });
+      return;
+    } catch (apiErr: unknown) {
+      console.error('Login error:', apiErr);
+      if (apiErr instanceof ApiClientError) {
+        if (apiErr.code === 'ACCOUNT_DEACTIVATED') {
+          setLoginError(
+            apiErr.message ||
+              'Your account has been deactivated. Please contact your workspace administrator.'
+          );
+        } else if (apiErr.code === 'TENANT_SUSPENDED') {
+          setLoginError(
+            apiErr.message || 'Your organization workspace is currently suspended.'
+          );
+        } else if (apiErr.code === 'TENANT_NOT_FOUND') {
+          setLoginError(
+            apiErr.message ||
+              'This account is not provisioned for a workspace. Ask your administrator to invite you.'
+          );
+        } else if (
+          apiErr.code === 'FETCH_ERROR' ||
+          apiErr.code === 'NON_JSON_RESPONSE' ||
+          apiErr.code.startsWith('HTTP_5')
+        ) {
+          setLoginError(
+            apiErr.message?.includes('timed out')
+              ? 'The sign-in service timed out. Check your connection and try again.'
+              : 'Unable to reach the sign-in service. Check your connection and try again.'
+          );
+        } else if (
+          apiErr.code === 'INVALID_CREDENTIALS' ||
+          apiErr.code === 'HTTP_401' ||
+          apiErr.code === 'UNAUTHORIZED'
+        ) {
+          setLoginError('Incorrect email or password. Please verify your credentials.');
+        } else {
+          setLoginError(apiErr.message || 'Authentication failed. Please try again.');
+        }
+      } else {
+        const message = apiErr instanceof Error ? apiErr.message : '';
+        setLoginError(message || 'Authentication failed. Please try again.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -716,7 +763,22 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
         const activeTenantSlug = tenant?.slug || slug;
 
         if (token) {
-          api.setAuth(token, activeTenantSlug, { persist: true });
+          api.setAuth(token, activeTenantSlug, {
+            persist: true,
+            refreshToken: (res.data as any).refreshToken,
+            email: user?.email || resolvedAdminEmail,
+          });
+          AuthService.setSession({
+            token,
+            sub: user?.id || (user as any)?.sub || `admin_${Date.now()}`,
+            email: user?.email || resolvedAdminEmail,
+            role: 'super_admin',
+            tenantId: activeTenantSlug,
+            dbSchema: tenant?.schema,
+            name: user?.name || resolvedAdminName,
+            persist: true,
+            refreshToken: (res.data as any).refreshToken,
+          });
         }
 
         // Always reset workspace-setup progress for a new registration so a
@@ -1401,7 +1463,8 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
               <div className="setup-workplace__heading">
                 <h2>Choose a license.</h2>
               </div>
-              <div className="setup-chips" style={{ marginTop: 24 }} role="radiogroup" aria-label="Billing cycle">
+              <div className="setup-chips" style={{ marginTop: 24 }} role="radiogroup" aria-label="License phase">
+                <button type="button" role="radio" aria-checked={billingCycle === 'trial'} className={`setup-chip${billingCycle === 'trial' ? ' is-on' : ''}`} onClick={() => setBillingCycle('trial')}>Trial</button>
                 <button type="button" role="radio" aria-checked={billingCycle === 'monthly'} className={`setup-chip${billingCycle === 'monthly' ? ' is-on' : ''}`} onClick={() => setBillingCycle('monthly')}>Monthly</button>
                 <button type="button" role="radio" aria-checked={billingCycle === 'annual'} className={`setup-chip${billingCycle === 'annual' ? ' is-on' : ''}`} onClick={() => setBillingCycle('annual')}>Annual</button>
               </div>
@@ -1409,7 +1472,16 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
               <div className="setup-mode-list" role="radiogroup" aria-label="License plans" style={{ marginTop: 20 }}>
                 {licensePlans.map((plan) => {
                   const price = billingCycle === 'annual' ? plan.priceAnnual : plan.priceMonthly;
+                  const trialDays = plan.trialDays > 0 ? plan.trialDays : 14;
                   const selected = selectedPlanId === plan.id;
+                  const priceLabel =
+                    billingCycle === 'trial'
+                      ? price
+                        ? `Free for ${trialDays} days · then $${price}/mo`
+                        : `${trialDays}-day trial`
+                      : price
+                        ? `$${price}/${billingCycle === 'annual' ? 'yr' : 'mo'}`
+                        : 'Included';
                   return (
                     <button
                       key={plan.id}
@@ -1425,8 +1497,7 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
                       <span className="setup-mode__copy">
                         <strong>{plan.name}</strong>
                         <small>
-                          {price ? `$${price}/${billingCycle === 'annual' ? 'yr' : 'mo'}` : 'Included'} · {plan.maxSeats} seats
-                          {plan.trialDays > 0 ? ` · ${plan.trialDays}-day trial` : ''}
+                          {priceLabel} · {plan.maxSeats} seats
                         </small>
                         {(plan.features || []).slice(0, 4).map((feature) => (
                           <small key={feature}>{feature}</small>
@@ -1452,7 +1523,12 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
                 <span><strong>{companySize}</strong> headcount</span>
                 <span><strong>{[streetAddress, city, stateProvince, postalCode, country].map((part) => part.trim()).filter(Boolean).join(', ') || '—'}</strong> address</span>
                 <span><strong>{role === 'Other' ? customRole || 'Other' : role}</strong> title</span>
-                <span><strong>{licensePlans.find((p) => p.id === selectedPlanId)?.name || '—'}</strong> license</span>
+                <span>
+                  <strong>{licensePlans.find((p) => p.id === selectedPlanId)?.name || '—'}</strong>
+                  {billingCycle === 'trial'
+                    ? ` · ${licensePlans.find((p) => p.id === selectedPlanId)?.trialDays || 14}-day trial`
+                    : ` · ${billingCycle} license`}
+                </span>
               </div>
               {onboardingError && <div role="alert" className="pixbe-setup__message is-error"><span>{onboardingError}</span></div>}
               <div className="setup-next">

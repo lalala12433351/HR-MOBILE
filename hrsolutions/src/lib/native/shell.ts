@@ -5,11 +5,12 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
 import { isNativePlatform } from './platform';
+import { initAppNotifications } from './notifications';
 
 let initialized = false;
 
 /**
- * One-time native shell bootstrap: status bar, splash, hardware back button.
+ * One-time native shell bootstrap: status bar, splash, hardware back button, notifications.
  */
 export async function initNativeShell(): Promise<() => void> {
   if (!isNativePlatform() || initialized) {
@@ -36,6 +37,13 @@ export async function initNativeShell(): Promise<() => void> {
     await Keyboard.setResizeMode({ mode: KeyboardResize.Body });
   } catch {
     // ignore
+  }
+
+  try {
+    const disposeNotifications = await initAppNotifications();
+    unsubscribers.push(disposeNotifications);
+  } catch {
+    // Local notifications plugin may be unavailable until cap sync
   }
 
   const backListener = await CapApp.addListener('backButton', ({ canGoBack }) => {

@@ -567,6 +567,8 @@ function policyRemainingForType(
   const entitlement = grantForType(annual, leaveSettings, monthsElapsed);
   const expireMonthly = isMonthlyGrant(leaveSettings) && !monthlyRolloverEnabled(leaveSettings);
   const usedPeriod = expireMonthly ? usedMonth : usedYear;
+  // Ledger `stored` is already debited on approve. Cap by policy entitlement - usage
+  // so a missing debit still cannot overstate remaining — without sharing usage across people.
   const remaining = roundHalf(Math.min(Math.max(0, stored), Math.max(0, entitlement - usedPeriod)));
   return { remaining, entitlement: roundHalf(entitlement) };
 }
@@ -582,8 +584,8 @@ export function serializeBalance(
   }
 ) {
   if (!row) return null;
-  const used = consumed || EMPTY_CONSUMED;
-  const usedMonth = policy?.usedThisMonth || EMPTY_CONSUMED;
+  const used = consumed ? { ...consumed } : { ...EMPTY_CONSUMED };
+  const usedMonth = policy?.usedThisMonth ? { ...policy.usedThisMonth } : { ...EMPTY_CONSUMED };
   const leaveSettings = policy?.leaveSettings || {};
   const annual = quotasFromSettings(leaveSettings, policy?.role);
   const months = monthsElapsedThisYear(policy?.joinDate);

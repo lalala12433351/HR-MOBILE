@@ -344,16 +344,22 @@ export const ACCENTS = [
   { value: '#7a2e35', label: 'Maroon' },
 ];
 
+const ACCENT_HEX = /^#[0-9a-f]{6}$/i;
+
 export function AccentPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const labelId = useId();
+  const customId = useId();
+  const safe = ACCENT_HEX.test(value) ? value : '#17324e';
+  const presetActive = ACCENTS.some((accent) => accent.value === safe);
+
   return (
     <div className="flex flex-col gap-1.5">
       <span id={labelId} className="text-[12px] font-[650] text-[#33435a]">
         Accent
       </span>
-      <div role="radiogroup" aria-labelledby={labelId} className="flex h-9 items-center gap-1.5">
+      <div role="radiogroup" aria-labelledby={labelId} className="flex h-9 flex-wrap items-center gap-1.5">
         {ACCENTS.map((accent) => {
-          const active = accent.value === value;
+          const active = accent.value === safe;
           return (
             <button
               key={accent.value}
@@ -373,6 +379,34 @@ export function AccentPicker({ value, onChange }: { value: string; onChange: (va
             </button>
           );
         })}
+        <label
+          htmlFor={customId}
+          title="Custom colour"
+          className={`relative flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-2 transition-transform active:scale-95 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#2d628e] ${
+            !presetActive ? 'border-[#172234]' : 'border-transparent hover:scale-105'
+          }`}
+        >
+          <span
+            className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full"
+            style={{
+              background: presetActive
+                ? 'conic-gradient(#e85d4c, #f0c419, #4caf73, #3b82f6, #a855f7, #e85d4c)'
+                : safe,
+            }}
+          >
+            {!presetActive ? <Check className="h-3 w-3 text-white drop-shadow" strokeWidth={3} /> : null}
+          </span>
+          <input
+            id={customId}
+            type="color"
+            role="radio"
+            aria-checked={!presetActive}
+            aria-label="Custom accent colour"
+            value={safe}
+            onChange={(event) => onChange(event.target.value)}
+            className="absolute inset-0 cursor-pointer opacity-0"
+          />
+        </label>
       </div>
     </div>
   );

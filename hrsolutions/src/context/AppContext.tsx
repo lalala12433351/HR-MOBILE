@@ -6,7 +6,10 @@ import { loadStoredState, saveStoredState, getDefaultState, AppState } from '../
 import { UserPersona, RealtimeToast, NotificationItem } from '../types';
 import { syncBackendDataToState } from '../services/backendSync';
 import { api } from '../services/apiClient';
+import { AuthService } from '../services/authService';
 import { showRealtimeToast, dismissRealtimeToast } from '../lib/sonnerToast';
+import { showAppNotification } from '../lib/native';
+import { useAppNotificationBridge } from '../hooks/useAppNotificationBridge';
 
 interface AppContextType {
   state: AppState;
@@ -61,8 +64,15 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
   const [timerActive, setTimerActive] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(1500); // 25 min pomodoro
   const [toasts, setToasts] = useState<RealtimeToast[]>([]);
+  const [inboxHydrated, setInboxHydrated] = useState(false);
   // Bumped on logout so in-flight sync results are ignored
   const authEpochRef = useRef(0);
+
+  useAppNotificationBridge(
+    state.notifications,
+    isLoaded && !!state.isAuthenticated,
+    inboxHydrated,
+  );
 
   const syncWithBackend = useCallback(async (overrideState?: AppState) => {
     const epoch = authEpochRef.current;
@@ -87,10 +97,12 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
         }));
       }
       setBackendStatus('connected');
+      setInboxHydrated(true);
     } catch (err) {
       if (epoch !== authEpochRef.current) return;
       console.warn('Backend sync failed, maintaining local state:', err);
       setBackendStatus('disconnected');
+      setInboxHydrated(true);
     }
   }, [state]);
 
@@ -102,7 +114,13 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
     const cleanNotifications = (loaded.notifications || []).filter((n) => {
       if (!n || !n.title) return false;
       const title = n.title.toLowerCase();
-      if (title.includes('action blocked') || title.includes('demo workspace') || title.includes('workspace ready') || title.includes('backend notice')) {
+      if (
+        title.includes('action blocked') ||
+        title.includes('demo workspace') ||
+        title.includes('workspace ready') ||
+        title.includes('backend notice') ||
+        title.includes('profile was updated')
+      ) {
         return false;
       }
       return true;
@@ -139,6 +157,20 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
     const token = api.getToken();
     if (token) {
       loaded.isAuthenticated = true;
+      if (!loaded.currentPersona) {
+        const session = AuthService.getSession();
+        if (session) {
+          loaded.currentPersona = {
+            id: session.sub,
+            name: session.name || session.email || 'User',
+            email: session.email || '',
+            role: session.role as any,
+            designation: session.role === 'super_admin' ? 'Founder & CEO' : 'Team Member',
+            department: session.role === 'student' ? 'Academic' : 'Management',
+            avatar: '',
+          };
+        }
+      }
     } else if (!loaded.isAuthenticated) {
       loaded.currentPersona = null;
     }
@@ -148,7 +180,9 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
 
     // Only fetch live backend records when user is logged in with an active token
     if (token) {
-      syncBackendDataToState(loaded)
+      api
+        .ensureFreshToken()
+        .then(() => syncBackendDataToState(loaded))
         .then((updates) => {
           if (epoch !== authEpochRef.current || !api.getToken()) return;
           if (Object.keys(updates).length > 0) {
@@ -162,14 +196,17 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
             }));
           }
           setBackendStatus('connected');
+          setInboxHydrated(true);
         })
         .catch((err) => {
           if (epoch !== authEpochRef.current) return;
           console.debug('Initial live backend sync unavailable, operating with cached state:', err);
           setBackendStatus('disconnected');
+          setInboxHydrated(true);
         });
     } else {
       setBackendStatus('disconnected');
+      setInboxHydrated(false);
     }
   }, []);
 
@@ -254,6 +291,16 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
 
       setToasts((prev) => [newToast, ...prev.slice(0, 3)]);
       showRealtimeToast(newToast, (item) => navigateToToast(item));
+
+      const linkModule = newToast.linkModule
+        ? `/${newToast.linkModule.toLowerCase()}${newToast.linkTab ? `?tab=${encodeURIComponent(newToast.linkTab)}` : ''}`
+        : undefined;
+      void showAppNotification({
+        id: `toast:${newToast.id}`,
+        title: newToast.title,
+        body: newToast.message || newToast.title,
+        linkUrl: linkModule,
+      });
     },
     [navigateToToast]
   );
@@ -264,10 +311,14 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
   }, []);
 
   const markAllNotificationsRead = () => {
+    const employeeId = state.currentPersona?.id;
     setState((prev) => ({
       ...prev,
       notifications: (prev.notifications || []).map((n) => ({ ...n, read: true })),
     }));
+    void api.auditComms.markAllNotificationsRead(employeeId).catch((err) => {
+      console.error('Failed to mark all notifications read', err);
+    });
   };
 
   const clearReadNotifications = () => {
@@ -282,13 +333,20 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
       ...prev,
       notifications: (prev.notifications || []).filter((n) => n.id !== id),
     }));
+    void api.auditComms.deleteNotification(id).catch((err) => {
+      console.error('Failed to delete notification', err);
+    });
   };
 
   const clearAllNotifications = () => {
+    const employeeId = state.currentPersona?.id;
     setState((prev) => ({
       ...prev,
       notifications: [],
     }));
+    void api.auditComms.clearAllNotifications(employeeId).catch((err) => {
+      console.error('Failed to clear notifications', err);
+    });
   };
 
   const login = (persona: UserPersona) => {
@@ -341,6 +399,7 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
     saveStoredState(loggedOutState);
     setState(loggedOutState);
     setBackendStatus('disconnected');
+    setInboxHydrated(false);
 
     // Hard navigation resets React state and kills pending soft redirects
     if (typeof window !== 'undefined') {
@@ -376,8 +435,11 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
   const markNotificationRead = (id: string) => {
     setState((prev) => ({
       ...prev,
-      notifications: prev.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
+      notifications: (prev.notifications || []).map((n) => (n.id === id ? { ...n, read: true } : n)),
     }));
+    void api.auditComms.markNotificationRead(id).catch((err) => {
+      console.error('Failed to mark notification read', err);
+    });
   };
 
   const toggleThemeMode = () => {

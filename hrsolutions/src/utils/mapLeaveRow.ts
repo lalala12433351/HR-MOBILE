@@ -1,4 +1,40 @@
-import { LeaveRequest } from '@/types';
+import { Employee, LeaveRequest, UserPersona } from '@/types';
+
+type LeaveOwnerRef = {
+  id?: string | null;
+  employeeId?: string | null;
+  name?: string | null;
+  fullName?: string | null;
+  email?: string | null;
+};
+
+/**
+ * Strict leave→person match. Never treats empty ids/names as a match, so one
+ * employee's leave cannot drain everyone else's client-side remaining balance.
+ */
+export function leaveBelongsToEmployee(
+  leave: Pick<LeaveRequest, 'employeeId' | 'employeeName'> | null | undefined,
+  person: LeaveOwnerRef | Employee | UserPersona | null | undefined
+): boolean {
+  if (!leave || !person) return false;
+
+  const leaveId = String(leave.employeeId || '').trim();
+  const personIds = [person.id, (person as LeaveOwnerRef).employeeId]
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+
+  if (leaveId && personIds.includes(leaveId)) return true;
+
+  const leaveName = String(leave.employeeName || '').trim().toLowerCase();
+  const personName = String(
+    (person as LeaveOwnerRef).name || (person as LeaveOwnerRef).fullName || ''
+  )
+    .trim()
+    .toLowerCase();
+  if (leaveName && personName && leaveName === personName) return true;
+
+  return false;
+}
 
 /** Map a backend leave_requests row (snake_case) to the FE LeaveRequest shape. */
 export function mapLeaveRow(l: any): LeaveRequest {

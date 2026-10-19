@@ -152,7 +152,8 @@ export function NewHrRequestDialog({ open, onClose, onCreated }: NewHrRequestDia
             ref={fileRef}
             type="file"
             multiple
-            className="hidden"
+            className="sr-only"
+            tabIndex={-1}
             onChange={(e) => {
               const list = Array.from(e.target.files || []);
               setFiles((prev) => [...prev, ...list].slice(0, 10));

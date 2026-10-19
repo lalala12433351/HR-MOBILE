@@ -6,9 +6,10 @@ import { usePathname } from 'next/navigation';
 import { UserPersona } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { OrgBrandMark } from '@/components/common/PixbeBrand';
-import { PixbeIcon, PixbeIconName } from '@/components/common/PixbeIcon';
+import { PixbeIcon } from '@/components/common/PixbeIcon';
+import { HelpSupportWidget } from '@/components/support/HelpSupportWidget';
 import { isInstitutionMode } from '@/utils/organizationMode';
-import { isExecutiveOrAdmin } from '@/utils/teamAccess';
+import { getWorkspaceNavGroups } from '@/utils/workspaceNav';
 import { useChatUnread } from '@/hooks/useChat';
 
 interface SidebarProps {
@@ -17,19 +18,6 @@ interface SidebarProps {
   onCloseMobile: () => void;
   activeModule?: string;
   onSelectModule?: (mod: string) => void;
-}
-
-interface NavItem {
-  id: string;
-  label: string;
-  path: string;
-  icon: PixbeIconName;
-}
-
-interface NavGroup {
-  id: string;
-  label?: string;
-  items: NavItem[];
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -45,13 +33,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const isInstitution = isInstitutionMode(state.organization, currentPersona);
   const isStudentRole = currentPersona?.role === 'student';
-  const canManageSettings = isExecutiveOrAdmin(currentPersona);
   const chatUnread = useChatUnread();
+  const navGroups = getWorkspaceNavGroups(state.organization, currentPersona);
 
   const [drawerMounted, setDrawerMounted] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const collapseTimer = useRef<number | null>(null);
+  const desktopHelpRef = useRef<HTMLButtonElement>(null);
+  const mobileHelpRef = useRef<HTMLButtonElement>(null);
+  const helpAnchorRef = drawerOpen ? mobileHelpRef : desktopHelpRef;
 
   const expandSidebar = () => {
     if (collapseTimer.current) {
@@ -62,6 +54,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const collapseSidebar = () => {
+    if (helpOpen) return;
     if (collapseTimer.current) window.clearTimeout(collapseTimer.current);
     collapseTimer.current = window.setTimeout(() => {
       setExpanded(false);
@@ -74,6 +67,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (collapseTimer.current) window.clearTimeout(collapseTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (helpOpen) {
+      expandSidebar();
+      return;
+    }
+    const dock = document.getElementById('pixbe-sidebar');
+    if (dock?.matches(':hover')) return;
+    collapseSidebar();
+  }, [helpOpen]);
 
   useEffect(() => {
     document.documentElement.style.removeProperty('--sidebar-width');
@@ -92,83 +95,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const timeout = window.setTimeout(() => setDrawerMounted(false), 280);
     return () => window.clearTimeout(timeout);
   }, [mobileOpen]);
-
-  const chatItem: NavItem = { id: 'chat', label: 'Chat', path: '/chat', icon: 'chat' };
-  const payrollItem: NavItem = { id: 'payroll', label: 'Payroll', path: '/payroll', icon: 'payslips' };
-  const reportsItem: NavItem = { id: 'reports', label: 'Reports', path: '/reports', icon: 'reports' };
-  const settingsItem: NavItem = { id: 'settings', label: 'Settings', path: '/settings', icon: 'settings' };
-
-  const navGroups: NavGroup[] = isStudentRole
-    ? [
-        {
-          id: 'student',
-          items: [
-            { id: 'timetable', label: 'Class timetable', path: '/timetable', icon: 'timetable' },
-            { id: 'student-attendance', label: 'My attendance', path: '/student-attendance', icon: 'attendance' },
-            { id: 'announcements', label: 'Announcements', path: '/announcements', icon: 'announcements' },
-          ],
-        },
-      ]
-    : isInstitution
-    ? [
-        {
-          id: 'workspace',
-          items: [
-            { id: 'dashboard', label: 'Home', path: '/dashboard', icon: 'home' },
-            chatItem,
-          ],
-        },
-        {
-          id: 'classes',
-          label: 'Classes',
-          items: [
-            { id: 'student-directory', label: 'Students', path: '/student-directory', icon: 'students' },
-            { id: 'timetable', label: 'Timetables', path: '/timetable', icon: 'timetable' },
-            { id: 'student-attendance', label: 'Class attendance', path: '/student-attendance', icon: 'attendance' },
-          ],
-        },
-        {
-          id: 'institute',
-          label: 'Institute',
-          items: [
-            { id: 'hr', label: 'Staff', path: '/hr', icon: 'people' },
-            { id: 'attendance', label: 'Staff attendance', path: '/attendance', icon: 'attendance' },
-            ...(canManageSettings ? [payrollItem] : []),
-            { id: 'announcements', label: 'Announcements', path: '/announcements', icon: 'announcements' },
-            ...(canManageSettings ? [reportsItem] : []),
-            ...(canManageSettings ? [settingsItem] : []),
-          ],
-        },
-      ]
-    : [
-        {
-          id: 'workspace',
-          items: [
-            { id: 'dashboard', label: 'Home', path: '/dashboard', icon: 'home' },
-            chatItem,
-          ],
-        },
-        {
-          id: 'work',
-          label: 'Work',
-          items: [
-            { id: 'projects', label: 'Projects', path: '/projects', icon: 'projects' },
-            { id: 'attendance', label: 'Calendar', path: '/attendance', icon: 'calendar' },
-            { id: 'timesheets', label: 'Timesheets', path: '/timesheets', icon: 'attendance' },
-          ],
-        },
-        {
-          id: 'organisation',
-          label: 'Organisation',
-          items: [
-            { id: 'hr', label: 'Team', path: '/hr', icon: 'people' },
-            ...(canManageSettings ? [payrollItem] : []),
-            ...(canManageSettings ? [reportsItem] : []),
-            { id: 'announcements', label: 'Announcements', path: '/announcements', icon: 'announcements' },
-            ...(canManageSettings ? [settingsItem] : []),
-          ],
-        },
-      ];
 
   const isItemActive = (path: string, id: string): boolean => {
     if (activeModule) {
@@ -251,6 +177,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         ))}
       </nav>
+
+      <div className="sidebar-footer">
+        <button
+          ref={showGroupLabels ? mobileHelpRef : desktopHelpRef}
+          type="button"
+          onClick={() => {
+            setHelpOpen((value) => !value);
+            if (!showGroupLabels) expandSidebar();
+          }}
+          title={showGroupLabels || expanded || helpOpen ? undefined : 'Help & support'}
+          aria-label="Help & support"
+          aria-expanded={helpOpen}
+          data-active={helpOpen ? 'true' : 'false'}
+          className="sidebar-nav-item"
+        >
+          <PixbeIcon name="help" className="sidebar-nav-icon" />
+          <span className="sidebar-nav-text">Help & support</span>
+        </button>
+      </div>
     </div>
   );
 
@@ -290,6 +235,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       )}
+
+      <HelpSupportWidget
+        open={helpOpen}
+        onOpenChange={(next) => {
+          setHelpOpen(next);
+          if (next) expandSidebar();
+        }}
+        showLauncher={false}
+        anchorRef={helpAnchorRef}
+      />
     </>
   );
 };

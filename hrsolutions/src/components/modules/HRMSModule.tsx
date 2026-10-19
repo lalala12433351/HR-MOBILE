@@ -38,9 +38,10 @@ import { useApp } from '../../context/AppContext';
 import { isInstitutionMode } from '@/utils/organizationMode';
 import { toApiAuthRole } from '@/utils/roleMapping';
 import { resolveOrCreateTeamId } from '@/utils/teamResolve';
-import { Employee, LeaveRequest, AttendanceRecord, TimesheetEntry, PayrollRecord, Role, Student, AccountStatus } from '../../types';
+import { Employee, LeaveRequest, AttendanceRecord, AttendanceRegularization, TimesheetEntry, PayrollRecord, Role, Student, AccountStatus } from '../../types';
 import { api } from '../../services/apiClient';
-import { toApiLeaveType } from '@/utils/mapLeaveRow';
+import { leaveBelongsToEmployee, toApiLeaveType } from '@/utils/mapLeaveRow';
+import { eachDateInclusive } from '@/utils/wfhRegularization';
 import { KekaAttendanceModule } from './KekaAttendanceModule';
 import { TimesheetsModule } from './TimesheetsModule';
 import {
@@ -56,6 +57,7 @@ import { applyDepartmentLocalUpdate, removeDepartmentLocal } from '@/utils/depar
 import { OrgChartModule } from './OrgChartModule';
 import { EmployeeTableTab } from './hrms/EmployeeTableTab';
 import { StaffCardsTab } from './hrms/StaffCardsTab';
+import { EmployeeProfileCardModal } from './hrms/EmployeeProfileCardModal';
 import { BulkIdCardStudio } from '../print/BulkIdCardStudio';
 import { StudentDirectoryModule } from './StudentDirectoryModule';
 import { AddEmployeeModal } from './hrms/AddEmployeeModal';
@@ -76,7 +78,7 @@ interface HRMSModuleProps {
   initialTab?: 'employees' | 'my_team' | 'organization' | 'students' | 'directory' | 'org_chart' | 'attendance' | 'attendance_leaves' | 'leaves' | 'timesheets' | 'settings' | 'payroll' | 'employee_settings';
   initialOpenApplyModal?: boolean;
   initialEmployeeId?: string;
-  initialEmployeeTab?: 'general' | 'job' | 'attendance_leave' | 'payroll' | 'documents' | 'setting';
+  initialEmployeeTab?: 'general' | 'public_profile' | 'job' | 'attendance_leave' | 'payroll' | 'documents' | 'setting';
   moduleScope?: 'employees' | 'attendance' | 'all';
 }
 
@@ -116,8 +118,12 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
   const isUserView = !isSuperAdmin && !isHR && !isManager;
 
   const [selectedEmployeeTab, setSelectedEmployeeTab] = useState<
-    'general' | 'job' | 'attendance_leave' | 'payroll' | 'documents' | 'setting'
+    'general' | 'public_profile' | 'job' | 'attendance_leave' | 'payroll' | 'documents' | 'setting'
   >(initialEmployeeTab || (initialTab === 'attendance' || (initialTab as string) === 'attendance_leaves' ? 'attendance_leave' : 'general'));
+
+  const allowCoworkerDirectoryAccess =
+    state.customOptions?.profileSelfServiceSettings?.allowCoworkerDirectoryAccess ?? true;
+  const [publicProfileEmployee, setPublicProfileEmployee] = useState<Employee | null>(null);
 
   useEffect(() => {
     if (initialEmployeeTab) {
@@ -174,19 +180,22 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
 
   useEffect(() => {
     if (moduleScope !== 'employees') return;
+    const coworkerTabs = allowCoworkerDirectoryAccess
+      ? (['my_team', 'organization', 'directory', 'org_chart'] as const)
+      : (['my_team', 'organization', 'org_chart'] as const);
     const allowed = new Set(
       canEditProfiles
         ? isInstitution
           ? ['employees', 'students', 'directory', 'org_chart']
           : ['employees', 'directory', 'org_chart']
         : isInstitution
-          ? ['my_team', 'organization', 'org_chart', 'students']
-          : ['my_team', 'organization', 'org_chart']
+          ? [...coworkerTabs, 'students']
+          : [...coworkerTabs]
     );
     if (!allowed.has(activeTab)) {
       setActiveTab((canEditProfiles ? 'employees' : 'my_team') as any);
     }
-  }, [moduleScope, canEditProfiles, isInstitution, activeTab]);
+  }, [moduleScope, canEditProfiles, isInstitution, activeTab, allowCoworkerDirectoryAccess]);
 
   const isSelfEmployee = (emp: Employee | null | undefined) => {
     if (!emp || !state.currentPersona) return false;
@@ -199,13 +208,23 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
 
   const handleSelectEmployee = (emp: Employee) => {
     if (canEditProfiles) {
+      setPublicProfileEmployee(null);
       setSelectedEmployee(emp);
       return;
     }
-    // Employees/managers: only open detail for self (read-only). Others are browse-only.
+    // Self: full read-only detail (includes Public Profile tab).
     if (isSelfEmployee(emp)) {
+      setPublicProfileEmployee(null);
       setSelectedEmployee(emp);
+      return;
     }
+    // Coworkers: company public profile modal when directory access is enabled.
+    if (allowCoworkerDirectoryAccess) {
+      setSelectedEmployee(null);
+      setPublicProfileEmployee(emp);
+      return;
+    }
+    setPublicProfileEmployee(null);
   };
 
   const [selectedDepartmentName, setSelectedDepartmentName] = useState<string | null>(null);
@@ -300,19 +319,37 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     }
   }, [initialOpenApplyModal, moduleScope]);
 
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(() => {
-    if (initialEmployeeId) {
-      return state.employees.find((e) => e.id === initialEmployeeId || e.employeeId === initialEmployeeId) || null;
-    }
-    return null;
-  });
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
 
   useEffect(() => {
-    if (initialEmployeeId) {
-      const found = state.employees.find((e) => e.id === initialEmployeeId || e.employeeId === initialEmployeeId);
-      if (found) setSelectedEmployee(found);
+    if (!initialEmployeeId) return;
+    const found = state.employees.find(
+      (e) => e.id === initialEmployeeId || e.employeeId === initialEmployeeId
+    );
+    if (!found) return;
+    if (canEditProfiles || isSelfEmployee(found)) {
+      setPublicProfileEmployee(null);
+      setSelectedEmployee(found);
+    } else if (allowCoworkerDirectoryAccess) {
+      setSelectedEmployee(null);
+      setPublicProfileEmployee(found);
     }
-  }, [initialEmployeeId, state.employees]);
+  }, [
+    initialEmployeeId,
+    state.employees,
+    state.currentPersona,
+    canEditProfiles,
+    allowCoworkerDirectoryAccess,
+  ]);
+
+  // Keep detail-view avatar in sync when photo is updated via the lightweight avatar-only path
+  // (EmployeeDetailView / Header), which updates store employees without setSelectedEmployee.
+  useEffect(() => {
+    if (!selectedEmployee?.id) return;
+    const fresh = (state.employees || []).find((e) => e.id === selectedEmployee.id);
+    if (!fresh || fresh.avatar === selectedEmployee.avatar) return;
+    setSelectedEmployee((prev) => (prev ? { ...prev, avatar: fresh.avatar } : prev));
+  }, [state.employees, selectedEmployee?.id, selectedEmployee?.avatar]);
 
   // New Leave State
   const todayStr = new Date().toISOString().split('T')[0];
@@ -340,9 +377,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
 
   // User's Leaves & Synced Dynamic Balances
   const userLeaves = useMemo(() => {
-    return state.leaves.filter(
-      (l) => l.employeeId === state.currentPersona.id || l.employeeName === state.currentPersona.name
-    );
+    return state.leaves.filter((l) => leaveBelongsToEmployee(l, state.currentPersona));
   }, [state.leaves, state.currentPersona]);
 
   const currentEmpObj = useMemo(() => {
@@ -672,11 +707,94 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     const finalEndDate = dayMode === 'single' ? singleDate : endDate;
     const finalReason = leaveReason.trim();
     const reasonWithHandover = leaveHandover ? `${finalReason} (Covered by: ${leaveHandover})` : finalReason;
+    const targetEmpId = (targetEmp as any).id || (targetEmp as any).employeeId || state.currentPersona.id || '';
 
     setIsSaving(true);
     try {
+      // WFH goes to Regularizations for manager approval
+      if (leaveType === 'Work From Home' || toApiLeaveType(leaveType) === 'wfh') {
+        const shiftStart =
+          state.customOptions?.attendanceSettings?.workDayStartTime ||
+          state.customOptions?.attendancePolicies?.workDayStartTime ||
+          '09:00';
+        const shiftEnd =
+          state.customOptions?.attendanceSettings?.workDayEndTime ||
+          state.customOptions?.attendancePolicies?.workDayEndTime ||
+          '18:00';
+        const to24 = (t: string) => {
+          const m = String(t).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+          if (!m) return String(t).slice(0, 5) || '09:00';
+          let h = parseInt(m[1], 10);
+          const mins = m[2];
+          const mer = m[3]?.toUpperCase();
+          if (mer === 'PM' && h < 12) h += 12;
+          if (mer === 'AM' && h === 12) h = 0;
+          if (!mer && h <= 23) return `${String(h).padStart(2, '0')}:${mins}`;
+          return `${String(h).padStart(2, '0')}:${mins}`;
+        };
+        const dates = eachDateInclusive(finalStartDate, finalEndDate);
+        const createdRegs: AttendanceRegularization[] = [];
+        for (const date of dates) {
+          const created = await api.attendance.requestRegularization({
+            employeeId: targetEmpId,
+            date,
+            requestedCheckIn: to24(shiftStart),
+            requestedCheckOut: to24(shiftEnd),
+            reason: 'Work From Home',
+            remarks: reasonWithHandover,
+          });
+          if (!created.success) {
+            showToast(created.error?.message || 'Failed to submit WFH request.');
+            setIsSaving(false);
+            return;
+          }
+          createdRegs.push({
+            id: created.data?.id || `reg_${Date.now()}_${date}`,
+            employeeId: created.data?.employee_id || targetEmpId,
+            employeeName: targetEmp.name,
+            avatar: (targetEmp as any).avatar || '',
+            department: (targetEmp.department as any) || state.currentPersona.department,
+            date,
+            requestedCheckIn: shiftStart,
+            requestedCheckOut: shiftEnd,
+            reason: 'Work From Home',
+            remarks: reasonWithHandover,
+            status: 'Pending',
+            appliedOn: new Date().toISOString().split('T')[0],
+          });
+        }
+        onUpdateState((prev) => ({
+          ...prev,
+          regularizations: [...createdRegs, ...(prev.regularizations || [])],
+          notifications: [
+            {
+              id: `notif_${Date.now()}`,
+              title: 'WFH Request Submitted',
+              message: `${targetEmp.name} requested work from home for ${dates.length} day(s). Approve under Attendance → Regularizations.`,
+              timestamp: 'Just now',
+              category: 'Approvals' as const,
+              priority: 'high' as const,
+              read: false,
+              linkModule: 'attendance',
+              linkTab: 'regularizations',
+              actorName: targetEmp.name,
+              actionLabel: 'Review Request',
+            },
+            ...prev.notifications,
+          ],
+        }));
+        setShowApplyLeaveModal(false);
+        setLeaveReason('');
+        setLeaveHandover('');
+        setLeaveAttachment('');
+        setLeaveType('Casual Leave');
+        showToast('WFH request sent to Regularizations for manager approval.');
+        setIsSaving(false);
+        return;
+      }
+
       await api.attendance.requestLeave({
-        employeeId: (targetEmp as any).id || (targetEmp as any).employeeId || state.currentPersona.id || '',
+        employeeId: targetEmpId,
         leaveType: toApiLeaveType(leaveType),
         startDate: finalStartDate,
         endDate: finalEndDate,
@@ -686,7 +804,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
 
       const newLeave: LeaveRequest = {
         id: `lve_${Date.now()}`,
-        employeeId: (targetEmp as any).id || (targetEmp as any).employeeId || state.currentPersona.id || '',
+        employeeId: targetEmpId,
         employeeName: targetEmp.name,
         department: (targetEmp.department as any) || state.currentPersona.department || 'Operations',
         leaveType,
@@ -1060,6 +1178,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         leadEmployeeId: updatedEmp.managerId || undefined,
       });
 
+      // Avatar / bank / salary have dedicated save paths — omit them here so a
+      // personal-info (or address/job) edit is not blocked by a large avatar PUT
+      // or a secondary bank/salary sync failure.
       const updateRes = await api.identity.updateEmployee(updatedEmp.id, {
         firstName,
         lastName,
@@ -1087,7 +1208,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         accountStatus: (updatedEmp.accountStatus || updatedEmp.status || 'Active') as AccountStatus,
         dateOfJoining: updatedEmp.joiningDate || updatedEmp.joinDate || undefined,
         dateOfBirth: updatedEmp.dateOfBirth && updatedEmp.dateOfBirth.trim() !== '' && updatedEmp.dateOfBirth !== '—' ? updatedEmp.dateOfBirth.trim() : null,
-        gender: updatedEmp.gender,
+        gender: updatedEmp.gender && updatedEmp.gender !== 'None' ? updatedEmp.gender : null,
         bloodGroup: updatedEmp.bloodGroup,
         maritalStatus: updatedEmp.maritalStatus,
         nationality: updatedEmp.nationality,
@@ -1098,10 +1219,11 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         country: updatedEmp.country,
         personalTaxId: updatedEmp.personalTaxId,
         socialInsurance: updatedEmp.socialInsurance,
+        healthInsurance: updatedEmp.healthInsurance,
         emergencyContact: updatedEmp.emergencyContact,
         customFieldValues: updatedEmp.customFieldValues,
         uploadedDocuments: updatedEmp.uploadedDocuments,
-        avatar: updatedEmp.avatar,
+        bio: updatedEmp.bio ?? null,
       });
 
       if (!updateRes.success) {
@@ -1111,6 +1233,8 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       const apiEmp = updateRes.data || {};
       const mergedEmp: Employee = {
         ...updatedEmp,
+        name: fullName || updatedEmp.name,
+        fullName: fullName || updatedEmp.fullName,
         officeId: apiEmp.office_id || apiEmp.officeId || updatedEmp.officeId,
         officeName: apiEmp.office_name || apiEmp.officeName || updatedEmp.officeName,
         officeIds: Array.isArray(apiEmp.office_ids)
@@ -1126,30 +1250,6 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
             }))
           : updatedEmp.offices,
       };
-
-      if (mergedEmp.bankDetails && mergedEmp.bankDetails.accountNumber && mergedEmp.bankDetails.accountNumber !== '—') {
-        await api.identity.updateBankDetails(mergedEmp.id, {
-          accountHolderName: mergedEmp.bankDetails.accountHolderName || mergedEmp.name,
-          accountNumber: mergedEmp.bankDetails.accountNumber,
-          bankName: mergedEmp.bankDetails.bankName,
-          routingOrIfscCode: mergedEmp.bankDetails.ifscCode,
-        });
-      }
-
-      if (mergedEmp.salaryDetails) {
-        await api.payroll.setSalaryStructure({
-          employeeId: mergedEmp.id,
-          baseSalary: mergedEmp.salaryDetails.basic,
-          hra: mergedEmp.salaryDetails.hra,
-          specialAllowance: mergedEmp.salaryDetails.specialAllowance,
-          conveyanceAllowance: mergedEmp.salaryDetails.conveyanceAllowance,
-          medicalAllowance: mergedEmp.salaryDetails.medicalAllowance,
-          otherAllowances: mergedEmp.salaryDetails.otherAllowances,
-          allowances: mergedEmp.salaryDetails.allowanceItems,
-          providentFundDeduction: mergedEmp.salaryDetails.pfDeduction,
-          taxDeduction: mergedEmp.salaryDetails.taxDeduction,
-        });
-      }
 
       onUpdateState((prev) => {
         const isCurrentPersona =
@@ -1205,6 +1305,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     } catch (err) {
       console.error('Failed to update employee', err);
       showToast(err instanceof Error ? err.message : 'Failed to update employee');
+      throw err;
     } finally {
       setIsSaving(false);
     }
@@ -1217,17 +1318,16 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         employee={selectedEmployee}
         allEmployees={state.employees}
         onSelectEmployee={(emp) => {
-          if (canEditProfiles) {
-            setSelectedEmployee(emp);
+          handleSelectEmployee(emp);
+          if (canEditProfiles || isSelfEmployee(emp)) {
             setSelectedEmployeeTab('attendance_leave');
-          } else if (isSelfEmployee(emp)) {
-            setSelectedEmployee(emp);
           }
         }}
         onOpenDepartment={handleSelectDepartment}
         onUpdateEmployee={handleUpdateEmployee}
         onBack={() => {
           setSelectedEmployee(null);
+          setPublicProfileEmployee(null);
           setSelectedEmployeeTab('general');
         }}
         state={state}
@@ -1246,6 +1346,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         onSelectEmployee={(emp) => {
           handleSelectEmployee(emp);
         }}
+        onUpdateState={onUpdateState}
         onSaved={(patch) => {
           onUpdateState((prev) => applyDepartmentLocalUpdate(prev, patch));
           setSelectedDepartmentName(patch.name);
@@ -1293,6 +1394,15 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     );
   };
 
+  const coworkerPeopleTabs = [
+    { id: 'my_team', label: 'My Team' },
+    { id: 'organization', label: 'Organization' },
+    ...(allowCoworkerDirectoryAccess
+      ? [{ id: 'directory', label: isInstitution ? 'Staff Cards' : 'Directory' }]
+      : []),
+    { id: 'org_chart', label: 'Org Chart' },
+  ];
+
   const peopleTabs =
     moduleScope === 'employees'
       ? canEditProfiles
@@ -1309,17 +1419,8 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
               { id: 'org_chart', label: 'Org Chart' },
             ]
         : isInstitution
-          ? [
-              { id: 'my_team', label: 'My Team' },
-              { id: 'organization', label: 'Organization' },
-              { id: 'org_chart', label: 'Org Chart' },
-              { id: 'students', label: 'Students' },
-            ]
-          : [
-              { id: 'my_team', label: 'My Team' },
-              { id: 'organization', label: 'Organization' },
-              { id: 'org_chart', label: 'Org Chart' },
-            ]
+          ? [...coworkerPeopleTabs, { id: 'students', label: 'Students' }]
+          : coworkerPeopleTabs
       : canEditProfiles
         ? isInstitution
           ? [
@@ -1339,17 +1440,13 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
             ]
         : isInstitution
           ? [
-              { id: 'my_team', label: 'My Team' },
-              { id: 'organization', label: 'Organization' },
-              { id: 'org_chart', label: 'Org Chart' },
+              ...coworkerPeopleTabs,
               { id: 'students', label: 'Students' },
               { id: 'attendance', label: 'Staff Attendance' },
               { id: 'leaves', label: 'Leave Applications' },
             ]
           : [
-              { id: 'my_team', label: 'My Team' },
-              { id: 'organization', label: 'Organization' },
-              { id: 'org_chart', label: 'Org Chart' },
+              ...coworkerPeopleTabs,
               { id: 'attendance', label: 'Time & Attendance' },
               { id: 'leaves', label: 'Leave Applications' },
             ];
@@ -1466,7 +1563,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
           onSelectEmployee={handleSelectEmployee}
           onSelectDepartment={handleSelectDepartment}
           onResendInvite={isSuperAdmin || isHR ? handleResendInvite : undefined}
-          onPrintIdCards={isSuperAdmin || isHR || isManager ? setIdCardBatch : undefined}
+          onPrintIdCards={canEditProfiles ? setIdCardBatch : undefined}
         />
       )}
 
@@ -1483,9 +1580,11 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         <StaffCardsTab
           state={state}
           isInstitution={isInstitution}
-          accessibleEmployees={canEditProfiles ? state.employees : accessibleEmployees}
+          accessibleEmployees={
+            canEditProfiles || allowCoworkerDirectoryAccess ? state.employees : accessibleEmployees
+          }
           onSelectEmployee={handleSelectEmployee}
-          onPrintIdCards={isSuperAdmin || isHR || isManager ? setIdCardBatch : undefined}
+          onPrintIdCards={canEditProfiles ? setIdCardBatch : undefined}
         />
       )}
 
@@ -1505,8 +1604,10 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
           onUpdateState={onUpdateState}
           onCheckInAttendance={onCheckInAttendance}
           onSelectEmployee={(emp) => {
-            setSelectedEmployee(emp);
-            setSelectedEmployeeTab('attendance_leave');
+            handleSelectEmployee(emp);
+            if (canEditProfiles || isSelfEmployee(emp)) {
+              setSelectedEmployeeTab('attendance_leave');
+            }
           }}
         />
       )}
@@ -1641,7 +1742,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
                   <Calendar className="h-4 w-4 text-blue-600" />
                   <h3 className="text-sm font-semibold text-slate-900">History of Past Leaves & Requests</h3>
                   <span className="text-xs text-slate-500">
-                    ({state.leaves.filter((l) => l.employeeId === state.currentPersona.id || l.employeeName === state.currentPersona.name).length} records)
+                    ({userLeaves.length} records)
                   </span>
                 </div>
 
@@ -1672,8 +1773,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
                     </tr>
                   </thead>
                   <tbody className="font-medium text-slate-700 divide-y divide-slate-100">
-                    {state.leaves
-                      .filter((l) => l.employeeId === state.currentPersona.id || l.employeeName === state.currentPersona.name)
+                    {userLeaves
                       .filter((l) => leaveFilterStatus === 'All' || l.status === leaveFilterStatus)
                       .length === 0 ? (
                       <tr>
@@ -1682,8 +1782,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      state.leaves
-                        .filter((l) => l.employeeId === state.currentPersona.id || l.employeeName === state.currentPersona.name)
+                      userLeaves
                         .filter((l) => leaveFilterStatus === 'All' || l.status === leaveFilterStatus)
                         .map((leave) => (
                           <tr key={leave.id} className="hover:bg-slate-50 transition-colors">
@@ -1885,7 +1984,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
                                 const emp = state.employees.find(
                                   (e) => e.id === leave.employeeId || e.name.toLowerCase() === leave.employeeName.toLowerCase()
                                 );
-                                if (emp) setSelectedEmployee(emp);
+                                if (emp) handleSelectEmployee(emp);
                               }}
                               className="text-left font-semibold text-slate-900 hover:text-blue-600 hover:underline cursor-pointer transition-colors"
                               title={`View profile for ${leave.employeeName}`}
@@ -2164,10 +2263,17 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
                     <option value="Sick Leave" className="bg-white text-slate-800">Sick Leave ({sickLeft}/{sickQuota} Days Remaining)</option>
                     <option value="Earned Leave" className="bg-white text-slate-800">Earned / Privilege Leave ({earnedLeft}/{earnedQuota} Days Remaining)</option>
                     {!isInstitution && (
-                      <option value="Work From Home" className="bg-white text-slate-800">Work From Home ({wfhLeft}/{wfhQuota} Days Remaining)</option>
+                      <option value="Work From Home" className="bg-white text-slate-800">
+                        Work From Home ({wfhLeft}/{wfhQuota}) — goes to Regularizations
+                      </option>
                     )}
                     <option value="Unpaid Leave" className="bg-white text-slate-800">Unpaid Leave / Loss of Pay</option>
                   </select>
+                  {!isInstitution && leaveType === 'Work From Home' && (
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      WFH requests are sent to Attendance → Regularizations for manager approval (not Leaves).
+                    </p>
+                  )}
                 </div>
 
                 {/* 2. Single Day vs Multiple Day Segmented Selection */}
@@ -2442,6 +2548,15 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
           onClose={() => setIdCardBatch(null)}
         />
       )}
+
+      <EmployeeProfileCardModal
+        isOpen={!!publicProfileEmployee}
+        onClose={() => setPublicProfileEmployee(null)}
+        employee={publicProfileEmployee}
+        allEmployees={state.employees || []}
+        canEdit={false}
+        isInstitution={isInstitution}
+      />
 
       {/* Toast Alert */}
       {toastMessage && (

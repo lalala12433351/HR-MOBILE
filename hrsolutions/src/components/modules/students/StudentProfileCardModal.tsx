@@ -19,8 +19,8 @@ import {
 } from 'lucide-react';
 import { Student, AttendanceRecord, Organization } from '@/types';
 import { StudentAttendanceLogModal } from './StudentAttendanceLogModal';
-import { compressAvatarImage } from '@/utils/imageUtils';
 import { buildStudentIdCardDraft, IdCardStudio } from '../../print/IdCardStudio';
+import { resolveAvatarDataUrl, shouldUseNativeAvatarPicker } from '@/utils/avatarUpload';
 
 interface StudentProfileCardModalProps {
   isOpen: boolean;
@@ -107,20 +107,35 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
 
   if (!isOpen || !student) return null;
 
-  // Handle Photo Upload
+  const applyStudentAvatar = (dataUrl: string) => {
+    if (!onUpdateStudent) return;
+    onUpdateStudent({
+      ...student,
+      avatar: dataUrl,
+    });
+  };
+
+  const handleAvatarPick = async () => {
+    try {
+      if (shouldUseNativeAvatarPicker()) {
+        const dataUrl = await resolveAvatarDataUrl();
+        if (dataUrl) applyStudentAvatar(dataUrl);
+        return;
+      }
+      avatarInputRef.current?.click();
+    } catch (err) {
+      console.error('Failed to compress student avatar picture:', err);
+    }
+  };
+
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     try {
-      const dataUrl = await compressAvatarImage(file);
-      if (dataUrl && onUpdateStudent) {
-        const updated: Student = {
-          ...student,
-          avatar: dataUrl,
-        };
-        onUpdateStudent(updated);
-      }
+      const dataUrl = await resolveAvatarDataUrl(file);
+      if (dataUrl) applyStudentAvatar(dataUrl);
     } catch (err) {
       console.error('Failed to compress student avatar picture:', err);
     }
@@ -224,13 +239,14 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
             </div>
           </div>
 
-          {/* Photo File Input (Hidden) */}
           <input
             type="file"
             ref={avatarInputRef}
             onChange={handleAvatarChange}
-            accept="image/*"
-            className="hidden"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
           />
 
           {/* Modal Body */}
@@ -251,7 +267,7 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
                     />
                     <button
                       type="button"
-                      onClick={() => avatarInputRef.current?.click()}
+                      onClick={() => void handleAvatarPick()}
                       title="Change Student Photo"
                       className="absolute bottom-0 right-0 p-1.5 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-md border-2 border-white transition-all cursor-pointer flex items-center justify-center group-hover:scale-105"
                     >

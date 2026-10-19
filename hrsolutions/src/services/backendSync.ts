@@ -36,6 +36,21 @@ function personaFromSession() {
   };
 }
 
+function formatNotificationTimestamp(raw: unknown): string {
+  if (!raw) return 'Just now';
+  const date = new Date(String(raw));
+  if (Number.isNaN(date.getTime())) return String(raw);
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 /** Build a display name; ignore the old setup-wizard placeholder last name "User". */
 export function formatEmployeeDisplayName(
   firstName?: string | null,
@@ -240,6 +255,7 @@ export function mapApiEmployee(emp: any): Employee {
     joiningDate: emp.dateOfJoining || emp.date_of_joining || emp.joiningDate || '',
     employmentType: (pickString(emp.employmentType, emp.employment_type) || 'Full-time') as Employee['employmentType'],
     avatar: emp.avatar || emp.avatar_url || '',
+    bio: pickString(emp.bio) || undefined,
     // Profile / onboarding fields persisted by PUT /identity/employees/:id
     dateOfBirth: normalizeDateValue(emp.dateOfBirth ?? emp.date_of_birth),
     gender: pickString(emp.gender) || undefined,
@@ -253,6 +269,7 @@ export function mapApiEmployee(emp: any): Employee {
     country: pickString(emp.country) || undefined,
     personalTaxId: pickString(emp.personalTaxId, emp.personal_tax_id) || undefined,
     socialInsurance: pickString(emp.socialInsurance, emp.social_insurance) || undefined,
+    healthInsurance: pickString(emp.healthInsurance, emp.health_insurance) || undefined,
     emergencyContact,
     bankDetails,
     customFieldValues,
@@ -507,8 +524,9 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
   let syncedOfficeLocation: ReturnType<typeof officeRowToLocation> = null;
 
   // Fan out independent GETs in parallel; merge below preserves prior field semantics.
+  const recipientEmployeeId = currentState.currentPersona?.id;
   const [notifSettled, orgSettled, holSettled, empSettled, meSettled] = await Promise.allSettled([
-    api.auditComms.getNotifications(),
+    api.auditComms.getNotifications(recipientEmployeeId),
     Promise.all([
       api.org.getOffices(),
       api.org.getDepartments(),
@@ -530,10 +548,11 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
           id: n.id,
           title: n.title,
           message: n.message,
-          timestamp: n.created_at || 'Just now',
+          timestamp: formatNotificationTimestamp(n.created_at),
           category: (n.category || 'System') as any,
           priority: (n.priority || 'medium') as any,
-          read: n.is_read ?? false,
+          read: Boolean(n.is_read ?? n.isRead ?? false),
+          linkUrl: n.link_url || n.linkUrl || undefined,
         }));
       }
     } else {

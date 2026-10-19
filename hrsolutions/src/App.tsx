@@ -336,6 +336,7 @@ export default function App() {
       <CommandPalette
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
+        onOpen={() => setCommandPaletteOpen(true)}
         state={state}
         onSelectModule={handleSelectModule}
         onOpenAIAssistantWithQuery={(q) => {

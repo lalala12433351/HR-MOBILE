@@ -87,6 +87,7 @@ ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_completed_profile BOOLEAN DEF
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS onboarding_progress INTEGER DEFAULT 0;
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS onboarding_status VARCHAR(32) DEFAULT 'pending';
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS bio TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_employees_email ON employees(email);
 CREATE INDEX IF NOT EXISTS idx_employees_cognito ON employees(cognito_sub);

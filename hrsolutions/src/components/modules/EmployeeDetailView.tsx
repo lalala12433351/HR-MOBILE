@@ -53,10 +53,15 @@ import {
 import { Employee, JobTimelineItem, ContractTimelineItem, EmployeeDocument, EmployeePayslipDocument, SalaryType, PayrollGroup, SalaryAllowanceItem } from '../../types';
 import { AppState } from '../../services/store';
 import { getEffectiveLeaveQuotas, isEmployeeInProbation } from '@/utils/leaveRules';
+import { leaveBelongsToEmployee } from '@/utils/mapLeaveRow';
 import { WORLD_NATIONALITIES, WORLD_COUNTRIES } from '@/data/nations';
 import { api } from '@/services/apiClient';
 import { isInstitutionMode } from '@/utils/organizationMode';
 import { compressAvatarImage } from '@/utils/imageUtils';
+import { useApp } from '@/context/AppContext';
+import { saveStoredState } from '@/services/store';
+import { UserAvatar } from '@/components/common/UserAvatar';
+import { EmployeePublicProfilePanel } from './hrms/EmployeePublicProfilePanel';
 import { buildEmployeeIdCardDraft, IdCardStudio } from '../print/IdCardStudio';
 import { buildPayslipDraftFromDocument, PayslipStudio } from '../print/PayslipStudio';
 import {
@@ -140,10 +145,10 @@ interface EmployeeDetailViewProps {
   allEmployees: Employee[];
   onSelectEmployee: (emp: Employee) => void;
   onOpenDepartment?: (departmentName: string) => void;
-  onUpdateEmployee: (updated: Employee) => void;
+  onUpdateEmployee: (updated: Employee) => void | Promise<void>;
   onBack: () => void;
   state: AppState;
-  initialTab?: 'general' | 'job' | 'attendance_leave' | 'payroll' | 'documents' | 'setting';
+  initialTab?: 'general' | 'public_profile' | 'job' | 'attendance_leave' | 'payroll' | 'documents' | 'setting';
 }
 
 import { isExecutiveOrAdmin, isDirectReport } from '../../utils/teamAccess';
@@ -159,6 +164,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   initialTab,
 }) => {
   const router = useRouter();
+  const { updateState } = useApp();
 
   // Strict RBAC: Only Super Admin and HR can edit employee profiles
   const currentRole = state.currentPersona?.role || 'employee';
@@ -168,11 +174,31 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
     currentRole === 'hr_manager' ||
     (currentRole as string) === 'hr';
 
-  // Tabs: General | Job | Attendance & Leaves | Payroll | Documents | Setting
-  const [activeTab, setActiveTab] = useState<'general' | 'job' | 'attendance_leave' | 'payroll' | 'documents' | 'setting'>(initialTab || 'general');
+  // Tabs: General | Public Profile | Job | Attendance & Leaves | Payroll | Documents | Setting
+  const [activeTab, setActiveTab] = useState<
+    'general' | 'public_profile' | 'job' | 'attendance_leave' | 'payroll' | 'documents' | 'setting'
+  >(initialTab || 'general');
+
+  const isSelfViewer =
+    !!state.currentPersona &&
+    (employee.id === state.currentPersona.id ||
+      (!!state.currentPersona.email &&
+        employee.email?.toLowerCase() === state.currentPersona.email.toLowerCase()));
+  const canEditPublicBio = canEdit || isSelfViewer;
+  const [bioDraft, setBioDraft] = useState(employee.bio || '');
+  const [savingBio, setSavingBio] = useState(false);
+
+  useEffect(() => {
+    setBioDraft(employee.bio || '');
+  }, [employee.id, employee.bio]);
+
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
 
   // Edit Mode States
   const [isEditingPersonalInfo, setIsEditingPersonalInfo] = useState(false);
+  const [savingPersonalInfo, setSavingPersonalInfo] = useState(false);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [isEditingEmergency, setIsEditingEmergency] = useState(false);
   const [isEditingJobInfo, setIsEditingJobInfo] = useState(false);
@@ -366,22 +392,78 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   const [formTimezone, setFormTimezone] = useState(employee.timezone || '');
   const [formBirthdayPrivacy, setFormBirthdayPrivacy] = useState<'Everyone' | 'Only Me' | 'Department' | 'Managers'>('Everyone');
 
-  // Avatar Upload Ref & Handler
+  // Avatar-only upload (same path as Header / profile modal).
+  // Never call onUpdateEmployee here — that full-profile PUT often fails and never persists the photo.
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [optimisticAvatar, setOptimisticAvatar] = useState<string | null>(null);
+  const displayAvatar = optimisticAvatar ?? employee.avatar ?? '';
+
+  useEffect(() => {
+    setOptimisticAvatar(null);
+  }, [employee.id, employee.avatar]);
+
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please choose an image file.');
+      return;
+    }
+
+    setIsUploadingAvatar(true);
     try {
       const dataUrl = await compressAvatarImage(file);
-      if (dataUrl) {
-        onUpdateEmployee({
-          ...employee,
-          avatar: dataUrl,
-        });
-        showToast('Profile photo updated successfully');
+      if (!dataUrl) {
+        showToast('Could not process that image. Try a different photo.');
+        return;
       }
+
+      setOptimisticAvatar(dataUrl);
+
+      updateState((prev) => {
+        const updatedEmployees = (prev.employees || []).map((emp) =>
+          emp.id === employee.id ||
+          (emp.email && employee.email && emp.email.toLowerCase() === employee.email.toLowerCase()) ||
+          emp.name === employee.name
+            ? { ...emp, avatar: dataUrl }
+            : emp
+        );
+        const isCurrentPersona =
+          prev.currentPersona?.id === employee.id ||
+          (prev.currentPersona?.email &&
+            employee.email &&
+            prev.currentPersona.email.toLowerCase() === employee.email.toLowerCase()) ||
+          prev.currentPersona?.name === employee.name;
+
+        const nextState = {
+          ...prev,
+          employees: updatedEmployees,
+          currentPersona:
+            isCurrentPersona && prev.currentPersona
+              ? { ...prev.currentPersona, avatar: dataUrl }
+              : prev.currentPersona,
+        };
+        saveStoredState(nextState);
+        return nextState;
+      });
+
+      if (employee.id) {
+        const res = await api.identity.updateEmployee(employee.id, { avatar: dataUrl });
+        if (!res.success) {
+          throw new Error(res.error?.message || 'Failed to save profile photo');
+        }
+      }
+
+      showToast('Profile photo updated successfully');
     } catch (err) {
-      console.error('Failed to compress profile picture:', err);
+      console.error('Failed to upload profile picture:', err);
+      setOptimisticAvatar(null);
+      showToast(err instanceof Error ? err.message : 'Failed to update profile photo');
+    } finally {
+      setIsUploadingAvatar(false);
     }
   };
 
@@ -743,12 +825,8 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
   // Compute leaves history for this specific employee
   const employeeLeaveRecords = useMemo(() => {
-    return (state.leaves || []).filter(
-      (l) =>
-        l.employeeId === employee.id ||
-        (l.employeeName && l.employeeName.toLowerCase() === (employee.name || '').toLowerCase())
-    );
-  }, [state.leaves, employee.id, employee.name]);
+    return (state.leaves || []).filter((l) => leaveBelongsToEmployee(l, employee));
+  }, [state.leaves, employee]);
 
   // Leave balance computation
   const casualUsed = employeeLeaveRecords
@@ -829,18 +907,19 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
   }, [state.attendance, employee.id, employee.employeeId, employee.name]);
 
-  // Helper to save personal info
-  const handleSavePersonalInfo = (e: React.FormEvent) => {
+  // Helper to save personal info — await parent persist so UI only exits edit mode on success
+  const handleSavePersonalInfo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit) {
       showToast('Permission denied. Only HR and Super Admin can edit employee records.');
       return;
     }
+    const fullName = formFullName.trim() || employee.name;
     const updated: Employee = {
       ...employee,
-      name: formFullName.trim() || employee.name,
-      fullName: formFullName.trim() || employee.fullName,
-      gender: formGender,
+      name: fullName,
+      fullName,
+      gender: formGender === 'None' ? undefined : formGender,
       dateOfBirth: formDOB.trim() || undefined,
       nationality: formNationality,
       phone: formPhone,
@@ -850,9 +929,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
       personalTaxId: formTaxId,
       socialInsurance: formSocialInsurance,
     };
-    onUpdateEmployee(updated);
-    setIsEditingPersonalInfo(false);
-    showToast('Personal Info updated successfully');
+    setSavingPersonalInfo(true);
+    try {
+      await onUpdateEmployee(updated);
+      setIsEditingPersonalInfo(false);
+    } catch {
+      // Parent surfaces the error toast; stay in edit mode so the user can retry.
+    } finally {
+      setSavingPersonalInfo(false);
+    }
   };
 
   // Helper to save address
@@ -1336,15 +1421,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           <div className="flex flex-col items-center text-center space-y-2">
             <div className="relative group">
               <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center text-slate-400 border-2 border-slate-200/80 shadow-2xs">
-                {employee.avatar ? (
-                  <img
-                    src={employee.avatar}
-                    alt={employee.name}
-                    className="w-full h-full object-cover rounded-full"
-                  />
-                ) : (
-                  <User className="h-12 w-12 text-slate-400 stroke-[1.8]" />
-                )}
+                <UserAvatar
+                  src={displayAvatar}
+                  name={employee.name}
+                  alt={employee.name}
+                  className="w-full h-full text-base"
+                  iconClassName="h-12 w-12"
+                />
               </div>
 
               {(canEdit || state.currentPersona?.id === employee.id || state.currentPersona?.name === employee.name) && (
@@ -1355,14 +1438,16 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     onChange={handleAvatarChange}
                     accept="image/*"
                     className="hidden"
+                    disabled={isUploadingAvatar}
                   />
                   <button
                     type="button"
                     onClick={() => avatarInputRef.current?.click()}
-                    title="Change Profile Photo"
-                    className="absolute bottom-0 right-0 p-2 rounded-full bg-[#17324e] hover:bg-[#285275] active:scale-95 text-white shadow-md border-2 border-white transition-all cursor-pointer flex items-center justify-center group-hover:scale-105"
+                    disabled={isUploadingAvatar}
+                    title={isUploadingAvatar ? 'Uploading…' : 'Change Profile Photo'}
+                    className="absolute bottom-0 right-0 p-2 rounded-full bg-[#17324e] hover:bg-[#285275] active:scale-95 text-white shadow-md border-2 border-white transition-all cursor-pointer flex items-center justify-center group-hover:scale-105 disabled:opacity-60 disabled:cursor-wait"
                   >
-                    <Camera className="w-3.5 h-3.5" />
+                    <Camera className={`w-3.5 h-3.5 ${isUploadingAvatar ? 'animate-pulse' : ''}`} />
                   </button>
                 </>
               )}
@@ -1403,14 +1488,16 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowIdCard(true)}
-              className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-[7px] border border-[#dde4e9] bg-white px-3 py-2 text-xs font-semibold text-[#172234] hover:bg-[#f3f5f7] cursor-pointer"
-            >
-              <CreditCard className="h-3.5 w-3.5 text-[#2d628e]" />
-              Print ID card
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setShowIdCard(true)}
+                className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-[7px] border border-[#dde4e9] bg-white px-3 py-2 text-xs font-semibold text-[#172234] hover:bg-[#f3f5f7] cursor-pointer"
+              >
+                <CreditCard className="h-3.5 w-3.5 text-[#2d628e]" />
+                Print ID card
+              </button>
+            )}
           </div>
 
           {/* Divider */}
@@ -1607,6 +1694,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
             {(
               [
                 { id: 'general' as const, label: 'General' },
+                { id: 'public_profile' as const, label: 'Public Profile' },
                 { id: 'job' as const, label: 'Job & Role' },
                 { id: 'attendance_leave' as const, label: 'Attendance & Leaves' },
                 { id: 'payroll' as const, label: 'Payroll' },
@@ -1630,6 +1718,59 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               );
             })}
           </div>
+
+          {/* ===================================================== */}
+          {/* TAB: PUBLIC PROFILE (coworker-visible surface)        */}
+          {/* ===================================================== */}
+          {activeTab === 'public_profile' && (
+            <div className="space-y-4">
+              <div className="bg-[#f4f7fa] border border-[#dde4e9] rounded-[12px] px-4 py-3 text-xs text-[#5e6c7b]">
+                This is what coworkers see in Directory and Org Chart. Personal, payroll, and document
+                details stay private.
+              </div>
+              <div className="max-w-3xl overflow-hidden rounded-[12px] border border-[#dde4e9] bg-white shadow-[0_8px_24px_-16px_rgba(23,34,52,0.2)]">
+                <EmployeePublicProfilePanel
+                  employee={{ ...employee, bio: bioDraft }}
+                  allEmployees={allEmployees}
+                  isInstitution={isInstitution}
+                  bioEditable={canEditPublicBio}
+                  bioDraft={bioDraft}
+                  onBioDraftChange={setBioDraft}
+                  variant="page"
+                />
+                {canEditPublicBio && (
+                  <div className="flex items-center justify-end gap-2 border-t border-[#dde4e9] px-6 py-4 sm:px-10">
+                    <button
+                      type="button"
+                      disabled={savingBio || bioDraft === (employee.bio || '')}
+                      onClick={() => setBioDraft(employee.bio || '')}
+                      className="h-9 rounded-[7px] border border-[#c5d0d8] bg-white px-3.5 text-[13px] font-semibold text-[#17324e] transition-colors hover:bg-[#f8fbfe] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingBio || bioDraft === (employee.bio || '')}
+                      onClick={async () => {
+                        const nextBio = bioDraft.trim();
+                        setSavingBio(true);
+                        try {
+                          await onUpdateEmployee({ ...employee, bio: nextBio || undefined });
+                        } catch (err) {
+                          showToast(err instanceof Error ? err.message : 'Failed to save bio');
+                        } finally {
+                          setSavingBio(false);
+                        }
+                      }}
+                      className="h-9 rounded-[7px] bg-[#17324e] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#285275] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                    >
+                      {savingBio ? 'Saving…' : 'Save bio'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* ===================================================== */}
           {/* TAB 1: GENERAL (Personal Info, Address, Emergency)    */}
@@ -1807,6 +1948,24 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div>
+                        <label className="block text-slate-700 font-bold mb-1">Marital Status</label>
+                        <select
+                          value={formMaritalStatus}
+                          onChange={(e) => setFormMaritalStatus(e.target.value)}
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs cursor-pointer"
+                        >
+                          <option value="">Select status</option>
+                          <option value="Single">Single</option>
+                          <option value="Married">Married</option>
+                          <option value="Divorced">Divorced</option>
+                          <option value="Widowed">Widowed</option>
+                          <option value="Prefer not to say">Prefer not to say</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
                         <label className="block text-slate-700 font-bold mb-1">Nationality</label>
                         <select
                           value={formNationality}
@@ -1887,15 +2046,17 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsEditingPersonalInfo(false)}
-                        className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-bold cursor-pointer transition-colors text-xs"
+                        disabled={savingPersonalInfo}
+                        className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-bold cursor-pointer transition-colors text-xs disabled:opacity-60"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold cursor-pointer transition-all shadow-xs text-xs"
+                        disabled={savingPersonalInfo}
+                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold cursor-pointer transition-all shadow-xs text-xs disabled:opacity-60"
                       >
-                        Save Changes
+                        {savingPersonalInfo ? 'Saving…' : 'Save Changes'}
                       </button>
                     </div>
                   </form>

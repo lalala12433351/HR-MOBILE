@@ -15,6 +15,7 @@ export type PixbeIconName =
   | 'leave'
   | 'tasks'
   | 'payslips'
+  | 'help'
   | 'attendance-action'
   | 'leave-action'
   | 'tasks-action'
@@ -61,6 +62,7 @@ const glyphs: Record<PixbeIconName, React.ReactNode> = {
   leave: <>{line('M19.7 4.3c-6.35-.25-10.6 1.45-12.8 5.1-1.45 2.45-1.8 5.45-1.05 9 3.5.55 6.45.08 8.85-1.42 3.55-2.22 5.2-6.45 5-12.68Z')}{line('M5.9 18.4c2.65-3.3 5.85-5.92 9.62-7.86M10.05 14.2l.1 3.28M13.55 11.6l2.9.2', .72)}{sail('m18.72 5.9 1.55 2.35-2.78-.3-.8-2.05h2.03Z')}</>,
   tasks: <>{line('M5.35 3.8h10.3c.92 0 1.65.73 1.65 1.65v13.1c0 .92-.73 1.65-1.65 1.65H5.35c-.92 0-1.65-.73-1.65-1.65V5.45c0-.92.73-1.65 1.65-1.65Z')}{line('m7.2 11.75 2.02 2.02 3.52-3.65M7.2 16.9h5.8', .88)}{sail('m15.8 5.25 2.15 1.35-1.2 1.65-1.72-.66.77-2.34Z')}</>,
   payslips: <>{line('M6.1 3.6h9.05l3.25 3.25v11.6c0 .85-.7 1.55-1.55 1.55H6.1c-.85 0-1.55-.7-1.55-1.55v-13.3c0-.85.7-1.55 1.55-1.55Z')}{line('M15.15 3.8v3.15h3.15M8 11h6.9M8 14.35h5.1M8 17.7h4.1', .7)}{sail('m14.5 13.22 2.55 1.35-1.75 1.82-1.64-1.1.84-2.07Z')}</>,
+  help: <>{line('M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z')}{line('M9.6 9.35c.45-1.45 1.55-2.2 2.9-2.2 1.55 0 2.7.95 2.7 2.35 0 1.15-.65 1.8-1.55 2.35-.8.5-1.15.9-1.15 1.7v.35', .86)}{line('M12 17.15h.01', .9)}{sail('m16.1 6.35 2.35 1.2-1.55 1.85-1.7-.75.9-2.3Z')}</>,
   // Dashboard actions are slightly more descriptive than navigation icons while
   // following the same Kiteflow grammar: rounded outlines + one filled sail.
   'attendance-action': <>

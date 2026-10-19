@@ -4,7 +4,11 @@ import {
   SupportError,
   addStaffReply,
   addUserMessage,
+  attachmentDownloadUrl,
+  createSupportUpload,
   createThread,
+  getAttachmentForAdmin,
+  getAttachmentForUser,
   getMyThread,
   getTicketForAdmin,
   listAllTickets,
@@ -66,6 +70,9 @@ export async function postSupportThread(req: Request, res: Response): Promise<vo
         employee,
         subject: req.body.subject,
         body: req.body.body,
+        category: req.body.category,
+        priority: req.body.priority,
+        attachments: req.body.attachments,
       });
     },
     201
@@ -83,7 +90,30 @@ export async function getSupportThreadMessages(req: Request, res: Response): Pro
 export async function postSupportThreadMessage(req: Request, res: Response): Promise<void> {
   await withSupport(res, async () => {
     const { employee, tenant } = await tenantActor(req);
-    return addUserMessage(tenant.id, employee.id, req.params.id, req.body.body, employee.name);
+    return addUserMessage(
+      tenant.id,
+      employee.id,
+      req.params.id,
+      req.body.body,
+      employee.name,
+      req.body.attachments
+    );
+  });
+}
+
+export async function postSupportUpload(req: Request, res: Response): Promise<void> {
+  await withSupport(res, async () => {
+    const { tenant } = await tenantActor(req);
+    return createSupportUpload(tenant.id, req.body);
+  });
+}
+
+export async function getSupportAttachmentUrl(req: Request, res: Response): Promise<void> {
+  await withSupport(res, async () => {
+    const { employee, tenant } = await tenantActor(req);
+    const attachment = await getAttachmentForUser(tenant.id, employee.id, req.params.id);
+    const downloadUrl = await attachmentDownloadUrl(attachment.fileKey);
+    return { ...attachment, downloadUrl };
   });
 }
 
@@ -98,10 +128,25 @@ export async function getPlatformSupportTicket(req: Request, res: Response): Pro
 export async function postPlatformSupportReply(req: Request, res: Response): Promise<void> {
   await withSupport(res, async () => {
     const name = req.user?.name || req.user?.email || 'Pixbe Support';
-    return addStaffReply(req.params.id, req.body.body, name);
+    return addStaffReply(req.params.id, req.body.body, name, req.body.attachments);
   });
 }
 
 export async function patchPlatformSupportTicket(req: Request, res: Response): Promise<void> {
   await withSupport(res, async () => updateTicketStatus(req.params.id, req.body.status));
+}
+
+export async function postPlatformSupportUpload(req: Request, res: Response): Promise<void> {
+  await withSupport(res, async () => {
+    const ticket = await getTicketForAdmin(req.params.id);
+    return createSupportUpload(ticket.tenantId, req.body);
+  });
+}
+
+export async function getPlatformSupportAttachmentUrl(req: Request, res: Response): Promise<void> {
+  await withSupport(res, async () => {
+    const attachment = await getAttachmentForAdmin(req.params.id);
+    const downloadUrl = await attachmentDownloadUrl(attachment.fileKey);
+    return { ...attachment, downloadUrl };
+  });
 }

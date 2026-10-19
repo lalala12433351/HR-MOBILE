@@ -4,11 +4,11 @@ import { provisionTenantSchema } from '../../db/migrator.js';
 import { sanitizeSchemaName } from '../../db/queryRunner.js';
 import { cognitoSignUp, cognitoLogin, cognitoRefreshToken } from '../../config/cognito.js';
 import { isEmailRegistered, verifyEmailVerificationToken } from './emailFlows.controller.js';
-import { hashPassword, signJwt, verifyPassword } from '../../utils/crypto.js';
+import { hashPassword, signJwt, verifyJwt, verifyPassword } from '../../utils/crypto.js';
 import { log } from '../../utils/logger.js';
 import { isFounderEmployeeCode, pickEffectiveAuthRole } from '../../utils/roles.js';
 import { ensureOwnerOrgDefaults } from '../../utils/orgDefaults.js';
-import { getPlanByIdOrKey, issueLicense, syncAndSummarizeLicense } from '../licenses/license.service.js';
+import { getPlanByIdOrKey, issueLicense, resolveBillingIntent, syncAndSummarizeLicense } from '../licenses/license.service.js';
 
 export interface PasswordValidationResult {
   isValid: boolean;
@@ -151,7 +151,7 @@ export async function register(req: Request, res: Response): Promise<void> {
     });
     return;
   }
-  const selectedCycle = billingCycle === 'annual' ? 'annual' : 'monthly';
+  const { billingCycle: selectedCycle, startTrial } = resolveBillingIntent(billingCycle);
 
   if (!verifyEmailVerificationToken(req.body.verificationToken, resolvedEmail)) {
     log.warn('Registration Rejected: Email not verified', { email: resolvedEmail });
@@ -343,6 +343,7 @@ export async function register(req: Request, res: Response): Promise<void> {
       tenantId: tenantRecord.id,
       plan: selectedPlan,
       billingCycle: selectedCycle,
+      startTrial,
       actorEmail: resolvedEmail,
     });
 
@@ -425,6 +426,9 @@ export async function register(req: Request, res: Response): Promise<void> {
         message: 'Tenant and administrator workspace provisioned successfully.',
         data: {
           token: sessionToken,
+          accessToken: authTokens?.accessToken,
+          refreshToken: authTokens?.refreshToken,
+          expiresIn: authTokens?.expiresIn,
           tenant: {
             id: tenantRecord.id,
             slug: tenantRecord.slug,
@@ -529,7 +533,7 @@ export async function login(req: Request, res: Response): Promise<void> {
             db_schema: row.schema_name,
             name: cleanEmail.split('@')[0],
           },
-          60 * 60 * 12
+          60 * 60 * 24 * 30
         );
         pool
           .query('UPDATE public.global_auth_mapping SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1', [row.id])
@@ -541,7 +545,8 @@ export async function login(req: Request, res: Response): Promise<void> {
           message: 'Login successful',
           data: {
             token,
-            expiresIn: 60 * 60 * 12,
+            refreshToken: token,
+            expiresIn: 60 * 60 * 24 * 30,
             tenant: {
               id: row.tenant_uuid,
               slug: row.tenant_slug,
@@ -580,92 +585,19 @@ export async function login(req: Request, res: Response): Promise<void> {
       [cleanEmail]
     );
 
-    let authRecord = mappingRes.rows[0];
+    const authRecord = mappingRes.rows[0];
 
-    // Fallback: If auth mapping missing for demo/existing tenant, resolve from tenant schema (Employees or Students)
-    if (!authRecord) {
-      log.info(`Checking tenant schemas for existing user "${cleanEmail}"...`);
-      const tenants = await pool.query('SELECT id, slug, name, schema_name, status, industry, address, city, state_province, postal_code, country FROM public.tenants WHERE status != $1', ['decommissioned']);
-      for (const t of tenants.rows) {
-        try {
-          // Check employee table
-          const empCheck = await pool.query(
-            `SELECT * FROM "${t.schema_name}".employees WHERE LOWER(email) = $1 LIMIT 1`,
-            [cleanEmail]
-          );
-          if (empCheck.rows.length > 0) {
-            const emp = empCheck.rows[0];
-            const cognitoSub = emp.cognito_sub || `user_${emp.id}`;
-
-            const inserted = await pool.query(
-              `INSERT INTO public.global_auth_mapping (cognito_sub, email, tenant_id, role, is_active)
-               VALUES ($1, $2, $3, $4, true)
-               ON CONFLICT (cognito_sub, tenant_id) DO UPDATE SET is_active = true
-               RETURNING *`,
-              [cognitoSub, cleanEmail, t.id, emp.role || 'employee']
-            );
-
-            authRecord = {
-              ...inserted.rows[0],
-              tenant_uuid: t.id,
-              tenant_slug: t.slug,
-              tenant_name: t.name,
-              schema_name: t.schema_name,
-              tenant_status: t.status,
-              tenant_industry: t.industry,
-              address: t.address,
-              city: t.city,
-              state_province: t.state_province,
-              postal_code: t.postal_code,
-              country: t.country,
-            };
-            break;
-          }
-
-          // Check student table (by email, student_id, or roll_number)
-          const studentCheck = await pool.query(
-            `SELECT * FROM "${t.schema_name}".students 
-             WHERE LOWER(email) = $1 OR LOWER(student_id) = $1 OR LOWER(roll_number) = $1
-             LIMIT 1`,
-            [cleanEmail]
-          );
-          if (studentCheck.rows.length > 0) {
-            const stu = studentCheck.rows[0];
-            const cognitoSub = `student_${stu.id}`;
-
-            const inserted = await pool.query(
-              `INSERT INTO public.global_auth_mapping (cognito_sub, email, tenant_id, role, is_active)
-               VALUES ($1, $2, $3, 'student', true)
-               ON CONFLICT (cognito_sub, tenant_id) DO UPDATE SET is_active = true
-               RETURNING *`,
-              [cognitoSub, cleanEmail, t.id]
-            );
-
-            authRecord = {
-              ...inserted.rows[0],
-              tenant_uuid: t.id,
-              tenant_slug: t.slug,
-              tenant_name: t.name,
-              schema_name: t.schema_name,
-              tenant_status: t.status,
-              tenant_industry: t.industry || 'Institute',
-              address: t.address,
-              city: t.city,
-              state_province: t.state_province,
-              postal_code: t.postal_code,
-              country: t.country,
-            };
-            break;
-          }
-        } catch (_) {}
-      }
-    }
-
+    // Do not scan every tenant schema on missing mapping — that O(n) path stalled login.
+    // Users must have a global_auth_mapping row (created at register / invite / provisioning).
     if (!authRecord) {
       log.warn(`Login Denied: No tenant workspace found for user "${cleanEmail}"`);
       res.status(404).json({
         success: false,
-        error: { code: 'TENANT_NOT_FOUND', message: 'No registered workspace tenant associated with this user.' },
+        error: {
+          code: 'TENANT_NOT_FOUND',
+          message:
+            'This account is not provisioned for a workspace. Ask your administrator to invite you, or register a new workspace.',
+        },
       });
       return;
     }
@@ -839,6 +771,13 @@ export async function login(req: Request, res: Response): Promise<void> {
       name: resolvedFullName,
     });
 
+    // License sync is intentionally off the login critical path — /auth/me refreshes it.
+    if (authRecord.tenant_uuid) {
+      void syncAndSummarizeLicense(pool, authRecord.tenant_uuid, cleanEmail).catch((err) =>
+        log.warn('Background license sync after login failed', err)
+      );
+    }
+
     res.json({
       success: true,
       message: 'Login successful',
@@ -854,9 +793,7 @@ export async function login(req: Request, res: Response): Promise<void> {
           schema: authRecord.schema_name,
           industry: authRecord.tenant_industry || 'Office',
           ...tenantAddressPayload(authRecord),
-          license: authRecord.tenant_uuid
-            ? await syncAndSummarizeLicense(pool, authRecord.tenant_uuid, cleanEmail)
-            : null,
+          license: null,
         },
         user: {
           id: student?.id || employee?.id || authRecord.id,
@@ -895,6 +832,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 export async function refresh(req: Request, res: Response): Promise<void> {
   try {
     const refreshToken = req.body.refreshToken || req.body.token;
+    const username = String(req.body.username || req.body.email || '').trim().toLowerCase() || undefined;
 
     if (!refreshToken) {
       log.warn('Token Refresh Rejected: Missing refresh token');
@@ -905,8 +843,24 @@ export async function refresh(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    // App-signed student / platform JWTs are themselves JWTs (HS256). Cognito refresh tokens are opaque.
+    const looksLikeAppJwt = String(refreshToken).split('.').length === 3;
+    if (looksLikeAppJwt) {
+      const payload = verifyJwt<Record<string, any>>(refreshToken, { ignoreExpiration: true });
+      if (payload?.role === 'student' || payload?.role === 'platform_admin' || payload?.impersonation === true) {
+        const { exp: _exp, iat: _iat, ...claims } = payload;
+        const token = signJwt(claims, 60 * 60 * 24 * 30);
+        res.json({
+          success: true,
+          message: 'Token refreshed successfully.',
+          data: { token, expiresIn: 60 * 60 * 24 * 30 },
+        });
+        return;
+      }
+    }
+
     log.info('Refreshing AWS Cognito session tokens...');
-    const refreshed = await cognitoRefreshToken(refreshToken);
+    const refreshed = await cognitoRefreshToken(refreshToken, username);
     log.success('AWS Cognito session refreshed successfully.');
 
     res.json({
@@ -915,6 +869,7 @@ export async function refresh(req: Request, res: Response): Promise<void> {
       data: {
         token: refreshed.idToken,
         accessToken: refreshed.accessToken,
+        refreshToken: refreshToken,
         expiresIn: refreshed.expiresIn,
       },
     });
@@ -1063,15 +1018,18 @@ export async function studentLogin(req: Request, res: Response): Promise<void> {
       log.warn('Could not upsert student global_auth_mapping', { error: mapErr.message });
     }
 
-    const token = signJwt({
-      sub: cognitoSub,
-      email: studentEmail,
-      role: 'student',
-      tenant_id: matchedTenant.slug,
-      db_schema: matchedTenant.schema_name,
-      name: fullName,
-      student_id: student.id,
-    });
+    const token = signJwt(
+      {
+        sub: cognitoSub,
+        email: studentEmail,
+        role: 'student',
+        tenant_id: matchedTenant.slug,
+        db_schema: matchedTenant.schema_name,
+        name: fullName,
+        student_id: student.id,
+      },
+      60 * 60 * 24 * 30
+    );
 
     log.success(`Student "${studentEmail}" logged in successfully`, {
       tenant: matchedTenant.slug,
@@ -1083,6 +1041,8 @@ export async function studentLogin(req: Request, res: Response): Promise<void> {
       message: 'Student login successful',
       data: {
         token,
+        refreshToken: token,
+        expiresIn: 60 * 60 * 24 * 30,
         tenant: {
           id: matchedTenant.id,
           slug: matchedTenant.slug,

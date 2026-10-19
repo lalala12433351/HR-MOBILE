@@ -517,7 +517,7 @@ export const WorkspaceSetupWizard: React.FC = () => {
               <div className="setup-patterns__section-head">
                 <h3>Import a CSV</h3>
               </div>
-              <input ref={fileInput} type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPeople(file); event.currentTarget.value = ''; }} />
+              <input ref={fileInput} type="file" accept=".csv,text/csv" className="sr-only" tabIndex={-1} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPeople(file); event.currentTarget.value = ''; }} />
               <button type="button" onClick={() => fileInput.current?.click()} className="setup-button setup-button--secondary"><Upload className="size-4" />Choose CSV</button>
               {importErrors.length > 0 && <ul className="setup-issues">{importErrors.map((issue) => <li key={issue}>{issue}</li>)}</ul>}
             </section>

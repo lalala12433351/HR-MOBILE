@@ -14,6 +14,8 @@ import {
   attendanceElapsedSeconds,
   hasOpenAttendanceSession,
 } from '@/utils/attendancePunches';
+import { isWfhRegularization } from '@/utils/wfhRegularization';
+import type { AttendanceRegularization } from '@/types';
 
 function localToday() {
   const d = new Date();
@@ -156,6 +158,91 @@ export const DashboardClockInCard: React.FC = () => {
       const selfiePhoto = payload.selfiePhoto;
       const notes = payload.notes ?? clockOutNotes;
 
+      // WFH / remote requires manager approval via Regularizations
+      if (asRemote) {
+        const today = localToday();
+        const existingPending = (state.regularizations || []).find(
+          (r) =>
+            r.employeeId === persona.id &&
+            r.date === today &&
+            r.status === 'Pending' &&
+            isWfhRegularization(r)
+        );
+        if (existingPending) {
+          triggerToast({
+            title: 'WFH already pending',
+            message: 'You already have a work-from-home request awaiting approval in Regularizations.',
+            type: 'info',
+          });
+          setModalOpen(false);
+          setSaving(false);
+          return;
+        }
+        const shiftStart =
+          attSettings?.workDayStartTime || attPolicies?.workDayStartTime || '09:00 AM';
+        const shiftEnd = attSettings?.workDayEndTime || attPolicies?.workDayEndTime || '06:00 PM';
+        const to24 = (t: string) => {
+          const m = String(t).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+          if (!m) return '09:00';
+          let h = parseInt(m[1], 10);
+          const mins = m[2];
+          const mer = m[3]?.toUpperCase();
+          if (mer === 'PM' && h < 12) h += 12;
+          if (mer === 'AM' && h === 12) h = 0;
+          return `${String(h).padStart(2, '0')}:${mins}`;
+        };
+        const created = await api.attendance.requestRegularization({
+          employeeId: persona.id,
+          date: today,
+          requestedCheckIn: to24(shiftStart),
+          requestedCheckOut: to24(shiftEnd),
+          reason: 'Work From Home',
+          remarks:
+            selectedLocation === 'wfh'
+              ? 'Work from home selected at punch time'
+              : 'Requested while outside office geofence',
+        });
+        if (!created.success) {
+          triggerToast({
+            title: 'Could not request WFH',
+            message: created.error?.message || 'Failed to submit work-from-home request.',
+            type: 'error',
+          });
+          setSaving(false);
+          return;
+        }
+        const newReg: AttendanceRegularization = {
+          id: created.data?.id || `reg_${Date.now()}`,
+          employeeId: created.data?.employee_id || persona.id,
+          employeeName: persona.name,
+          avatar: persona.avatar || '',
+          department: persona.department,
+          date: today,
+          requestedCheckIn: shiftStart,
+          requestedCheckOut: shiftEnd,
+          reason: 'Work From Home',
+          remarks:
+            selectedLocation === 'wfh'
+              ? 'Work from home selected at punch time'
+              : 'Requested while outside office geofence',
+          status: 'Pending',
+          appliedOn: today,
+        };
+        updateState((prev) => ({
+          ...prev,
+          regularizations: [newReg, ...(prev.regularizations || [])],
+        }));
+        setModalOpen(false);
+        setSelectedLocation(offices[0] || '');
+        triggerToast({
+          title: 'WFH request submitted',
+          message: 'Your manager can approve it under Attendance → Regularizations.',
+          type: 'success',
+        });
+        setSaving(false);
+        return;
+      }
+
       const punchType = isCheckedIn ? 'check_out' : 'check_in';
       const timeStr = formatClock(new Date());
       const res = await api.attendance.recordPunch({
@@ -165,13 +252,13 @@ export const DashboardClockInCard: React.FC = () => {
         latitude: lat,
         longitude: lng,
         deviceInfo: [
-          asRemote ? 'Dashboard · Remote' : 'Dashboard · Web',
+          'Dashboard · Web',
           punchType === 'check_out' && notes.trim() ? notes.trim() : '',
         ]
           .filter(Boolean)
           .join(' · '),
         selfiePhoto: selfiePhoto || undefined,
-        workFromHome: asRemote,
+        workFromHome: false,
       });
 
       if (!res.success) {

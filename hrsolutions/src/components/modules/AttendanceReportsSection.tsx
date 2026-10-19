@@ -27,6 +27,7 @@ import {
   getTeamEmployees,
 } from '@/utils/teamAccess';
 import { getDefaultReportSettings } from '@/utils/reportCatalog';
+import { leaveBelongsToEmployee } from '@/utils/mapLeaveRow';
 import {
   ChartTooltip,
   chartGradientDefs,
@@ -290,7 +291,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       });
 
       const empLeaves = monthLeaves.filter(
-        (l) => (l.employeeId === emp.id || l.employeeName === emp.name) && l.status === 'Approved'
+        (l) => leaveBelongsToEmployee(l, emp) && l.status === 'Approved'
       );
       const leaveDays = empLeaves.reduce((sum, l) => sum + (Number(l.daysCount) || 1), 0);
 

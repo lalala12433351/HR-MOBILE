@@ -4,6 +4,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { PunchLocationLeafletMap } from '@/components/common/PunchLocationLeafletMap';
 import { reverseGeocodeLatLng } from '@/lib/googleMaps';
+import {
+  getCurrentPosition,
+  getSelfieStream,
+  isNativePlatform,
+} from '@/lib/native';
 
 function formatClock(date: Date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -108,23 +113,18 @@ export function WorkdayPunchDialogs({
   }, []);
 
   const fetchLocation = useCallback(() => {
-    if (typeof window === 'undefined' || !navigator.geolocation) {
-      setGpsStatus(geofenceOptional || isWfh ? 'granted' : 'denied');
-      setIsLocating(false);
-      setPunchAddress(
-        geofenceOptional || isWfh
-          ? locationLabel
-          : 'Geolocation is not supported by your browser.'
-      );
-      return;
-    }
-
     setIsLocating(true);
     setGpsStatus('locating');
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
+
+    void (async () => {
+      try {
+        const coords = await getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        });
+        const lat = coords.latitude;
+        const lng = coords.longitude;
         setCurrentLat(lat);
         setCurrentLng(lng);
         setHasDeviceGps(true);
@@ -149,20 +149,22 @@ export function WorkdayPunchDialogs({
         } catch {
           setPunchAddress(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
         }
-      },
-      (error) => {
+      } catch (error) {
         setIsLocating(false);
         setHasDeviceGps(false);
         setGpsStatus(geofenceOptional || isWfh ? 'granted' : 'denied');
         if (geofenceOptional || isWfh) setInsideRadius(true);
+        const message = error instanceof Error ? error.message : '';
+        const denied = /denied|permission/i.test(message);
         setPunchAddress(
-          error.code === error.PERMISSION_DENIED
-            ? 'Location is blocked. Allow it in the address bar, then retry.'
+          denied
+            ? isNativePlatform()
+              ? 'Location is blocked. Allow location for this app in system settings, then retry.'
+              : 'Location is blocked. Allow it in the address bar, then retry.'
             : 'Unable to retrieve your current location.'
         );
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+      }
+    })();
   }, [geofenceOptional, hasOfficeCoords, isWfh, locationLabel, officeLat, officeLng, radiusMeters]);
 
   useEffect(() => {
@@ -195,13 +197,7 @@ export function WorkdayPunchDialogs({
     (async () => {
       try {
         stopCamera();
-        if (!navigator?.mediaDevices?.getUserMedia) {
-          throw new Error('Camera device API not supported by browser');
-        }
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: false,
-        });
+        const { stream } = await getSelfieStream();
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -232,9 +228,12 @@ export function WorkdayPunchDialogs({
       } catch (err: unknown) {
         if (cancelled) return;
         const name = err && typeof err === 'object' && 'name' in err ? String((err as { name?: string }).name) : '';
+        const message = err instanceof Error ? err.message : '';
         setCameraError(
-          name === 'NotAllowedError' || name === 'PermissionDeniedError'
-            ? 'Camera access is blocked. Allow camera permissions in the address bar and retry.'
+          name === 'NotAllowedError' || name === 'PermissionDeniedError' || /denied|permission/i.test(message)
+            ? isNativePlatform()
+              ? 'Camera access is blocked. Allow camera for this app in system settings and retry.'
+              : 'Camera access is blocked. Allow camera permissions in the address bar and retry.'
             : 'Camera device unavailable. Connect a camera and retry.'
         );
         setIsCameraLoading(false);
@@ -461,30 +460,20 @@ export function WorkdayPunchDialogs({
             <div className="att-dialog-alert">
               {isInstitution
                 ? 'Campus attendance is blocked outside the campus boundary. You need to be on campus to punch.'
-                : 'Office attendance is blocked outside the radius. Be at the workplace, or punch as work from home.'}
+                : 'Office attendance is blocked outside the radius. Be at the workplace, or request WFH approval for your manager.'}
             </div>
             <div className="dash-clock-dialog-actions" style={{ justifyContent: 'stretch' }}>
               <button type="button" className="work-btn-secondary flex-1" onClick={() => setStep('map')}>
                 Back to map
               </button>
-              {outOfRadiusAction === 'Warn' && (
+              {!isInstitution && (
                 <button
                   type="button"
                   className="work-btn-primary flex-1"
                   onClick={() => openSelfieOrFinish(true)}
                   disabled={saving}
                 >
-                  Punch as remote
-                </button>
-              )}
-              {!isInstitution && outOfRadiusAction === 'Block' && (
-                <button
-                  type="button"
-                  className="work-btn-primary flex-1"
-                  onClick={() => openSelfieOrFinish(true)}
-                  disabled={saving}
-                >
-                  Switch to WFH
+                  Request WFH approval
                 </button>
               )}
             </div>

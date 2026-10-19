@@ -180,7 +180,8 @@ export function Composer({
           ref={fileRef}
           type="file"
           multiple
-          className="hidden"
+          className="sr-only"
+          tabIndex={-1}
           onChange={(e) => {
             addFiles(e.target.files);
             e.target.value = '';

@@ -6,6 +6,7 @@ import { GoogleIcon } from '@/components/ui/GoogleIcon';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
 import { getEffectiveLeaveQuotas, formatLeaveDays } from '@/utils/leaveRules';
+import { leaveBelongsToEmployee } from '@/utils/mapLeaveRow';
 import { DashPanel } from './DashPanel';
 
 export const UserLeavesSummaryCard: React.FC<{ className?: string }> = ({ className = '' }) => {
@@ -14,35 +15,79 @@ export const UserLeavesSummaryCard: React.FC<{ className?: string }> = ({ classN
   const dashboardState = useDashboardContext();
 
   const currentPersona = state.currentPersona;
-  const currentEmpId = currentPersona?.id;
   const currentEmpEmail = currentPersona?.email?.toLowerCase().trim();
 
   const matchedEmp = useMemo(() => {
     return (dashboardState.employees || state.employees || []).find(
       (e) =>
-        (e.id && e.id === currentEmpId) ||
+        (e.id && e.id === currentPersona?.id) ||
         (e.email && e.email.toLowerCase().trim() === currentEmpEmail)
     );
-  }, [dashboardState.employees, state.employees, currentEmpId, currentEmpEmail]);
+  }, [dashboardState.employees, state.employees, currentPersona?.id, currentEmpEmail]);
+
+  const owner = matchedEmp || currentPersona;
 
   const quotas = useMemo(() => {
     return getEffectiveLeaveQuotas(
-      matchedEmp || currentPersona,
+      owner,
       state.customOptions?.leaveSettings,
       state.customOptions?.probationSettings
     );
-  }, [matchedEmp, currentPersona, state.customOptions]);
+  }, [owner, state.customOptions]);
 
-  const userLeaves = useMemo(() => {
-    return (dashboardState.leaves || state.leaves || [])
-      .filter(
-        (l) =>
-          l.employeeId === currentEmpId ||
-          (matchedEmp && l.employeeId === matchedEmp.id) ||
-          l.employeeName?.toLowerCase() === currentPersona?.name?.toLowerCase()
-      )
-      .slice(0, 3);
-  }, [dashboardState.leaves, state.leaves, currentEmpId, matchedEmp, currentPersona]);
+  const ownerLeaves = useMemo(() => {
+    return (dashboardState.leaves || state.leaves || []).filter((l) =>
+      leaveBelongsToEmployee(l, owner)
+    );
+  }, [dashboardState.leaves, state.leaves, owner]);
+
+  const userLeaves = useMemo(() => ownerLeaves.slice(0, 3), [ownerLeaves]);
+
+  const counters = useMemo(() => {
+    const fromServer = !!quotas.balancesFromServer;
+    const totals = matchedEmp?.leaveBalanceTotals;
+    const usedOf = (...types: string[]) =>
+      formatLeaveDays(
+        ownerLeaves
+          .filter(
+            (l) =>
+              types.includes(l.leaveType as string) &&
+              l.status !== 'Rejected' &&
+              l.status !== 'Cancelled'
+          )
+          .reduce((sum, l) => sum + (l.daysCount || 1), 0)
+      );
+
+    const remainingOf = (key: 'earnedLeave' | 'casualLeave' | 'sickLeave', used: number) => {
+      const quota = formatLeaveDays(quotas.effectiveQuotas[key]);
+      if (quotas.inProbation) return 0;
+      return fromServer ? quota : formatLeaveDays(Math.max(0, quota - used));
+    };
+
+    const totalOf = (key: 'earnedLeave' | 'casualLeave' | 'sickLeave') => {
+      const fromTotals = totals?.[key];
+      if (fromTotals !== undefined && fromTotals !== null) return formatLeaveDays(fromTotals);
+      return formatLeaveDays(quotas.annualQuotas[key]);
+    };
+
+    return [
+      {
+        label: 'Paid / PL',
+        remaining: remainingOf('earnedLeave', usedOf('Earned Leave', 'Earned / Privilege')),
+        total: totalOf('earnedLeave'),
+      },
+      {
+        label: 'Casual / CL',
+        remaining: remainingOf('casualLeave', usedOf('Casual Leave')),
+        total: totalOf('casualLeave'),
+      },
+      {
+        label: 'Sick / SL',
+        remaining: remainingOf('sickLeave', usedOf('Sick Leave')),
+        total: totalOf('sickLeave'),
+      },
+    ];
+  }, [quotas, matchedEmp?.leaveBalanceTotals, ownerLeaves]);
 
   return (
     <DashPanel
@@ -60,34 +105,21 @@ export const UserLeavesSummaryCard: React.FC<{ className?: string }> = ({ classN
       }
     >
       <div className="dash-quota-grid">
-        <div className="dash-quota">
-          <span className="dash-kpi-label block">Paid / PL</span>
-          <p className="text-xl font-bold text-[var(--text-primary)] mt-0.5 tabular-nums">
-            {formatLeaveDays(quotas.effectiveQuotas.earnedLeave)}
-            <span className="text-[11px] font-normal text-[var(--text-muted)] ml-1">
-              / {formatLeaveDays(quotas.annualQuotas.earnedLeave)}
-            </span>
-          </p>
-        </div>
-        <div className="dash-quota">
-          <span className="dash-kpi-label block">Casual / CL</span>
-          <p className="text-xl font-bold text-[var(--text-primary)] mt-0.5 tabular-nums">
-            {formatLeaveDays(quotas.effectiveQuotas.casualLeave)}
-            <span className="text-[11px] font-normal text-[var(--text-muted)] ml-1">
-              / {formatLeaveDays(quotas.annualQuotas.casualLeave)}
-            </span>
-          </p>
-        </div>
-        <div className="dash-quota">
-          <span className="dash-kpi-label block">Sick / SL</span>
-          <p className="text-xl font-bold text-[var(--text-primary)] mt-0.5 tabular-nums">
-            {formatLeaveDays(quotas.effectiveQuotas.sickLeave)}
-            <span className="text-[11px] font-normal text-[var(--text-muted)] ml-1">
-              / {formatLeaveDays(quotas.annualQuotas.sickLeave)}
-            </span>
-          </p>
-        </div>
+        {counters.map((item) => (
+          <div key={item.label} className="dash-quota">
+            <span className="dash-kpi-label block">{item.label}</span>
+            <p className="dash-kpi-split mt-0.5">
+              <b>{item.remaining}</b>
+              <span>/ {item.total}</span>
+            </p>
+          </div>
+        ))}
       </div>
+      {quotas.inProbation ? (
+        <p className="mt-2 text-[11px] leading-snug text-[var(--text-muted)]">
+          Paid leave is restricted during probation. Absences should be logged as Loss of Pay.
+        </p>
+      ) : null}
 
       <div className="mt-3 pt-2 border-t border-[var(--border-color)]">
         <span className="dash-section-label block mb-1">Recent applications</span>

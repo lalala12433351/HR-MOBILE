@@ -29,12 +29,12 @@ export const SUPPORT_FAQS: SupportFaq[] = [
     id: 'hr-vs-pixbe',
     question: 'When should I open a ticket instead of Ask HR?',
     answer:
-      'Ask HR in Chat is for your company’s HR team (payslips, leave, policy). Chat with us opens a Pixbe product-support ticket for workspace-admin help.',
+      'Ask HR in Chat is for your company’s HR team (payslips, leave, policy). Tickets here are Pixbe product support — a separate chat with Super Admin, including files.',
   },
   {
     id: 'chat-email',
     question: 'What happens when I send a support message?',
     answer:
-      'We open a ticket Pixbe Super Admin can see in Master Admin, with your client name and tenant. Replies appear in this panel and are emailed to you. You can also write to support@pixbe.in. This is not mixed with Ask HR tickets.',
+      'We open a ticket Pixbe Super Admin can chat on in Master Admin, with your client name and tenant. You can keep several tickets, attach files, and follow up in the thread. Replies also email you. You can write to support@pixbe.in instead. This is not mixed with Ask HR.',
   },
 ];

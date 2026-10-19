@@ -277,7 +277,40 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
     }
   };
 
-  const companyName = state.organization?.name || 'Company';
+  const deleteUnbilledTask = async (line: UnbilledLine) => {
+    const taskId = String(line.sourceTaskId || '').trim();
+    if (!taskId || line.kind !== 'deliverable') return;
+    if (!window.confirm(`Delete unbilled task “${line.description}”? This cannot be undone.`)) return;
+    setSaving(true);
+    try {
+      const res = await api.projects.deleteTask(taskId);
+      if (!res.success) {
+        toast.error(res.error?.message || 'Could not delete the task.');
+        return;
+      }
+      toast.success('Unbilled task deleted.');
+      setLines((prev) => prev.filter((row) => row.sourceTaskId !== taskId));
+      void loadAll();
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not delete the task.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const org = state.organization;
+  const companyName = org?.name || 'Company';
+  const companyAddress =
+    [
+      org?.streetAddress,
+      [org?.city, org?.stateProvince].filter(Boolean).join(', '),
+      org?.postalCode,
+      org?.country,
+    ]
+      .filter(Boolean)
+      .join('\n') ||
+    String(org?.officeLocation?.address || '').trim() ||
+    '';
   const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
   return (
@@ -408,12 +441,13 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
                   <th className="px-4 py-3">Qty</th>
                   <th className="px-4 py-3">Rate</th>
                   <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3 w-20"></th>
                 </tr>
               </thead>
               <tbody>
                 {lines.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-[var(--text-secondary)]">
+                    <td colSpan={7} className="px-4 py-10 text-center text-[var(--text-secondary)]">
                       No unbilled work in this period. Complete billable tasks or approve timesheets first.
                     </td>
                   </tr>
@@ -459,6 +493,18 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
                       />
                     </td>
                     <td className="px-4 py-3 tabular-nums font-semibold">{money(line.total)}</td>
+                    <td className="px-4 py-3 text-right">
+                      {line.kind === 'deliverable' && line.sourceTaskId ? (
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => void deleteUnbilledTask(line)}
+                          className="text-[12px] font-semibold text-[#9b2c2c] hover:underline disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -511,6 +557,7 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
         <InvoiceDocument
           invoice={detail}
           companyName={companyName}
+          companyAddress={companyAddress}
           onBack={() => setTab('invoices')}
           onStatus={markStatus}
         />
@@ -519,19 +566,172 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
   );
 }
 
+function formatSellerAddress(invoice: any, fallback: string): string {
+  const fromApi = String(invoice?.seller_address_formatted || '').trim();
+  if (fromApi) return fromApi;
+  const parts = [
+    invoice?.seller_address,
+    [invoice?.seller_city, invoice?.seller_state_province].filter(Boolean).join(', '),
+    invoice?.seller_postal_code,
+    invoice?.seller_country,
+  ].filter(Boolean);
+  if (parts.length) return parts.join('\n');
+  return fallback;
+}
+
+function escapePrintHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Opens a clean print sheet so the browser does not stamp date/title/URL/page chrome. */
+function printInvoicePdf(opts: {
+  invoice: any;
+  sellerName: string;
+  sellerAddress: string;
+  status: string;
+  lines: any[];
+}) {
+  const { invoice, sellerName, sellerAddress, status, lines } = opts;
+  const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=860,height=1100');
+  if (!printWindow) {
+    toast.error('Allow pop-ups to download the invoice PDF.');
+    return;
+  }
+
+  const period =
+    invoice.billing_period_start || invoice.issue_date
+      ? `${String(invoice.billing_period_start || invoice.issue_date).slice(0, 10)} – ${String(invoice.billing_period_end || invoice.due_date || '').slice(0, 10)}`
+      : '—';
+  const billToName = String(invoice.company_name || invoice.client_name || invoice.customer_name || '').trim();
+  const lineRows = lines
+    .map(
+      (line: any) => `
+      <tr>
+        <td>${escapePrintHtml(String(line.description || ''))}</td>
+        <td class="num">${Number(line.quantity)}</td>
+        <td class="num">${escapePrintHtml(money(Number(line.unit_price) || 0))}</td>
+        <td class="num right">${escapePrintHtml(money(Number(line.total) || 0))}</td>
+      </tr>`
+    )
+    .join('');
+
+  printWindow.document.open();
+  printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>&nbsp;</title>
+  <style>
+    @page { size: A4 portrait; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #172234;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    body { padding: 18mm 16mm; }
+    header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 1px solid #dde4e9; padding-bottom: 16px; }
+    .eyebrow { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #5e6c7b; }
+    h1 { margin: 6px 0 0; font-size: 22px; letter-spacing: -0.02em; }
+    .muted { color: #5e6c7b; white-space: pre-line; }
+    .meta { text-align: right; font-size: 13px; line-height: 1.5; }
+    .meta strong { display: block; font-size: 14px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 18px; font-size: 13px; line-height: 1.5; }
+    .right { text-align: right; }
+    table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 13px; }
+    th { text-align: left; font-size: 11px; text-transform: uppercase; color: #5e6c7b; border-bottom: 1px solid #dde4e9; padding: 8px 0; }
+    td { border-bottom: 1px solid #f3f5f7; padding: 10px 0; vertical-align: top; }
+    th.right, td.right { text-align: right; }
+    .num { font-variant-numeric: tabular-nums; }
+    .totals { width: 220px; margin: 18px 0 0 auto; font-size: 13px; }
+    .totals div { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; }
+    .totals .grand { margin-top: 6px; padding-top: 8px; border-top: 1px solid #dde4e9; font-weight: 700; }
+    .terms { margin-top: 28px; font-size: 12px; color: #5e6c7b; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">Tax invoice</p>
+      <h1>${escapePrintHtml(sellerName)}</h1>
+      ${sellerAddress ? `<p class="muted" style="margin:8px 0 0;font-size:13px;">${escapePrintHtml(sellerAddress)}</p>` : ''}
+    </div>
+    <div class="meta">
+      <strong>${escapePrintHtml(String(invoice.invoice_number || ''))}</strong>
+      <div>Issued ${escapePrintHtml(String(invoice.issue_date || '').slice(0, 10))}</div>
+      ${invoice.due_date ? `<div>Due ${escapePrintHtml(String(invoice.due_date).slice(0, 10))}</div>` : ''}
+    </div>
+  </header>
+  <div class="grid">
+    <div>
+      <p class="eyebrow">Bill to</p>
+      <div style="font-weight:600;margin-top:4px;">${escapePrintHtml(billToName)}</div>
+      ${invoice.billing_address ? `<div class="muted">${escapePrintHtml(String(invoice.billing_address))}</div>` : ''}
+      ${invoice.gstin ? `<div>GSTIN ${escapePrintHtml(String(invoice.gstin))}</div>` : ''}
+      ${invoice.client_email ? `<div>${escapePrintHtml(String(invoice.client_email))}</div>` : ''}
+    </div>
+    <div class="right">
+      <p class="eyebrow">Period</p>
+      <div style="margin-top:4px;">${escapePrintHtml(period)}</div>
+      <div style="text-transform:capitalize;">${escapePrintHtml(String(invoice.kind || 'project'))} billing</div>
+      ${invoice.project_name ? `<div>${escapePrintHtml(String(invoice.project_name))}</div>` : ''}
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Description</th>
+        <th>Qty</th>
+        <th>Rate</th>
+        <th class="right">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${lineRows}</tbody>
+  </table>
+  <div class="totals">
+    <div><span>Subtotal</span><span>${escapePrintHtml(money(Number(invoice.subtotal) || 0))}</span></div>
+    <div><span>GST 18%</span><span>${escapePrintHtml(money(Number(invoice.gst_amount) || 0))}</span></div>
+    <div class="grand"><span>Total</span><span>${escapePrintHtml(money(Number(invoice.total_amount) || 0))}</span></div>
+  </div>
+  <p class="terms">Payment terms: ${Number(invoice.payment_terms_days) || 15} days. Status: ${escapePrintHtml(status.replace('_', ' '))}.</p>
+  <script>
+    window.onload = function () {
+      document.title = ' ';
+      setTimeout(function () {
+        window.focus();
+        window.print();
+      }, 150);
+    };
+    window.onafterprint = function () { window.close(); };
+  </script>
+</body>
+</html>`);
+  printWindow.document.close();
+}
+
 function InvoiceDocument({
   invoice,
   companyName,
+  companyAddress,
   onBack,
   onStatus,
 }: {
   invoice: any;
   companyName: string;
+  companyAddress: string;
   onBack: () => void;
   onStatus: (id: string, status: string) => void;
 }) {
   const status = String(invoice.status || 'draft').toLowerCase();
   const lines = Array.isArray(invoice.lines) ? invoice.lines : [];
+  const sellerName = String(invoice.seller_name || companyName).trim() || companyName;
+  const sellerAddress = formatSellerAddress(invoice, companyAddress);
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
@@ -539,14 +739,31 @@ function InvoiceDocument({
         <div className="flex flex-wrap gap-2">
           {status === 'draft' && <button type="button" className={secondaryBtn} onClick={() => onStatus(invoice.id, 'sent')}>Mark sent</button>}
           {status !== 'paid' && <button type="button" className={secondaryBtn} onClick={() => onStatus(invoice.id, 'paid')}>Mark paid</button>}
-          <button type="button" className={primaryBtn} onClick={() => window.print()}>Download PDF</button>
+          <button
+            type="button"
+            className={primaryBtn}
+            onClick={() =>
+              printInvoicePdf({
+                invoice,
+                sellerName,
+                sellerAddress,
+                status,
+                lines,
+              })
+            }
+          >
+            Download PDF
+          </button>
         </div>
       </div>
       <article className="invoice-print mx-auto w-full max-w-[720px] rounded-[12px] border border-[var(--border-color)] bg-white p-8 text-[#172234]">
         <header className="flex items-start justify-between gap-4 border-b border-[#dde4e9] pb-4">
           <div>
             <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#5e6c7b]">Tax invoice</p>
-            <h2 className="mt-1 text-xl font-bold tracking-[-0.02em]">{companyName}</h2>
+            <h2 className="mt-1 text-xl font-bold tracking-[-0.02em]">{sellerName}</h2>
+            {sellerAddress ? (
+              <p className="mt-1 whitespace-pre-line text-sm text-[#5e6c7b]">{sellerAddress}</p>
+            ) : null}
           </div>
           <div className="text-right text-sm">
             <p className="font-bold">{invoice.invoice_number}</p>

@@ -16,6 +16,7 @@ import {
   listLicenseEvents,
   mapPlanRow,
   mutateTenantLicense,
+  resolveBillingIntent,
   resolveTenantUuid,
   syncAndSummarizeLicense,
   LicenseError,
@@ -80,7 +81,7 @@ export async function registerTenant(req: Request, res: Response): Promise<void>
     });
     return;
   }
-  const selectedCycle = billingCycle === 'annual' ? 'annual' : 'monthly';
+  const { billingCycle: selectedCycle, startTrial } = resolveBillingIntent(billingCycle);
 
   const client = await pool.connect();
   try {
@@ -105,6 +106,7 @@ export async function registerTenant(req: Request, res: Response): Promise<void>
       tenantId: tenant.id,
       plan: selectedPlan,
       billingCycle: selectedCycle,
+      startTrial,
       maxSeats: maxSeatsNum,
       actorEmail: req.user?.email || 'platform_admin',
     });

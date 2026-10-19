@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { UserReport } from '@/utils/userReport';
 import { downloadUserReportPdf, downloadUserReportXlsx } from '@/utils/userReportExport';
+import { AttendanceMonthCalendar } from './AttendanceMonthCalendar';
 
 const inr = (value: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(
@@ -103,34 +104,11 @@ export function UserReportView({
       </div>
 
       <Section title="Attendance">
-        {report.attendance.length ? (
-          <div className="people-studio__table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  {['Date', 'In', 'Out', 'Hours', 'Status'].map((label) => (
-                    <th key={label}>{label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {report.attendance.map((row) => (
-                  <tr key={row.date}>
-                    <td className="people-studio__role">{row.date}</td>
-                    <td className="people-studio__quiet">{row.checkIn}</td>
-                    <td className="people-studio__quiet">{row.checkOut}</td>
-                    <td>{row.hours.toFixed(1)}</td>
-                    <td>
-                      <span className="people-studio__status people-studio__status--wait">{row.status}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <Empty>No attendance records for this period.</Empty>
-        )}
+        <AttendanceMonthCalendar
+          range={report.range}
+          attendance={report.attendance}
+          leaves={report.leaves}
+        />
       </Section>
 
       <Section title="Tasks">

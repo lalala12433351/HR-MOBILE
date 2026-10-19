@@ -16,7 +16,7 @@ async function fetchBackend(endpoint: string, method: string, payload: any) {
     'Accept': 'application/json',
   };
 
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (token && token.split('.').length === 3) headers['Authorization'] = `Bearer ${token}`;
   if (tenantId) headers['X-Tenant-ID'] = tenantId;
 
   const res = await fetch(`${API_BASE_URL}${endpoint}`, {

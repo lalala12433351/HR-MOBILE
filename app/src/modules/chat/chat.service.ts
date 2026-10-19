@@ -1169,8 +1169,19 @@ export async function updateHrTicket(
     for (const change of changes) {
       await insertSystemMessage(ctx, id, 'hr_ticket', change);
     }
-    if (requesterId) {
-      await notify(ctx, [requesterId], `Update on your HR request`, `"${current.name}": ${changes.join('; ')}`, `/chat?c=${id}`);
+    // Only notify the requester for meaningful status outcomes — not priority/category/meta churn.
+    const statusBecameTerminal =
+      Boolean(input.status) &&
+      input.status !== current.ticket_status &&
+      (input.status === 'resolved' || input.status === 'closed');
+    if (requesterId && statusBecameTerminal) {
+      await notify(
+        ctx,
+        [requesterId],
+        'Update on your HR request',
+        `"${current.name}" is now ${STATUS_LABELS[input.status as TicketStatus]}.`,
+        `/chat?c=${id}`
+      );
     }
     await broadcast(ctx, id, 'hr_ticket', 'ticket:updated', { conversationId: id });
   }

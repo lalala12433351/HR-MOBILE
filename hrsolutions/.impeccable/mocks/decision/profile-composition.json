@@ -1,0 +1,227 @@
+{
+  "title": "Coworker profile composition",
+  "question": "Pick how the profile peek is structured. Working Studio palette stays fixed.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "Side dossier",
+      "kicker": "THE ROLL",
+      "thesis": "Split the peek: identity on a Quiet Mist rail, facts on a Clean Sheet list.",
+      "palette": [
+        "#17324e",
+        "#f3f5f7",
+        "#ffffff",
+        "#172234"
+      ],
+      "materials": [
+        "Quiet Mist rail",
+        "Clean Sheet fields",
+        "navy action"
+      ],
+      "viewport": "Left rail: avatar, name, role, optional View profile. Right: email, phone, timezone, department, office, manager as labeled segments.",
+      "risk": "Too wide on phone; stacks to identity-then-facts on narrow screens.",
+      "raised": [
+        {
+          "from": "boarding-pass",
+          "raise": "Right column uses pass-style labeled segments, not a gray inset card."
+        },
+        {
+          "from": "crouwel-grid",
+          "raise": "Field labels and values snap to one strict two-column measure."
+        }
+      ],
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "mist identity rail",
+            "x": 0,
+            "y": 0,
+            "w": 4,
+            "h": 10,
+            "accent": true
+          },
+          {
+            "label": "avatar + name",
+            "x": 0,
+            "y": 1,
+            "w": 4,
+            "h": 3
+          },
+          {
+            "label": "View profile",
+            "x": 0,
+            "y": 8,
+            "w": 4,
+            "h": 1,
+            "accent": true
+          },
+          {
+            "label": "email / phone",
+            "x": 5,
+            "y": 1,
+            "w": 7,
+            "h": 2
+          },
+          {
+            "label": "org + manager",
+            "x": 5,
+            "y": 4,
+            "w": 7,
+            "h": 4
+          },
+          {
+            "label": "close X",
+            "x": 10,
+            "y": 0,
+            "w": 2,
+            "h": 1
+          }
+        ]
+      },
+      "comp": ".impeccable/mocks/decision/profile-side-dossier.webp"
+    },
+    {
+      "id": "identity-band",
+      "label": "Identity band",
+      "thesis": "A navy identity band owns the top; the person overhangs it; facts read as one list below.",
+      "palette": [
+        "#17324e",
+        "#ffffff",
+        "#172234",
+        "#5e6c7b"
+      ],
+      "materials": [
+        "navy band",
+        "overlapping avatar",
+        "single field list"
+      ],
+      "viewport": "Full-width navy header with avatar overlapping the seam, name and role on the band, then a continuous definition list. X only — no Close brick.",
+      "risk": "Band height can feel promotional if the avatar is too large.",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "navy identity band",
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 3,
+            "accent": true
+          },
+          {
+            "label": "avatar overlap",
+            "x": 1,
+            "y": 1,
+            "w": 3,
+            "h": 3
+          },
+          {
+            "label": "name + role",
+            "x": 4,
+            "y": 1,
+            "w": 6,
+            "h": 2
+          },
+          {
+            "label": "field list",
+            "x": 1,
+            "y": 5,
+            "w": 10,
+            "h": 4
+          },
+          {
+            "label": "close X",
+            "x": 10,
+            "y": 0,
+            "w": 2,
+            "h": 1
+          }
+        ]
+      },
+      "comp": ".impeccable/mocks/decision/profile-identity-band.webp"
+    },
+    {
+      "id": "hierarchy-spine",
+      "label": "Hierarchy spine",
+      "thesis": "Read the person through the reporting line first, then grab contact.",
+      "palette": [
+        "#17324e",
+        "#e8eef2",
+        "#ffffff",
+        "#172234"
+      ],
+      "materials": [
+        "spine connector",
+        "manager chip",
+        "contact rows"
+      ],
+      "viewport": "Avatar and name, then a vertical spine to the line manager chip and reports count, then email and phone as secondary rows.",
+      "risk": "Weak when the person has no manager or reports.",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "person header",
+            "x": 1,
+            "y": 0,
+            "w": 10,
+            "h": 2
+          },
+          {
+            "label": "spine",
+            "x": 2,
+            "y": 2,
+            "w": 1,
+            "h": 3,
+            "accent": true
+          },
+          {
+            "label": "manager chip",
+            "x": 3,
+            "y": 3,
+            "w": 8,
+            "h": 1
+          },
+          {
+            "label": "reports",
+            "x": 3,
+            "y": 4,
+            "w": 8,
+            "h": 1
+          },
+          {
+            "label": "contact rows",
+            "x": 1,
+            "y": 6,
+            "w": 10,
+            "h": 3
+          },
+          {
+            "label": "close X",
+            "x": 10,
+            "y": 0,
+            "w": 2,
+            "h": 1
+          }
+        ]
+      },
+      "comp": ".impeccable/mocks/decision/profile-hierarchy-spine.webp"
+    }
+  ],
+  "reroll": {
+    "registers": [
+      "safer",
+      "bolder"
+    ]
+  },
+  "steer": true,
+  "canon": false,
+  "buildPath": {
+    "value": "code",
+    "toggle": true
+  }
+}

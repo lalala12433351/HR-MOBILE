@@ -104,6 +104,12 @@ import {
   isPaidLeaveType,
   validateLeaveApproval,
 } from '../../utils/leaveRules';
+import { leaveBelongsToEmployee } from '../../utils/mapLeaveRow';
+import { applyLeaveBalancesToEmployees } from '../../utils/applyLeaveBalances';
+import {
+  eachDateInclusive,
+  isWfhRegularization,
+} from '../../utils/wfhRegularization';
 
 interface KekaAttendanceModuleProps {
   state: AppState;
@@ -637,15 +643,13 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   const activeSubjectId = targetEmployeeId || targetEmployee?.id || state.currentPersona.id;
   const activeSubjectName = targetEmployee?.name || state.currentPersona.name;
 
-  const targetEmpLeaves = useMemo(() => {
-    return (state.leaves || []).filter(
-      (l) => l.employeeId === activeSubjectId || (l.employeeName && l.employeeName.toLowerCase() === activeSubjectName.toLowerCase())
-    );
-  }, [state.leaves, activeSubjectId, activeSubjectName]);
-
   const targetEmployeeObj = (state.employees || []).find(
-    (e) => e.id === activeSubjectId || (e.name && e.name.toLowerCase() === activeSubjectName.toLowerCase())
+    (e) => e.id === activeSubjectId || e.employeeId === activeSubjectId || (e.name && e.name.toLowerCase() === activeSubjectName.toLowerCase())
   ) || state.currentPersona;
+
+  const targetEmpLeaves = useMemo(() => {
+    return (state.leaves || []).filter((l) => leaveBelongsToEmployee(l, targetEmployeeObj));
+  }, [state.leaves, targetEmployeeObj]);
 
   const effectiveQuotas = useMemo(() => {
     return getEffectiveLeaveQuotas(targetEmployeeObj, state.customOptions?.leaveSettings, state.customOptions?.probationSettings);
@@ -690,12 +694,31 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     effectiveQuotas.balancesFromServer ? earnedQuota : Math.max(0, earnedQuota - earnedUsed)
   );
 
-  const wfhUsed = formatLeaveDays(targetEmpLeaves
-    .filter((l) => l.leaveType === 'Work From Home' && l.status !== 'Rejected' && l.status !== 'Cancelled')
-    .reduce((sum, l) => sum + (l.daysCount || 1), 0));
-  const wfhPending = formatLeaveDays(targetEmpLeaves
-    .filter((l) => l.leaveType === 'Work From Home' && l.status === 'Pending')
-    .reduce((sum, l) => sum + (l.daysCount || 1), 0));
+  const targetWfhRegs = useMemo(
+    () =>
+      (state.regularizations || []).filter(
+        (r) =>
+          isWfhRegularization(r) &&
+          (r.employeeId === activeSubjectId ||
+            r.employeeId === (targetEmployeeObj as any)?.id ||
+            r.employeeId === (targetEmployeeObj as any)?.employeeId ||
+            (r.employeeName &&
+              r.employeeName.toLowerCase() === String(activeSubjectName || '').toLowerCase()))
+      ),
+    [state.regularizations, activeSubjectId, targetEmployeeObj, activeSubjectName]
+  );
+  const wfhUsed = formatLeaveDays(
+    targetWfhRegs.filter((r) => r.status === 'Approved').length +
+      targetEmpLeaves
+        .filter((l) => l.leaveType === 'Work From Home' && l.status !== 'Rejected' && l.status !== 'Cancelled')
+        .reduce((sum, l) => sum + (l.daysCount || 1), 0)
+  );
+  const wfhPending = formatLeaveDays(
+    targetWfhRegs.filter((r) => r.status === 'Pending').length +
+      targetEmpLeaves
+        .filter((l) => l.leaveType === 'Work From Home' && l.status === 'Pending')
+        .reduce((sum, l) => sum + (l.daysCount || 1), 0)
+  );
   const wfhLeft = formatLeaveDays(
     effectiveQuotas.balancesFromServer ? wfhQuota : Math.max(0, wfhQuota - wfhUsed)
   );
@@ -744,9 +767,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   const modalIsProbation = modalTargetQuotas.inProbation;
 
   const modalEmpLeaves = useMemo(() => {
-    return (state.leaves || []).filter(
-      (l) => l.employeeId === modalTargetEmpId || (l.employeeName && modalTargetEmp?.name && l.employeeName.toLowerCase() === modalTargetEmp.name.toLowerCase())
-    );
+    return (state.leaves || []).filter((l) => leaveBelongsToEmployee(l, modalTargetEmp));
   }, [state.leaves, modalTargetEmpId, modalTargetEmp]);
 
   const modalCasualUsed = formatLeaveDays(modalEmpLeaves
@@ -830,6 +851,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     employee?: Employee;
   } | null>(null);
 
+  /** Re-hydrate per-employee leave ledgers so one approval cannot look shared. */
+  const refreshLeaveBalances = useCallback(async () => {
+    const balRes = await api.attendance.getLeaveBalances();
+    if (!balRes.success || !balRes.data) return;
+    onUpdateState((prev) => ({
+      ...prev,
+      employees: applyLeaveBalancesToEmployees(prev.employees || [], balRes.data),
+    }));
+  }, [onUpdateState]);
+
   const handleApproveLeave = async (id: string, approved: boolean) => {
     const targetLeave = state.leaves.find((l) => l.id === id);
     if (!targetLeave) return;
@@ -841,9 +872,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     }
 
     if (approved) {
-      const targetEmp = state.employees.find(
-        (e) => e.id === targetLeave.employeeId || (e.name && e.name.toLowerCase() === targetLeave.employeeName.toLowerCase())
-      );
+      const targetEmp = state.employees.find((e) => leaveBelongsToEmployee(targetLeave, e));
       const validation = validateLeaveApproval(targetLeave, targetEmp, state.customOptions?.probationSettings);
       if (!validation.canApproveAsPaid) {
         setProbationBlockModal({ leave: targetLeave, employee: targetEmp });
@@ -902,6 +931,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         ...prev.notifications,
       ],
     }));
+    if (approved) await refreshLeaveBalances();
   };
 
   const handleApproveAsUnpaid = async (id: string) => {
@@ -957,6 +987,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           ...prev.notifications,
         ],
       }));
+      await refreshLeaveBalances();
     } catch (err) {
       console.error('Failed to update leave', err);
       alert('Failed to update leave status');
@@ -1000,6 +1031,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           ...prev.auditLogs,
         ],
       }));
+      await refreshLeaveBalances();
     } catch (err) {
       console.error('Failed to approve leave', err);
       alert('Failed to approve leave');
@@ -1027,7 +1059,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         ...prev,
         leaves: prev.leaves.map((l) => {
           if (!pendingLeaves.some((item) => item.id === l.id)) return l;
-          const emp = prev.employees.find((e) => e.id === l.employeeId || (e.name && e.name.toLowerCase() === l.employeeName.toLowerCase()));
+          const emp = prev.employees.find((e) => leaveBelongsToEmployee(l, e));
           const inProbation = isEmployeeInProbation(emp, prev.customOptions?.probationSettings);
           const isPaid = isPaidLeaveType(l.leaveType, l.isPaid);
           if (inProbation && isPaid) {
@@ -1055,6 +1087,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           ...prev.auditLogs,
         ],
       }));
+      await refreshLeaveBalances();
     } catch (err) {
       console.error('Failed to approve all leaves', err);
       alert('Failed to approve all pending leaves');
@@ -1072,6 +1105,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         ...prev,
         leaves: prev.leaves.filter((l) => l.id !== id),
       }));
+      await refreshLeaveBalances();
     } catch (err) {
       console.error('Failed to cancel leave', err);
       alert('Failed to cancel leave');
@@ -1131,15 +1165,85 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
     setIsSaving(true);
     try {
       const targetEmpId = (targetEmp as any).id || (targetEmp as any).employeeId || state.currentPersona.id;
+      const leaveRemarks =
+        inProbation && isPaid
+          ? `[Probation LOP] ${leaveHandover ? `${finalReason} (Covered by: ${leaveHandover})` : finalReason}`
+          : leaveHandover
+            ? `${finalReason} (Covered by: ${leaveHandover})`
+            : finalReason;
+
+      // WFH is approved via Regularizations (not Leaves)
+      if (mappedLeaveType === 'wfh' || finalLeaveType === 'Work From Home') {
+        const dates = eachDateInclusive(finalStartDate, finalEndDate);
+        const createdRegs: AttendanceRegularization[] = [];
+        for (const date of dates) {
+          const created = await api.attendance.requestRegularization({
+            employeeId: targetEmpId,
+            date,
+            requestedCheckIn: to24HourTime(configuredShiftStart) || '09:00',
+            requestedCheckOut: to24HourTime(configuredShiftEnd) || '18:00',
+            reason: 'Work From Home',
+            remarks: leaveRemarks || 'Work from home request',
+          });
+          if (!created.success) {
+            alert(created.error?.message || 'Could not submit WFH request');
+            setIsSaving(false);
+            return;
+          }
+          createdRegs.push({
+            id: created.data?.id || `reg_${Date.now()}_${date}`,
+            employeeId: created.data?.employee_id || targetEmpId,
+            employeeName: (targetEmp as any).name || state.currentPersona.name,
+            avatar: (targetEmp as any).avatar || state.currentPersona.avatar,
+            department: (targetEmp as any).department || state.currentPersona.department,
+            date,
+            requestedCheckIn: configuredShiftStart,
+            requestedCheckOut: configuredShiftEnd,
+            reason: 'Work From Home',
+            remarks: leaveRemarks || 'Work from home request',
+            status: 'Pending',
+            appliedOn: toLocalISODate(),
+          });
+        }
+        onUpdateState((prev) => ({
+          ...prev,
+          regularizations: [...createdRegs, ...prev.regularizations],
+          notifications: [
+            {
+              id: `notif_${Date.now()}`,
+              title: 'WFH Request Submitted',
+              message: `${(targetEmp as any).name || state.currentPersona.name} requested work from home for ${dates.length} day(s). Awaiting manager approval in Regularizations.`,
+              timestamp: 'Just now',
+              category: 'Approvals' as const,
+              priority: 'high' as const,
+              read: false,
+              linkModule: 'attendance',
+              linkTab: 'regularizations',
+              actorName: (targetEmp as any).name || state.currentPersona.name,
+              actionLabel: 'Review Request',
+            },
+            ...prev.notifications,
+          ],
+        }));
+        setShowApplyLeaveModal(false);
+        setLeaveReason('');
+        setLeaveHandover('');
+        setLeaveAttachment('');
+        setLeaveType('Casual Leave');
+        setSubTab('regularizations');
+        setPingToast('WFH request sent to Regularizations for manager approval');
+        setTimeout(() => setPingToast(null), 4000);
+        setIsSaving(false);
+        return;
+      }
+
       const leaveRes = await api.attendance.requestLeave({
         employeeId: targetEmpId,
         leaveType: mappedLeaveType,
         startDate: finalStartDate,
         endDate: finalEndDate,
         daysCount: computedLeaveDays,
-        reason: inProbation && isPaid 
-          ? `[Probation LOP] ${leaveHandover ? `${finalReason} (Covered by: ${leaveHandover})` : finalReason}`
-          : leaveHandover ? `${finalReason} (Covered by: ${leaveHandover})` : finalReason,
+        reason: leaveRemarks,
       });
 
       if (!leaveRes.success) {
@@ -1622,32 +1726,62 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
         approvedBy: state.currentPersona.name,
       });
 
-      onUpdateState((prev) => ({
-        ...prev,
-        regularizations: prev.regularizations.map((r) =>
-          r.id === regId
-            ? { ...r, status: approved ? 'Approved' : 'Rejected', approvedBy: state.currentPersona.name }
-            : r
-        ),
-        ...(approved
-          ? {
-              attendance: prev.attendance.map((a) => {
-                if (
+      const wfh = isWfhRegularization(reg);
+      onUpdateState((prev) => {
+        const nextAttendance = approved
+          ? (() => {
+              const existing = prev.attendance.find(
+                (a) =>
                   (a.employeeId === reg.employeeId || a.employeeName === reg.employeeName) &&
                   a.date === reg.date
-                ) {
+              );
+              const status: AttendanceRecord['status'] = wfh ? 'Work From Home' : 'Present';
+              if (existing) {
+                return prev.attendance.map((a) => {
+                  if (a.id !== existing.id) return a;
                   const u = { ...a };
                   if (reg.requestedCheckIn) u.checkIn = reg.requestedCheckIn;
                   if (reg.requestedCheckOut) u.checkOut = reg.requestedCheckOut;
-                  u.status = 'Present';
+                  u.status = status;
+                  u.locationName = wfh ? 'Work From Home' : u.locationName;
+                  u.isWithinGeofence = wfh ? false : u.isWithinGeofence;
+                  u.device = wfh ? 'Work From Home' : u.device;
                   u.workingHours = calculateWorkedHours(u.checkIn, u.checkOut || undefined);
                   return u;
-                }
-                return a;
-              }),
-            }
-          : {}),
-      }));
+                });
+              }
+              const created: AttendanceRecord = {
+                id: `att_${reg.employeeId}_${reg.date}`,
+                employeeId: reg.employeeId,
+                employeeName: reg.employeeName,
+                avatar: reg.avatar,
+                date: reg.date,
+                checkIn: reg.requestedCheckIn || '—',
+                checkOut: reg.requestedCheckOut || '—',
+                status,
+                locationName: wfh ? 'Work From Home' : 'Office',
+                latitude: 0,
+                longitude: 0,
+                isWithinGeofence: !wfh,
+                ipAddress: '',
+                device: wfh ? 'Work From Home' : 'Manual Edit',
+                workingHours: calculateWorkedHours(reg.requestedCheckIn, reg.requestedCheckOut),
+                breakHours: 0,
+              };
+              return [created, ...prev.attendance];
+            })()
+          : prev.attendance;
+
+        return {
+          ...prev,
+          regularizations: prev.regularizations.map((r) =>
+            r.id === regId
+              ? { ...r, status: approved ? 'Approved' : 'Rejected', approvedBy: state.currentPersona.name }
+              : r
+          ),
+          attendance: nextAttendance,
+        };
+      });
     } catch (err: any) {
       console.error('Failed to update regularization status', err);
       alert(err?.message || 'Failed to update regularization status');
@@ -2178,12 +2312,115 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   const [regReason, setRegReason] = useState<AttendanceRegularization['reason']>('Client Visit');
   const [regRemarks, setRegRemarks] = useState('');
 
-  const openRegModal = () => {
-    setRegDate(toLocalISODate());
+  const openRegModal = (opts?: { reason?: AttendanceRegularization['reason']; remarks?: string; date?: string }) => {
+    setRegDate(opts?.date || toLocalISODate());
     setRegInTime(configuredShiftStart);
     setRegOutTime(configuredShiftEnd);
-    setRegRemarks('');
+    setRegReason(opts?.reason || 'Client Visit');
+    setRegRemarks(opts?.remarks || '');
     setShowRegModal(true);
+  };
+
+  const submitWfhRegularizationForDate = async (
+    date: string,
+    remarks: string,
+    employeeId = state.currentPersona.id
+  ): Promise<AttendanceRegularization | null> => {
+    const created = await api.attendance.requestRegularization({
+      employeeId,
+      date,
+      requestedCheckIn: to24HourTime(configuredShiftStart) || '09:00',
+      requestedCheckOut: to24HourTime(configuredShiftEnd) || '18:00',
+      reason: 'Work From Home',
+      remarks: remarks || 'Work from home request',
+    });
+    if (!created.success) {
+      throw new Error(created.error?.message || 'Could not submit WFH request');
+    }
+    return {
+      id: created.data?.id || `reg_${Date.now()}`,
+      employeeId: created.data?.employee_id || employeeId,
+      employeeName: state.currentPersona.name,
+      avatar: state.currentPersona.avatar,
+      department: state.currentPersona.department,
+      date: String(created.data?.date || date).slice(0, 10),
+      requestedCheckIn: configuredShiftStart,
+      requestedCheckOut: configuredShiftEnd,
+      reason: 'Work From Home',
+      remarks: remarks || 'Work from home request',
+      status: 'Pending',
+      appliedOn: toLocalISODate(),
+    };
+  };
+
+  const requestWfhApprovalInsteadOfPunch = async (remarks: string) => {
+    setShowPunchLocationModal(false);
+    setShowSelfieModal(false);
+    stopCameraStream();
+    setIsSaving(true);
+    try {
+      const today = toLocalISODate();
+      const existingPending = state.regularizations.find(
+        (r) =>
+          r.employeeId === state.currentPersona.id &&
+          r.date === today &&
+          r.status === 'Pending' &&
+          isWfhRegularization(r)
+      );
+      if (existingPending) {
+        setSubTab('regularizations');
+        setPingToast('You already have a pending WFH request for today');
+        setTimeout(() => setPingToast(null), 4000);
+        return;
+      }
+      const existingApproved = state.regularizations.find(
+        (r) =>
+          r.employeeId === state.currentPersona.id &&
+          r.date === today &&
+          r.status === 'Approved' &&
+          isWfhRegularization(r)
+      );
+      if (existingApproved) {
+        setPingToast('WFH already approved for today — punch from the office location is not required. Refresh attendance if punches are missing.');
+        setTimeout(() => setPingToast(null), 5000);
+        setSubTab('regularizations');
+        return;
+      }
+      const newReg = await submitWfhRegularizationForDate(
+        today,
+        remarks || 'Requested while outside office geofence / WFH selected'
+      );
+      if (!newReg) return;
+      onUpdateState((prev) => ({
+        ...prev,
+        regularizations: [newReg, ...prev.regularizations],
+        notifications: [
+          {
+            id: `notif_${Date.now()}`,
+            title: 'WFH Request Submitted',
+            message: `Work from home for ${today} is awaiting manager approval in Regularizations.`,
+            timestamp: 'Just now',
+            category: 'Approvals' as const,
+            priority: 'high' as const,
+            read: false,
+            linkModule: 'attendance',
+            linkTab: 'regularizations',
+            actorName: state.currentPersona.name,
+            actorAvatar: state.currentPersona.avatar,
+            actionLabel: 'Track Status',
+          },
+          ...prev.notifications,
+        ],
+      }));
+      setSelectedLocation(availableOffices[0] || '');
+      setSubTab('regularizations');
+      setPingToast('WFH request sent for manager approval');
+      setTimeout(() => setPingToast(null), 4000);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to submit WFH request');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Table Filters
@@ -3081,22 +3318,30 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   // From map: go straight to camera if in geofence; otherwise show out-of-geofence warning
   const handleProceedFromMap = () => {
-    if (selectedLocation !== 'wfh' && !isGeofenceOptional && !hasConfiguredOfficeCoords) {
+    if (selectedLocation === 'wfh') {
+      void requestWfhApprovalInsteadOfPunch('Work from home selected at punch time');
+      return;
+    }
+    if (!isGeofenceOptional && !hasConfiguredOfficeCoords) {
       setPingToast(
-        'Office location coordinates are not configured. Set latitude/longitude in Attendance Settings before punching at the office, or switch to WFH.'
+        'Office location coordinates are not configured. Set latitude/longitude in Attendance Settings before punching at the office, or request WFH approval.'
       );
       setTimeout(() => setPingToast(null), 5000);
       return;
     }
     const proceed = (asRemote: boolean) => {
+      if (asRemote) {
+        void requestWfhApprovalInsteadOfPunch('Requested while outside office geofence');
+        return;
+      }
       if (requireSelfieNow) {
-        handleOpenSelfieCamera(asRemote);
+        handleOpenSelfieCamera(false);
       } else {
-        void handleFinalConfirmPunch(asRemote, null);
+        void handleFinalConfirmPunch(false, null);
       }
     };
-    if (selectedLocation === 'wfh' || isInsideRadius || isGeofenceOptional) {
-      proceed(selectedLocation === 'wfh');
+    if (isInsideRadius || isGeofenceOptional) {
+      proceed(false);
     } else if (outOfRadiusAction === 'Allow') {
       proceed(true);
     } else {
@@ -3233,6 +3478,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   // Final punch submission (called after selfie capture or skip)
   const handleFinalConfirmPunch = async (asRemote: boolean = false, selfieDataUrl?: string | null) => {
+    // WFH / remote punches require manager approval via Regularizations
+    if (asRemote || selectedLocation === 'wfh') {
+      await requestWfhApprovalInsteadOfPunch(
+        asRemote && selectedLocation !== 'wfh'
+          ? 'Requested while outside office geofence'
+          : 'Work from home selected at punch time'
+      );
+      return;
+    }
+
     setShowPunchLocationModal(false);
     const timeStr = now.toLocaleTimeString('en-US', {
       hour: '2-digit',
@@ -3723,7 +3978,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             ]}
             trailing={
               !isStudentMode && state.currentPersona.role !== 'student' ? (
-                <button type="button" onClick={openRegModal} className="work-btn-secondary">
+                <button type="button" onClick={() => openRegModal()} className="work-btn-secondary">
                   Apply regularization
                 </button>
               ) : null
@@ -4477,13 +4732,29 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
             <div>
                 <h2 className="work-title">Regularizations</h2>
+                <p className="text-xs text-[var(--text-muted)] mt-1">
+                  Attendance corrections and work-from-home requests awaiting manager approval.
+                </p>
             </div>
-            <button
-              onClick={openRegModal}
-              className={ATT_BTN_PRIMARY}
-            >
-              <Plus className="h-4 w-4" /> Apply Regularization
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {!isInstitution && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    openRegModal({ reason: 'Work From Home', remarks: 'Work from home request' })
+                  }
+                  className={ATT_BTN_SECONDARY}
+                >
+                  Request WFH
+                </button>
+              )}
+              <button
+                onClick={() => openRegModal()}
+                className={ATT_BTN_PRIMARY}
+              >
+                <Plus className="h-4 w-4" /> Apply Regularization
+              </button>
+            </div>
           </div>
 
           {/* Mobile Regularizations Cards */}
@@ -4802,9 +5073,20 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 </div>
               </div>
 
-              {/* Card 4: Work From Home */}
+              {/* Card 4: Work From Home → Regularizations */}
               {!isInstitution && (
-                <div className="rounded-xl border border-[var(--border-color)]  bg-[var(--bg-surface)]  p-4 flex flex-col justify-between space-y-2 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubTab('regularizations');
+                    openRegModal({
+                      reason: 'Work From Home',
+                      remarks: 'Work from home request',
+                    });
+                  }}
+                  className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 flex flex-col justify-between space-y-2 shadow-2xs text-left hover:border-[var(--studio-navy)]/40 transition-colors cursor-pointer"
+                  title="Request WFH from Regularizations"
+                >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-[var(--text-secondary)] dark:text-slate-200">Work From Home</span>
                     {isTargetInProbation ? (
@@ -4816,13 +5098,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                         {wfhPending}d pending
                       </span>
                     ) : (
-                      <span className="text-[10px] text-[var(--text-muted)] dark:text-[#686873]">{wfhUsed}d used</span>
+                      <span className="text-[10px] text-[var(--text-muted)] dark:text-[#686873]">{wfhUsed}d used · via Regularizations</span>
                     )}
                   </div>
                   <div>
                     <p className="text-2xl font-bold text-[var(--text-primary)] dark:text-white tabular-nums">
                       {isTargetInProbation ? 0 : formatLeaveDays(wfhLeft)} <span className="text-xs font-normal text-[var(--text-muted)] dark:text-[#9e9ea7]">/ {isTargetInProbation ? 0 : formatLeaveDays(wfhQuota)} Days Left</span>
                     </p>
+                    <p className="mt-1 text-[10px] text-[var(--text-muted)]">Tap to request · manager approves in Regularizations</p>
                     <div className="mt-2 h-1.5 w-full bg-[var(--bg-surface-subtle)]  rounded-full overflow-hidden">
                       <div
                         className="h-full bg-[var(--studio-navy)] rounded-full"
@@ -4830,7 +5113,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       />
                     </div>
                   </div>
-                </div>
+                </button>
               )}
             </div>
 
@@ -5480,10 +5763,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     onChange={(e) => setRegReason(e.target.value as any)}
                     className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--text-primary)] font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
                   >
+                    <option value="Work From Home">Work From Home</option>
                     <option value="Client Visit">Client Visit / Offsite Meeting</option>
                     <option value="Network / GPS Error">GPS Accuracy / Technical Glitch</option>
-                    <option value="Forgot Punch">Forgot to Clock In / Out</option>
-                    <option value="Half Day Work">Half Day Authorized Work</option>
+                    <option value="Forgot Punch In">Forgot to Clock In / Out</option>
+                    <option value="On Duty">On Duty / Offsite</option>
+                    <option value="Biometric Scanner Glitch">Biometric Scanner Glitch</option>
                   </select>
                 </div>
 
@@ -5618,35 +5903,20 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 <div className="att-dialog-alert">
                   {isInstitution || isStudentMode || isStudentLogin
                     ? 'Campus attendance is blocked outside the campus boundary. You need to be on campus to punch.'
-                    : 'Office attendance is blocked outside the radius. Be at the workplace, or punch as work from home.'}
+                    : 'Office attendance is blocked outside the radius. Be at the workplace, or request WFH approval for your manager.'}
                 </div>
                 <div className="dash-clock-dialog-actions" style={{ justifyContent: 'stretch' }}>
                   <button type="button" className="work-btn-secondary flex-1" onClick={() => setPunchStep('map')}>
                     Back to map
                   </button>
-                  {outOfRadiusAction === 'Warn' && (
+                  {!isInstitution && !isStudentMode && !isStudentLogin && (
                     <button
                       type="button"
                       className="work-btn-primary flex-1"
-                      onClick={() => {
-                        if (requireSelfieNow) handleOpenSelfieCamera(true);
-                        else void handleFinalConfirmPunch(true, null);
-                      }}
+                      onClick={() => void requestWfhApprovalInsteadOfPunch('Requested while outside office geofence')}
+                      disabled={isSaving}
                     >
-                      Punch as remote
-                    </button>
-                  )}
-                  {!isInstitution && !isStudentMode && !isStudentLogin && outOfRadiusAction === 'Block' && (
-                    <button
-                      type="button"
-                      className="work-btn-primary flex-1"
-                      onClick={() => {
-                        setSelectedLocation('wfh');
-                        if (requireSelfieNow) handleOpenSelfieCamera(true);
-                        else void handleFinalConfirmPunch(true, null);
-                      }}
-                    >
-                      Switch to WFH
+                      Request WFH approval
                     </button>
                   )}
                 </div>
@@ -6278,11 +6548,6 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                     <option value="Earned Leave" className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
                       Earned / Privilege Leave ({modalEarnedLeft}/{Math.max(modalEarnedLeft, modalTargetQuotas.annualQuotas.earnedLeave)} Days Remaining)
                     </option>
-                    {!isInstitution && (
-                      <option value="Work From Home" className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
-                        Work From Home ({modalWfhLeft}/{Math.max(modalWfhLeft, modalTargetQuotas.annualQuotas.compOff)} Days Remaining)
-                      </option>
-                    )}
                     <option value="Unpaid Leave" className="bg-[var(--bg-surface)]  text-[var(--text-primary)] dark:text-white">
                       Unpaid Leave / Loss of Pay
                     </option>

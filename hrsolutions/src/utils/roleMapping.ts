@@ -1,3 +1,4 @@
+import type { AuthSessionRole } from '@/services/authService';
 import type { Role } from '@/types';
 
 /** Roles accepted by the backend employees / global_auth_mapping CHECK constraints. */
@@ -67,10 +68,22 @@ export function inferApiRoleFromDesignation(
 /** Map backend auth role back to the closest frontend Role. */
 export function fromApiAuthRole(role?: string | null): Role {
   const r = String(role || 'employee').trim().toLowerCase();
-  if (r === 'super_admin') return 'super_admin';
+  if (r === 'platform_admin') return 'platform_admin';
+  if (r === 'super_admin' || r === 'admin') return 'super_admin';
   if (r === 'hr_manager') return 'hr_manager';
   if (r === 'manager') return 'manager';
   if (r === 'faculty' || r === 'teacher') return 'faculty';
   if (r === 'student') return 'student';
+  return 'employee';
+}
+
+/** Narrow a backend/UI role to the session roles AuthService accepts. */
+export function toAuthSessionRole(role?: string | null): AuthSessionRole {
+  const mapped = fromApiAuthRole(role);
+  if (mapped === 'platform_admin') return 'platform_admin';
+  if (mapped === 'super_admin' || mapped === 'admin') return 'super_admin';
+  if (mapped === 'hr_manager') return 'hr_manager';
+  if (mapped === 'manager') return 'manager';
+  if (mapped === 'student') return 'student';
   return 'employee';
 }

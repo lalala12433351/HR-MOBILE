@@ -9,7 +9,6 @@ import { EmployeeSettingsView } from './EmployeeSettingsView';
 import { LicenseSettingsView } from './LicenseSettingsView';
 import { PayrollSettingsView } from './PayrollSettingsView';
 import { ReportsSettingsView } from './reports/ReportsSettingsView';
-import { HelpSupportWidget } from '@/components/support/HelpSupportWidget';
 
 type SettingsSection = 'attendance' | 'people' | 'payroll' | 'reports' | 'license';
 
@@ -85,8 +84,6 @@ export function SettingsWorkspace({ state, onUpdateState }: { state: AppState; o
           )}
         </section>
       </div>
-
-      <HelpSupportWidget />
     </div>
   );
 }

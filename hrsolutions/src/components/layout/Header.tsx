@@ -47,7 +47,15 @@ export const Header: React.FC<HeaderProps> = ({
   const { state, updateState, triggerToast, logout, deleteNotification, clearAllNotifications } = useApp();
   const [showPersonaMenu, setShowPersonaMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
-  const [notifFilter, setNotifFilter] = useState<'all' | 'unread' | 'approvals' | 'tasks' | 'attendance'>('all');
+  const [notifFilter, setNotifFilter] = useState<'all' | 'unread' | 'approvals' | 'tasks'>('all');
+  const [modKey, setModKey] = useState('Ctrl');
+
+  useEffect(() => {
+    const platform = navigator.platform || '';
+    const ua = navigator.userAgent || '';
+    const isApple = /Mac|iPhone|iPad|iPod/i.test(platform) || /Mac OS X/i.test(ua);
+    setModKey(isApple ? '⌘' : 'Ctrl');
+  }, []);
   const menuRef = useRef<HTMLDivElement>(null);
   const headerFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -103,7 +111,15 @@ export const Header: React.FC<HeaderProps> = ({
   const cleanNotifications = (notifications || []).filter((n) => {
     if (!n || !n.title) return false;
     const titleLower = n.title.toLowerCase();
-    if (titleLower.includes('action blocked') || titleLower.includes('demo workspace')) return false;
+    if (
+      titleLower.includes('action blocked') ||
+      titleLower.includes('demo workspace') ||
+      titleLower.includes('workspace ready') ||
+      titleLower.includes('backend notice') ||
+      titleLower.includes('profile was updated')
+    ) {
+      return false;
+    }
     return true;
   });
 
@@ -112,9 +128,10 @@ export const Header: React.FC<HeaderProps> = ({
   // Filtered notifications
   const filteredNotifications = cleanNotifications.filter((n) => {
     if (notifFilter === 'unread') return !n.read;
-    if (notifFilter === 'approvals') return n.category === 'Approvals' || n.category === 'HR';
+    if (notifFilter === 'approvals') {
+      return n.category === 'Approvals' || n.category === 'HR';
+    }
     if (notifFilter === 'tasks') return n.category === 'Tasks';
-    if (notifFilter === 'attendance') return n.category === 'Attendance';
     return true;
   });
 
@@ -175,46 +192,6 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const getCategoryBadge = (category: string) => {
-    switch (category) {
-      case 'Attendance':
-        return {
-          bg: 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/40',
-          iconName: 'schedule',
-        };
-      case 'Approvals':
-        return {
-          bg: 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/40',
-          iconName: 'verified_user',
-        };
-      case 'Tasks':
-        return {
-          bg: 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40',
-          iconName: 'assignment',
-        };
-      case 'HR':
-        return {
-          bg: 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-900/40',
-          iconName: 'badge',
-        };
-      case 'Finance':
-        return {
-          bg: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40',
-          iconName: 'payments',
-        };
-      case 'Meetings':
-        return {
-          bg: 'bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 border border-sky-100 dark:border-sky-900/40',
-          iconName: 'forum',
-        };
-      default:
-        return {
-          bg: 'bg-slate-100 dark:bg-[#202024] text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-[#282830]',
-          iconName: 'notifications',
-        };
-    }
-  };
-
   const roleDisplay =
     currentPersona?.role === 'super_admin'
       ? 'Admin'
@@ -271,22 +248,21 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Right Controls: Search anything, Notifications, Profile */}
       <div ref={menuRef} className="flex items-center flex-wrap sm:flex-nowrap gap-3 shrink-0">
         {/* Search Pill */}
-        <div
+        <button
+          type="button"
           onClick={onOpenCommandPalette}
-          className="relative hidden sm:flex items-center bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg px-3 py-1.5 w-56 md:w-64 transition-[border-color] duration-150 focus-within:border-[var(--primary-blue)] cursor-pointer hover:border-[var(--border-strong)]"
+          className="relative hidden sm:flex items-center h-9 bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-[7px] px-3 w-56 md:w-64 transition-[border-color] duration-150 cursor-pointer hover:border-[var(--border-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--primary-blue)] focus-visible:outline-offset-2"
+          aria-label="Search anything"
         >
-          <GoogleIcon name="search" size={16} className="text-slate-400 shrink-0 mr-2.5" />
-          <input
-            type="text"
-            placeholder="Search anything"
-            readOnly
-            className="w-full bg-transparent border-0 p-0 text-xs text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-0 focus:outline-none cursor-pointer"
-          />
-          <div className="flex items-center gap-0.5 text-[10px] font-mono font-medium text-slate-400 bg-slate-100 dark:bg-[#202024] px-1.5 py-0.5 rounded border border-slate-200 dark:border-[#282830]">
-            <span>⌘</span>
+          <GoogleIcon name="search" size={16} className="text-[var(--text-muted)] shrink-0 mr-2.5" />
+          <span className="flex-1 text-left text-[13px] text-[var(--text-muted)] truncate">
+            Search anything
+          </span>
+          <kbd className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] px-1.5 py-0.5 rounded-[5px] border border-[var(--border-color)]">
+            <span>{modKey}</span>
             <span>K</span>
-          </div>
-        </div>
+          </kbd>
+        </button>
 
         {/* Global Notifications Bell */}
         <div className="relative">
@@ -312,49 +288,52 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Notifications Dropdown */}
           {showNotifMenu && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 shadow-lg ring-1 ring-slate-900/5 dark:ring-black/50 z-50 space-y-3 animate-in fade-in zoom-in-95">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-[#282830]">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Notifications</h3>
-                  {unreadCount > 0 && (
-                    <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-[10px] font-bold text-blue-600 dark:text-blue-400">
-                      {unreadCount} new
+            <div
+              className="absolute right-0 mt-2 w-80 sm:w-96 rounded-[12px] border border-[var(--border-color)] bg-[var(--bg-surface)] z-50 overflow-hidden animate-in fade-in zoom-in-95"
+              style={{ boxShadow: '0 5px 15px rgba(26,46,62,.06)' }}
+            >
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border-color)]">
+                <h3 className="text-[15px] font-bold tracking-tight text-[var(--text-primary)]">
+                  Notifications
+                  {unreadCount > 0 ? (
+                    <span className="ml-2 text-[12px] font-semibold text-[var(--text-muted)]">
+                      {unreadCount} unread
                     </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
+                  ) : null}
+                </h3>
+                <div className="flex items-center gap-3 shrink-0">
                   {unreadCount > 0 && (
                     <button
+                      type="button"
                       onClick={handleMarkAllRead}
-                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 cursor-pointer inline-flex items-center gap-1"
+                      className="text-[12px] font-semibold text-[var(--primary-blue)] hover:text-[var(--primary-blue-hover,#285275)] cursor-pointer"
                     >
-                      <GoogleIcon name="done_all" size={14} />
-                      <span>Mark read</span>
+                      Mark read
                     </button>
                   )}
                   {cleanNotifications.length > 0 && (
                     <button
+                      type="button"
                       onClick={handleClearAll}
-                      className="text-xs font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer inline-flex items-center gap-1"
+                      className="text-[12px] font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
                       title="Clear all notifications"
                     >
-                      <GoogleIcon name="delete_sweep" size={14} />
-                      <span>Clear</span>
+                      Clear
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* Notification Filter Chips */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-                {(['all', 'unread', 'approvals', 'tasks', 'attendance'] as const).map((filter) => (
+              <div className="flex items-center gap-1.5 px-4 pt-3 overflow-x-auto custom-scrollbar">
+                {(['all', 'unread', 'tasks', 'approvals'] as const).map((filter) => (
                   <button
                     key={filter}
+                    type="button"
                     onClick={() => setNotifFilter(filter)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold capitalize whitespace-nowrap transition-all cursor-pointer ${
+                    className={`h-7 px-2.5 rounded-[7px] text-[12px] font-semibold capitalize whitespace-nowrap transition-colors cursor-pointer ${
                       notifFilter === filter
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'bg-slate-100 dark:bg-[#202024] text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-[#282830]'
+                        ? 'bg-[var(--primary-navy,#17324e)] text-white'
+                        : 'bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)]'
                     }`}
                   >
                     {filter}
@@ -362,66 +341,82 @@ export const Header: React.FC<HeaderProps> = ({
                 ))}
               </div>
 
-              {/* Notifications List */}
-              <div className="max-h-80 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+              <div className="max-h-80 overflow-y-auto mt-2 px-2 pb-2 custom-scrollbar">
                 {filteredNotifications.length === 0 ? (
-                  <div className="py-8 text-center text-slate-400 dark:text-slate-500 text-xs space-y-1">
-                    <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-[#242429] flex items-center justify-center mx-auto text-slate-400">
-                      <GoogleIcon name="notifications_off" size={18} />
-                    </div>
-                    <p className="font-medium mt-1">No notifications</p>
+                  <div className="py-10 text-center">
+                    <p className="text-[13px] font-medium text-[var(--text-secondary)]">No notifications</p>
                   </div>
                 ) : (
-                  filteredNotifications.map((n) => {
-                    const badge = getCategoryBadge(n.category);
-                    return (
+                  <div className="divide-y divide-[var(--border-color)]">
+                    {filteredNotifications.map((n) => (
                       <div
                         key={n.id}
                         onClick={() => handleNotificationNavigate(n)}
-                        className={`p-3 rounded-xl border transition-all cursor-pointer relative group ${
+                        className={`px-2.5 py-3 rounded-[8px] cursor-pointer relative group transition-colors ${
                           !n.read
-                            ? 'bg-blue-50/40 dark:bg-blue-950/20 border-blue-100/90 dark:border-blue-900/40 hover:bg-blue-50/70 dark:hover:bg-blue-950/30'
-                            : 'bg-slate-50/50 dark:bg-[#161619]/60 border-slate-100 dark:border-[#282830] hover:bg-slate-100/70 dark:hover:bg-[#202024]'
+                            ? 'bg-[var(--blue-selected,#f8fbfe)] hover:bg-[var(--blue-focus,#d8e8f2)]/40'
+                            : 'hover:bg-[var(--bg-surface-subtle)]'
                         }`}
                       >
                         <div className="flex items-start gap-2.5">
                           <span
-                            className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 shadow-2xs ${badge.bg}`}
-                          >
-                            <GoogleIcon name={badge.iconName} size={17} weight={500} />
-                          </span>
+                            className={`mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${
+                              !n.read ? 'bg-[var(--primary-blue,#2d628e)]' : 'bg-transparent'
+                            }`}
+                            aria-hidden
+                          />
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-1.5">
-                              <p className={`text-xs font-bold leading-snug truncate ${!n.read ? 'text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300'}`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <p
+                                className={`text-[13px] leading-snug truncate ${
+                                  !n.read
+                                    ? 'font-semibold text-[var(--text-primary)]'
+                                    : 'font-medium text-[var(--text-secondary)]'
+                                }`}
+                              >
                                 {n.title}
                               </p>
-                              <div className="flex items-center gap-1 shrink-0">
-                                {!n.read && (
-                                  <span className="h-2 w-2 rounded-full bg-blue-600 shrink-0" />
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleDeleteNotif(n.id, e)}
-                                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-[#2c2c34] text-slate-400 hover:text-slate-700 dark:hover:text-white transition-opacity"
-                                  title="Dismiss notification"
-                                >
-                                  <GoogleIcon name="close" size={13} />
-                                </button>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteNotif(n.id, e)}
+                                className="opacity-0 group-hover:opacity-100 h-7 w-7 flex items-center justify-center rounded-[7px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-subtle)] transition-opacity cursor-pointer shrink-0"
+                                title="Dismiss"
+                                aria-label="Dismiss notification"
+                              >
+                                <GoogleIcon name="close" size={14} />
+                              </button>
                             </div>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2 leading-relaxed font-normal">
-                              {n.message}
-                            </p>
-                            <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 mt-1">
-                              <GoogleIcon name="schedule" size={11} className="opacity-70" />
-                              <span>{n.timestamp}</span>
+                            {n.message ? (
+                              <p className="text-[12px] text-[var(--text-muted)] mt-0.5 line-clamp-2 leading-relaxed">
+                                {n.message}
+                              </p>
+                            ) : null}
+                            <div className="flex items-center justify-between gap-2 mt-1.5">
+                              <span className="text-[12px] text-[var(--text-muted)] tabular-nums">
+                                {n.timestamp}
+                              </span>
+                              {n.category ? (
+                                <span className="text-[12px] text-[var(--text-muted)] truncate">
+                                  {n.category}
+                                </span>
+                              ) : null}
                             </div>
                           </div>
                         </div>
                       </div>
-                    );
-                  })
+                    ))}
+                  </div>
                 )}
+              </div>
+
+              <div className="border-t border-[var(--border-color)] px-4 py-2.5">
+                <Link
+                  href="/notifications"
+                  onClick={() => setShowNotifMenu(false)}
+                  className="text-[12px] font-semibold text-[var(--primary-blue,#2d628e)] hover:text-[var(--primary-navy,#17324e)]"
+                >
+                  View all notifications
+                </Link>
               </div>
             </div>
           )}

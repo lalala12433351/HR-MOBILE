@@ -1,5 +1,14 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
+import {
+  getAuth,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  User,
+} from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Google Meet Scopes
@@ -19,12 +28,18 @@ let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 
 /**
- * Initialize Google Auth listener
+ * Initialize Google Auth listener and complete any pending redirect sign-in.
  */
 export const initGoogleAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  void completeGoogleRedirectSignIn().then((redirect) => {
+    if (redirect && onAuthSuccess) {
+      onAuthSuccess(redirect.user, redirect.accessToken);
+    }
+  });
+
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
       if (cachedAccessToken) {
@@ -40,19 +55,50 @@ export const initGoogleAuth = (
   });
 };
 
+function tokenFromResult(result: Awaited<ReturnType<typeof signInWithPopup>>) {
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  if (!credential?.accessToken) {
+    throw new Error('Failed to obtain Google access token');
+  }
+  cachedAccessToken = credential.accessToken;
+  return { user: result.user, accessToken: cachedAccessToken };
+}
+
 /**
- * Trigger Sign in with Google with Google Meet scopes
+ * Complete a pending redirect sign-in (Capacitor / native WebView).
+ * Call on app boot; returns null when there is no pending redirect.
+ */
+export const completeGoogleRedirectSignIn = async (): Promise<{
+  user: User;
+  accessToken: string;
+} | null> => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (!result) return null;
+    isSigningIn = true;
+    return tokenFromResult(result);
+  } catch (error) {
+    console.error('Google Redirect Sign In Error:', error);
+    return null;
+  } finally {
+    isSigningIn = false;
+  }
+};
+
+/**
+ * Trigger Sign in with Google with Google Meet scopes.
+ * Uses redirect on native (popups fail in Capacitor WebViews).
  */
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Failed to obtain Google access token');
+    if (Capacitor.isNativePlatform()) {
+      // Navigation leaves this page; result is read via getRedirectResult on return.
+      await signInWithRedirect(auth, provider);
+      return null;
     }
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+    const result = await signInWithPopup(auth, provider);
+    return tokenFromResult(result);
   } catch (error) {
     console.error('Google Sign In Error:', error);
     throw error;

@@ -22,6 +22,7 @@ import {
   normalizeDepartmentCode,
   suggestDepartmentCode,
 } from '@/utils/departmentCode';
+import { refreshEmployeeManagerLinks } from '@/utils/refreshEmployeeManagers';
 
 export type DepartmentSavePatch = {
   id: string;
@@ -44,6 +45,7 @@ interface DepartmentDetailViewProps {
   onSelectEmployee: (emp: Employee) => void;
   onSaved: (patch: DepartmentSavePatch) => void;
   onDeleted: (id: string, name: string) => void;
+  onUpdateState: (updater: (prev: AppState) => AppState) => void;
 }
 
 const cardClass =
@@ -68,6 +70,7 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
   onSelectEmployee,
   onSaved,
   onDeleted,
+  onUpdateState,
 }) => {
   const records = ((state.customOptions as any)?.departmentRecords || []) as DepartmentRecord[];
   const record = findDepartmentRecord(records, departmentName);
@@ -89,13 +92,15 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
   const [formDescription, setFormDescription] = useState(record?.description || '');
   const [formLeadIds, setFormLeadIds] = useState<string[]>(leadIdsOf(record));
 
+  const recordLeadKey = leadIdsOf(record).join(',');
+
   useEffect(() => {
     setFormName(record?.name || departmentName);
     setFormCode(record?.shortCode || suggestDepartmentCode(departmentName));
     setFormDescription(record?.description || '');
     setFormLeadIds(leadIdsOf(record));
     setIsEditing(false);
-  }, [record?.id, record?.name, record?.shortCode, record?.description, departmentName]);
+  }, [record?.id, record?.name, record?.shortCode, record?.description, recordLeadKey, departmentName]);
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -156,6 +161,9 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
         leadEmployeeIds: savedIds,
         leadNames: names.filter(Boolean),
       });
+      // Reporting lines are rewritten server-side when leads change — refresh "Reports to".
+      await refreshEmployeeManagerLinks(onUpdateState);
+      setFormLeadIds(savedIds);
       setIsEditing(false);
       showToast('Department updated');
     } catch (err: any) {

@@ -2,7 +2,6 @@ import React from 'react';
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { AppShell } from '@/components/layout/AppShell';
-import { NativeShellBootstrap } from '@/components/native/NativeShellBootstrap';
 
 export const metadata: Metadata = {
   title: 'Pixbe | Modern Workforce & Human Resource Management',
@@ -15,7 +14,6 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
-  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -42,9 +40,11 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased font-sans">
-        <NativeShellBootstrap />
         <AppShell>{children}</AppShell>
-      </body>
+      {/* impeccable-live-start */}
+<script src="http://localhost:8400/live.js?token=1e104352-1d35-4001-bd47-d81a37cae413"></script>
+{/* impeccable-live-end */}
+</body>
     </html>
   );
 }

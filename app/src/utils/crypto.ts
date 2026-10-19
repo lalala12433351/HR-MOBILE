@@ -69,7 +69,7 @@ export function signJwt(payload: Record<string, any>, expiresInSeconds: number =
 /**
  * Verify a signed JWT token
  */
-export function verifyJwt<T = any>(token: string): T | null {
+export function verifyJwt<T = any>(token: string, options?: { ignoreExpiration?: boolean }): T | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -85,7 +85,7 @@ export function verifyJwt<T = any>(token: string): T | null {
     }
 
     const payload = JSON.parse(Buffer.from(b64Payload, 'base64url').toString('utf8'));
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+    if (!options?.ignoreExpiration && payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
       return null; // Expired
     }
 

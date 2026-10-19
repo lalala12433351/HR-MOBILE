@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { AppProvider, useApp } from '@/context/AppContext';
 import { api } from '@/services/apiClient';
+import { AuthService } from '@/services/authService';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { MobileBottomBar } from './MobileBottomBar';
@@ -16,7 +17,11 @@ import { isMasterAdminHost } from '@/config/origins';
 import { ChatProvider } from '@/hooks/useChat';
 import { useWorkplaceLocationWatch } from '@/hooks/useWorkplaceLocationWatch';
 
+/** Max wait for persona to hydrate from session /me before forcing re-login. */
+const PERSONA_HYDRATE_MS = 4000;
+
 function AppShellContent({ children }: { children?: React.ReactNode }) {
+  useWorkplaceLocationWatch();
   const router = useRouter();
   const pathname = usePathname();
   const {
@@ -40,7 +45,8 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     themeMode,
     toggleThemeMode,
   } = useApp();
-  useWorkplaceLocationWatch();
+  const [personaTimedOut, setPersonaTimedOut] = useState(false);
+  const personaHydrateAttempted = useRef(false);
 
   const isAuthPage =
     pathname === '/login' ||
@@ -51,6 +57,8 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     pathname === '/forgot-password' ||
     pathname === '/reset-password' ||
     Boolean(pathname?.startsWith('/student-login'));
+  const isDevPreviewPage =
+    process.env.NODE_ENV === 'development' && Boolean(pathname?.startsWith('/dev/'));
   const hostname = typeof window !== 'undefined' ? window.location.hostname : null;
   const onMasterAdminHost = isMasterAdminHost(hostname);
   // Trust the path for shell bypass — host gating lives in proxy / page HostGate.
@@ -62,10 +70,17 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
   const isImpersonatePage = pathname === '/impersonate' || Boolean(pathname?.startsWith('/impersonate/'));
   const isSetupPage = pathname === '/setup';
   const isEmployeeOnboardingPage = pathname === '/employee-onboarding';
+  const bypassTenantGates =
+    isAuthPage ||
+    isMasterAdminPage ||
+    isImpersonatePage ||
+    isSetupPage ||
+    isEmployeeOnboardingPage ||
+    isDevPreviewPage;
 
-  // Strict route protection: authenticated only when a real credential exists
+  // Strict route protection: authenticated only when a real JWT exists (not a cookie marker)
   useEffect(() => {
-    if (!isLoaded || isAuthPage || isMasterAdminPage || isImpersonatePage) return;
+    if (!isLoaded || isAuthPage || isMasterAdminPage || isImpersonatePage || isDevPreviewPage) return;
 
     const hasToken = Boolean(api.getToken());
 
@@ -79,27 +94,70 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
       return;
     }
 
-    // Staff session with token but persona never hydrated after sync — don't spin forever
-    if (hasToken && state.isAuthenticated && !currentPersona && backendStatus !== 'syncing') {
-      const timer = window.setTimeout(() => {
-        if (!api.getToken()) return;
-        // Still no persona after grace period — session is unusable
-        logout();
-      }, 8000);
-      return () => window.clearTimeout(timer);
-    }
+    // Token exists — stay on the workspace. Persona hydrates from stored session / /me.
   }, [
     isLoaded,
     state.isAuthenticated,
     isAuthPage,
     isMasterAdminPage,
     isImpersonatePage,
+    isDevPreviewPage,
     router,
-    pathname,
-    currentPersona,
     logout,
-    backendStatus,
   ]);
+
+  // Rehydrate persona from AuthService when React state lost it (cold load strips persona).
+  useEffect(() => {
+    if (!isLoaded || bypassTenantGates || currentPersona) {
+      if (currentPersona) {
+        personaHydrateAttempted.current = false;
+        setPersonaTimedOut(false);
+      }
+      return;
+    }
+    if (!state.isAuthenticated || !api.getToken()) return;
+    if (personaHydrateAttempted.current) return;
+
+    personaHydrateAttempted.current = true;
+    const session = AuthService.getSession();
+    if (session) {
+      selectPersona({
+        id: session.sub,
+        name: session.name || session.email || 'User',
+        email: session.email || '',
+        role: session.role as any,
+        designation: session.role === 'super_admin' ? 'Founder & CEO' : 'Team Member',
+        department: session.role === 'student' ? 'Academic' : 'Management',
+        avatar: '',
+      });
+    }
+  }, [
+    isLoaded,
+    bypassTenantGates,
+    currentPersona,
+    state.isAuthenticated,
+    selectPersona,
+  ]);
+
+  // Bound wait: never leave the user on "Loading workspace…" forever.
+  useEffect(() => {
+    if (!isLoaded || bypassTenantGates || currentPersona) {
+      setPersonaTimedOut(false);
+      return;
+    }
+    if (!state.isAuthenticated) return;
+
+    const timer = window.setTimeout(() => {
+      setPersonaTimedOut(true);
+    }, PERSONA_HYDRATE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [isLoaded, bypassTenantGates, currentPersona, state.isAuthenticated]);
+
+  const handleSessionRecovery = () => {
+    logout();
+    router.replace('/login?reason=session');
+  };
 
   // Incomplete employee profile → force onboarding (durable gate beyond login routing)
   useEffect(() => {
@@ -134,10 +192,35 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
   ]);
 
   // Platform console / auth surfaces must render immediately — do not wait on tenant AppContext.
-  if (isAuthPage || isMasterAdminPage || isImpersonatePage || isSetupPage || isEmployeeOnboardingPage) {
+  if (bypassTenantGates) {
     return (
       <div className="h-screen w-full bg-[var(--bg-app)] text-[var(--text-primary)] font-sans overflow-y-auto custom-scrollbar">
         {children}
+      </div>
+    );
+  }
+
+  const handleSelectModule = (moduleId: string) => {
+    const path = moduleId === 'dashboard' ? '/dashboard' : `/${moduleId}`;
+    router.push(path);
+  };
+
+  // Session could not be restored — never spin forever
+  if (personaTimedOut && !currentPersona) {
+    return (
+      <div className="min-h-screen w-full bg-[var(--bg-app)] flex items-center justify-center text-[var(--text-primary)] font-sans px-6">
+        <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+          <p className="text-sm text-[var(--text-secondary)]">
+            Couldn&apos;t restore your session. Sign in again to open your workspace.
+          </p>
+          <button
+            type="button"
+            onClick={handleSessionRecovery}
+            className="px-4 py-2 text-sm font-medium rounded-md bg-[var(--studio-navy)] text-white hover:opacity-90"
+          >
+            Sign in again
+          </button>
+        </div>
       </div>
     );
   }
@@ -156,15 +239,13 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     );
   }
 
-  const handleSelectModule = (moduleId: string) => {
-    const path = moduleId === 'dashboard' ? '/dashboard' : `/${moduleId}`;
-    router.push(path);
-  };
-
   if (!currentPersona) {
     return (
       <div className="h-screen w-full bg-[var(--bg-app)] text-[var(--text-primary)] font-sans flex items-center justify-center">
-        <p className="text-sm text-[var(--text-secondary)]">Loading workspace…</p>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-7 h-7 border-2 border-[var(--studio-navy)] border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-[var(--text-secondary)]">Loading workspace…</p>
+        </div>
       </div>
     );
   }
@@ -217,7 +298,7 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
             {children}
           </main>
         ) : (
-          <main className={`pixbe-main ${isWorkPage ? 'work-main' : ''} ${pathname === '/projects' ? 'projects-surface' : ''} flex-1 w-full max-w-[1600px] mx-auto min-w-0 overflow-y-auto px-6 lg:px-8 pb-16 sm:pb-20 custom-scrollbar relative`}>
+          <main className={`pixbe-main ${isWorkPage ? 'work-main' : ''} ${pathname === '/projects' ? 'projects-surface' : ''} flex-1 w-full max-w-[1600px] mx-auto min-w-0 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-[88px] lg:pb-16 custom-scrollbar relative`}>
             {children}
           </main>
         )}
@@ -230,6 +311,7 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
       <CommandPalette
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
+        onOpen={() => setCommandPaletteOpen(true)}
         state={state}
         onSelectModule={handleSelectModule}
         onOpenAIAssistantWithQuery={(q) => {

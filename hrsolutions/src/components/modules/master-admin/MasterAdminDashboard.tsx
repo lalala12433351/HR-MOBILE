@@ -26,8 +26,6 @@ import {
   Download,
   Trash2,
   LifeBuoy,
-  Clock,
-  Check,
   Server,
   Cloud,
   HardDrive,
@@ -41,7 +39,8 @@ import { useApp } from '@/context/AppContext';
 import { ClientTenant, SchemaInspectorItem, MasterAuditLogItem, LicensePlan, LicenseEvent, LicenseStatus } from '@/types';
 import { api } from '@/services/apiClient';
 import { CustomSubscriptionPlan, LicenseManagerTab, mapApiPlan } from './LicenseManagerTab';
-import type { SupportMessage, SupportThread } from '@/services/supportTypes';
+import { SupportInbox } from './SupportInbox';
+import type { SupportThread } from '@/services/supportTypes';
 import { AuthService } from '@/services/authService';
 import { APP_ORIGIN, isAppHost, isLoopbackHost } from '@/config/origins';
 import { AdminPageSkeleton } from '@/components/skeletons';
@@ -103,17 +102,6 @@ function mapSchemaName(name: string, tenants: ClientTenant[]): SchemaInspectorIt
 
 export type { CustomSubscriptionPlan };
 
-export interface SupportPlan {
-  id: string;
-  key: string;
-  name: string;
-  price: number;
-  slaResponseTime: string;
-  channels: string[];
-  description: string;
-  isPopular?: boolean;
-}
-
 export interface SupportTicket {
   id: string;
   ticketNumber: string;
@@ -161,13 +149,6 @@ function impersonationAcceptUrl(token: string, backendAcceptUrl?: string): strin
   return `${APP_ORIGIN}${path}`;
 }
 
-function formatTicketTime(value?: string | null): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
 function mapSupportThread(row: SupportThread): SupportTicket {
   const created = row.createdAt ? new Date(row.createdAt) : null;
   return {
@@ -200,37 +181,6 @@ export interface PlatformBroadcast {
 
 const INITIAL_PLANS: CustomSubscriptionPlan[] = [];
 
-const INITIAL_SUPPORT_PLANS: SupportPlan[] = [
-  {
-    id: 'sup_standard',
-    key: 'standard',
-    name: 'Standard Support',
-    price: 0,
-    slaResponseTime: '24-48 Hours',
-    channels: ['Email Ticket System', 'Help Documentation'],
-    description: 'Included with all subscriptions. Basic ticketing and community docs.',
-  },
-  {
-    id: 'sup_priority',
-    key: 'priority',
-    name: 'Priority 24/7 Support',
-    price: 99,
-    slaResponseTime: '< 4 Hours',
-    channels: ['Direct Live Chat', 'Priority Email Queue', 'Emergency Phone Call'],
-    description: 'Fast response times and dedicated tech queue for mission-critical offices.',
-    isPopular: true,
-  },
-  {
-    id: 'sup_enterprise',
-    key: 'dedicated',
-    name: 'Dedicated TAM & White Glove',
-    price: 399,
-    slaResponseTime: '< 1 Hour (24/7/365)',
-    channels: ['Dedicated Slack / Teams Channel', 'Assigned Technical Account Manager', 'Custom Schema Migration & Onboarding'],
-    description: 'Dedicated engineer on call with guaranteed 1-hour SLA and live training.',
-  },
-];
-
 export const MasterAdminDashboard: React.FC = () => {
   const { state, updateState, triggerToast } = useApp();
 
@@ -257,10 +207,7 @@ export const MasterAdminDashboard: React.FC = () => {
 
   const [plans, setPlans] = useState<CustomSubscriptionPlan[]>(INITIAL_PLANS);
   const [plansLoadError, setPlansLoadError] = useState('');
-  const [supportPlans, setSupportPlans] = useState<SupportPlan[]>(INITIAL_SUPPORT_PLANS);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
-  const [ticketSearch, setTicketSearch] = useState('');
-  const [ticketFilter, setTicketFilter] = useState<string>('all');
 
   const fetchPlatformData = useCallback(async () => {
     setIsLoadingData(true);
@@ -397,12 +344,6 @@ export const MasterAdminDashboard: React.FC = () => {
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [selectedTenantForPlan, setSelectedTenantForPlan] = useState<ClientTenant | null>(null);
 
-  // Ticket Response Drawer State
-  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
-  const [ticketReplyText, setTicketReplyText] = useState('');
-  const [ticketMessages, setTicketMessages] = useState<SupportMessage[]>([]);
-  const [ticketBusy, setTicketBusy] = useState(false);
-
   const [licenseEvents, setLicenseEvents] = useState<LicenseEvent[]>([]);
   const [editExtendDays, setEditExtendDays] = useState(0);
   const [editRevoke, setEditRevoke] = useState(false);
@@ -413,7 +354,7 @@ export const MasterAdminDashboard: React.FC = () => {
   const [newTenantIndustry, setNewTenantIndustry] = useState('Office');
   const [newTenantPlan, setNewTenantPlan] = useState<string>('professional');
   const [newTenantSeats, setNewTenantSeats] = useState(100);
-  const [newTenantBillingCycle, setNewTenantBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [newTenantBillingCycle, setNewTenantBillingCycle] = useState<'monthly' | 'annual' | 'trial'>('monthly');
   const [newTenantAdminName, setNewTenantAdminName] = useState('');
   const [newTenantAdminEmail, setNewTenantAdminEmail] = useState('');
   const [newTenantPhone, setNewTenantPhone] = useState('');
@@ -476,6 +417,7 @@ export const MasterAdminDashboard: React.FC = () => {
         dbSchema: tenant.schema,
         name: user.name,
         persist: true,
+        refreshToken: (res.data as any).refreshToken || token,
       });
 
       setIsMasterAuthenticated(true);
@@ -513,24 +455,6 @@ export const MasterAdminDashboard: React.FC = () => {
       return matchesStatus && matchesSearch;
     });
   }, [allTenants, statusFilter, tenantSearch]);
-
-  const filteredTickets = useMemo(() => {
-    return tickets.filter((t) => {
-      const matchesFilter = ticketFilter === 'all' || t.status === ticketFilter || t.priority === ticketFilter;
-      const q = ticketSearch.toLowerCase().trim();
-      const matchesSearch =
-        !q ||
-        t.subject.toLowerCase().includes(q) ||
-        t.tenantName.toLowerCase().includes(q) ||
-        t.tenantSlug.toLowerCase().includes(q) ||
-        t.tenantSchema.toLowerCase().includes(q) ||
-        t.requesterName.toLowerCase().includes(q) ||
-        t.requesterEmail.toLowerCase().includes(q) ||
-        t.ticketNumber.toLowerCase().includes(q);
-
-      return matchesFilter && matchesSearch;
-    });
-  }, [tickets, ticketFilter, ticketSearch]);
 
   const stats = useMemo(() => {
     const totalTenantsCount = allTenants.length;
@@ -766,70 +690,6 @@ export const MasterAdminDashboard: React.FC = () => {
         message: err?.message || 'The server rejected the change.',
         type: 'system',
       });
-    }
-  };
-
-  const openSupportTicket = async (ticket: SupportTicket) => {
-    setSelectedTicket(ticket);
-    setTicketReplyText('');
-    setTicketMessages([]);
-    try {
-      const res = await api.controlPlane.getSupportTicket(ticket.id);
-      if (res.data) {
-        setSelectedTicket(mapSupportThread(res.data));
-        setTicketMessages(res.data.messages || []);
-      }
-    } catch (err: any) {
-      triggerToast({ title: 'Support', message: err?.message || 'Could not load ticket.', type: 'system' });
-    }
-  };
-
-  const applyTicketUpdate = (thread: SupportThread) => {
-    const mapped = mapSupportThread(thread);
-    setSelectedTicket(mapped);
-    setTicketMessages(thread.messages || []);
-    setTickets((prev) => prev.map((t) => (t.id === thread.id ? mapped : t)));
-    return mapped;
-  };
-
-  const handleReplyTicket = async (ticketId: string) => {
-    const reply = ticketReplyText.trim();
-    if (!reply) {
-      triggerToast({ title: 'Support', message: 'Write a reply before sending.', type: 'system' });
-      return;
-    }
-    setTicketBusy(true);
-    try {
-      const updated = await api.controlPlane.replySupportTicket(ticketId, reply);
-      if (updated.data) applyTicketUpdate(updated.data);
-      setTicketReplyText('');
-      triggerToast({
-        title: 'Reply sent',
-        message: 'The requester was emailed. This ticket stays in progress until you resolve or close it.',
-        type: 'system',
-      });
-    } catch (err: any) {
-      triggerToast({ title: 'Support', message: err?.message || 'Could not send the reply.', type: 'system' });
-    } finally {
-      setTicketBusy(false);
-    }
-  };
-
-  const handleUpdateTicketStatus = async (ticketId: string, status: SupportTicket['status']) => {
-    if (status === 'waiting_client') return;
-    setTicketBusy(true);
-    try {
-      const updated = await api.controlPlane.updateSupportTicket(ticketId, { status });
-      if (updated.data) applyTicketUpdate(updated.data);
-      triggerToast({
-        title: 'Ticket updated',
-        message: `Status is now ${status.replace('_', ' ')}.`,
-        type: 'system',
-      });
-    } catch (err: any) {
-      triggerToast({ title: 'Support', message: err?.message || 'Could not update the ticket.', type: 'system' });
-    } finally {
-      setTicketBusy(false);
     }
   };
 
@@ -1228,156 +1088,7 @@ export const MasterAdminDashboard: React.FC = () => {
         {/* ----------------------------------------------------------------- */}
         {/* TAB 3: DEDICATED SUPPORT HELPDESK PAGE */}
         {/* ----------------------------------------------------------------- */}
-        {activeTab === 'support' && (
-          <div className="space-y-4">
-            <div className="space-y-3">
-              <h3 className="font-bold text-[var(--text-primary)] text-sm">Support & SLA Packages</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-                {supportPlans.map((sp) => (
-                  <div
-                    key={sp.id}
-                    className={`bg-[var(--bg-surface)] rounded-lg p-4 space-y-3 flex flex-col justify-between border ${
-                      sp.isPopular ? 'border-blue-500' : 'border-[var(--border-color)]'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[var(--text-primary)] text-sm">{sp.name}</span>
-                        <span className="text-xs font-semibold text-[var(--text-primary)]">
-                          {sp.price === 0 ? 'Free' : `$${sp.price}/mo`}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 text-xs text-blue-600 font-medium mt-0.5">
-                        <Clock className="w-3 h-3" />
-                        <span>SLA: {sp.slaResponseTime}</span>
-                      </div>
-                      <p className="text-xs text-[var(--text-muted)] mt-2 leading-relaxed">{sp.description}</p>
-                      <div className="mt-3 space-y-1 text-xs text-[var(--text-secondary)]">
-                        {sp.channels.map((ch, i) => (
-                          <div key={i} className="flex items-center gap-1.5">
-                            <Check className="w-3 h-3 text-emerald-600" />
-                            <span>{ch}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="flex items-center gap-1 bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg p-0.5 text-xs">
-                {['all', 'open', 'in_progress', 'resolved', 'closed'].map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => setTicketFilter(f)}
-                    className={`px-2.5 py-1 rounded-md font-medium capitalize cursor-pointer transition-colors ${
-                      ticketFilter === f ? 'bg-[var(--bg-surface-subtle)] text-[var(--text-primary)] font-semibold' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    {f.replace('_', ' ')}
-                  </button>
-                ))}
-              </div>
-
-              <div className="relative w-full sm:w-64">
-                <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={ticketSearch}
-                  onChange={(e) => setTicketSearch(e.target.value)}
-                  placeholder="Search tickets, client, or tenant..."
-                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-lg outline-none focus:border-blue-600"
-                />
-              </div>
-            </div>
-
-            <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] overflow-hidden text-xs">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-semibold text-[11px] border-b border-[var(--border-color)]">
-                  <tr>
-                    <th className="p-3 pl-4">Ticket & Subject</th>
-                    <th className="p-3">Client name</th>
-                    <th className="p-3">Client tenant</th>
-                    <th className="p-3">Requester</th>
-                    <th className="p-3">Opened</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3 text-right pr-4">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border-color)] text-[var(--text-secondary)]">
-                  {filteredTickets.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-8 text-center text-[var(--text-muted)] text-xs">
-                        No support tickets found. Help & support tickets from client workspaces appear here.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredTickets.map((ticket) => (
-                      <tr key={ticket.id} className="hover:bg-[var(--bg-surface-subtle)]/60">
-                        <td className="p-3 pl-4">
-                          <div className="font-semibold text-[var(--text-primary)]">{ticket.subject}</div>
-                          <div className="text-[11px] text-[var(--text-muted)]">
-                            {ticket.ticketNumber} • {ticket.requesterName} ({ticket.requesterEmail})
-                          </div>
-                        </td>
-
-                        <td className="p-3">
-                          <div className="font-medium text-[var(--text-primary)]">{ticket.tenantName}</div>
-                        </td>
-
-                        <td className="p-3">
-                          <div className="font-mono text-[11px] font-semibold text-[var(--text-primary)]">
-                            {ticket.tenantSlug || '—'}
-                          </div>
-                          {ticket.tenantSchema ? (
-                            <div className="text-[10px] text-[var(--text-muted)]">{ticket.tenantSchema}</div>
-                          ) : null}
-                        </td>
-
-                        <td className="p-3 text-[var(--text-muted)]">
-                          <div className="text-[var(--text-secondary)]">{ticket.requesterName}</div>
-                          <div className="text-[11px]">{ticket.requesterEmail}</div>
-                        </td>
-
-                        <td className="p-3 font-mono text-[11px] text-blue-600 font-medium">{ticket.slaDue}</td>
-
-                        <td className="p-3">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                              ticket.status === 'open'
-                                ? 'bg-amber-50 text-amber-700'
-                                : ticket.status === 'in_progress'
-                                ? 'bg-blue-50 text-blue-700'
-                                : ticket.status === 'closed'
-                                ? 'bg-slate-100 text-slate-600'
-                                : 'bg-emerald-50 text-emerald-700'
-                            }`}
-                          >
-                            {ticket.status.replace('_', ' ')}
-                          </span>
-                        </td>
-
-                        <td className="p-3 text-right pr-4">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void openSupportTicket(ticket);
-                            }}
-                            className="px-2.5 py-1 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs cursor-pointer"
-                          >
-                            View & Reply
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+        {activeTab === 'support' && <SupportInbox />}
 
         {/* ----------------------------------------------------------------- */}
         {/* TAB 4: DATABASES */}
@@ -1773,156 +1484,6 @@ export const MasterAdminDashboard: React.FC = () => {
       </main>
 
       {/* ------------------------------------------------------------------- */}
-      {/* TICKET RESPONSE MODAL / DRAWER */}
-      {/* ------------------------------------------------------------------- */}
-      {selectedTicket && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 backdrop-blur-2xs cursor-pointer"
-          onClick={() => setSelectedTicket(null)}
-        >
-          <div
-            className="relative max-w-lg w-full bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] shadow-lg p-6 space-y-4 text-[var(--text-primary)] cursor-default max-h-[90vh] overflow-y-auto custom-scrollbar"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between pb-3 border-b border-[var(--border-color)]">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono font-semibold text-blue-600">{selectedTicket.ticketNumber}</span>
-                  <span
-                    className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                      selectedTicket.status === 'open'
-                        ? 'bg-amber-50 text-amber-700'
-                        : selectedTicket.status === 'in_progress'
-                        ? 'bg-blue-50 text-blue-700'
-                        : selectedTicket.status === 'closed'
-                        ? 'bg-slate-100 text-slate-600'
-                        : 'bg-emerald-50 text-emerald-700'
-                    }`}
-                  >
-                    {selectedTicket.status.replace('_', ' ')}
-                  </span>
-                </div>
-                <h3 className="font-bold text-[var(--text-primary)] text-base">{selectedTicket.subject}</h3>
-                <p className="text-xs text-[var(--text-muted)]">
-                  Client {selectedTicket.tenantName}
-                  {selectedTicket.tenantSlug ? ` · tenant ${selectedTicket.tenantSlug}` : ''}
-                  {selectedTicket.tenantSchema ? ` (${selectedTicket.tenantSchema})` : ''}
-                </p>
-                <p className="text-xs text-[var(--text-muted)]">
-                  {selectedTicket.requesterName} ({selectedTicket.requesterEmail})
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedTicket(null)}
-                className="w-7 h-7 rounded-full bg-[var(--bg-surface-subtle)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] flex items-center justify-center cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar">
-              {ticketMessages.length === 0 ? (
-                <div className="p-3.5 bg-[var(--bg-surface-subtle)] rounded-lg border border-[var(--border-color)]/70 text-xs space-y-1.5">
-                  <span className="font-semibold text-[var(--text-secondary)] block">Client message</span>
-                  <p className="text-[var(--text-secondary)] leading-relaxed">{selectedTicket.description}</p>
-                </div>
-              ) : (
-                ticketMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`p-3 rounded-lg border text-xs space-y-1 ${
-                      message.authorKind === 'support'
-                        ? 'bg-[#17324e] border-[#17324e] text-white'
-                        : 'bg-[var(--bg-surface-subtle)] border-[var(--border-color)]/70'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={`font-semibold ${message.authorKind === 'support' ? 'text-white' : 'text-[var(--text-secondary)]'}`}>
-                        {message.authorKind === 'support' ? message.authorName || 'Pixbe Support' : selectedTicket.requesterName}
-                      </span>
-                      <span className={`text-[10px] ${message.authorKind === 'support' ? 'text-white/70' : 'text-[var(--text-muted)]'}`}>
-                        {formatTicketTime(message.createdAt)}
-                      </span>
-                    </div>
-                    <p className={`leading-relaxed whitespace-pre-wrap ${message.authorKind === 'support' ? 'text-white' : 'text-[var(--text-secondary)]'}`}>
-                      {message.body}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {selectedTicket.status !== 'closed' ? (
-              <div className="space-y-2 text-xs">
-                <label className="block font-semibold text-[var(--text-secondary)]">Reply to requester</label>
-                <textarea
-                  rows={4}
-                  value={ticketReplyText}
-                  onChange={(e) => setTicketReplyText(e.target.value)}
-                  placeholder="Type a reply. The requester gets this by email and in Help & support."
-                  className="w-full rounded-lg border border-[var(--border-color)] p-3 text-xs outline-none focus:border-blue-600 font-medium"
-                />
-              </div>
-            ) : (
-              <p className="text-xs text-[var(--text-muted)]">This ticket is closed. Reopen it to send another reply.</p>
-            )}
-
-            <div className="flex flex-wrap gap-2 pt-2 border-t border-[var(--border-color)]">
-              <button
-                type="button"
-                onClick={() => setSelectedTicket(null)}
-                className="py-2 px-3 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-medium text-xs text-[var(--text-secondary)] cursor-pointer"
-              >
-                Close panel
-              </button>
-              {selectedTicket.status !== 'closed' && (
-                <button
-                  type="button"
-                  onClick={() => void handleReplyTicket(selectedTicket.id)}
-                  disabled={ticketBusy}
-                  className="flex-1 min-w-[9rem] py-2 rounded-lg bg-[#17324e] hover:bg-[#285275] text-white font-semibold text-xs cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{ticketBusy ? 'Sending…' : 'Send reply'}</span>
-                </button>
-              )}
-              {selectedTicket.status !== 'resolved' && selectedTicket.status !== 'closed' && (
-                <button
-                  type="button"
-                  onClick={() => void handleUpdateTicketStatus(selectedTicket.id, 'resolved')}
-                  disabled={ticketBusy}
-                  className="py-2 px-3 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-semibold text-xs text-[var(--text-primary)] cursor-pointer disabled:opacity-50"
-                >
-                  Mark resolved
-                </button>
-              )}
-              {(selectedTicket.status === 'resolved' || selectedTicket.status === 'closed') && (
-                <button
-                  type="button"
-                  onClick={() => void handleUpdateTicketStatus(selectedTicket.id, 'open')}
-                  disabled={ticketBusy}
-                  className="py-2 px-3 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-semibold text-xs text-[var(--text-primary)] cursor-pointer disabled:opacity-50"
-                >
-                  Reopen
-                </button>
-              )}
-              {selectedTicket.status !== 'closed' && (
-                <button
-                  type="button"
-                  onClick={() => void handleUpdateTicketStatus(selectedTicket.id, 'closed')}
-                  disabled={ticketBusy}
-                  className="py-2 px-3 rounded-lg border border-[var(--border-color)] hover:bg-[var(--bg-surface-subtle)] font-semibold text-xs text-[#8b3133] cursor-pointer disabled:opacity-50"
-                >
-                  Close ticket
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ------------------------------------------------------------------- */}
       {/* ADD WORKSPACE MODAL */}
       {/* ------------------------------------------------------------------- */}
       {showProvisionModal && (
@@ -2008,9 +1569,10 @@ export const MasterAdminDashboard: React.FC = () => {
                   <label className="block font-semibold text-[var(--text-secondary)] mb-1">Billing</label>
                   <select
                     value={newTenantBillingCycle}
-                    onChange={(e) => setNewTenantBillingCycle(e.target.value as 'monthly' | 'annual')}
+                    onChange={(e) => setNewTenantBillingCycle(e.target.value as 'monthly' | 'annual' | 'trial')}
                     className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 bg-[var(--bg-surface)] font-medium"
                   >
+                    <option value="trial">Trial</option>
                     <option value="monthly">Monthly</option>
                     <option value="annual">Annual</option>
                   </select>

@@ -15,6 +15,7 @@ import { DepartmentCodeBadge } from '../common/DepartmentTag';
 import { ManagerPicker } from '../common/ManagerPicker';
 import { DepartmentDetailView } from './DepartmentDetailView';
 import { applyDepartmentLocalUpdate, removeDepartmentLocal } from '@/utils/departmentRecords';
+import { refreshEmployeeManagerLinks } from '@/utils/refreshEmployeeManagers';
 import {
   isValidDepartmentCode,
   normalizeDepartmentCode,
@@ -765,27 +766,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
   };
 
   // Co-lead changes alter who manages whom server-side; pull the new manager links.
-  const refreshEmployeeManagers = async () => {
-    try {
-      const res = await api.identity.getEmployees();
-      if (!res.success || !Array.isArray(res.data)) return;
-      const byId = new Map<string, any>((res.data as any[]).map((row) => [String(row.id), row]));
-      onUpdateState((prev) => ({
-        ...prev,
-        employees: (prev.employees || []).map((emp) => {
-          const row = byId.get(emp.id);
-          if (!row) return emp;
-          return {
-            ...emp,
-            managerId: row.reporting_manager_id || emp.managerId,
-            managerIds: Array.isArray(row.co_manager_ids) ? row.co_manager_ids.map(String) : emp.managerIds,
-          };
-        }),
-      }));
-    } catch (err) {
-      console.error('Manager refresh failed', err);
-    }
-  };
+  const refreshEmployeeManagers = () => refreshEmployeeManagerLinks(onUpdateState);
 
   const handleSaveLeads = async (kind: 'department' | 'team', name: string, ids: string[]) => {
     const recordsKey = kind === 'department' ? 'departmentRecords' : 'teamRecords';
@@ -1222,6 +1203,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
         onBack={() => setSelectedDepartmentName(null)}
         backLabel="Back to Settings"
         onSelectEmployee={(emp) => router.push(`/hr?emp=${emp.id}`)}
+        onUpdateState={onUpdateState}
         onSaved={(patch) => {
           onUpdateState((prev) => applyDepartmentLocalUpdate(prev, patch));
           setSelectedDepartmentName(patch.name);

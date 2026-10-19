@@ -1,9 +1,11 @@
 import { UserPersona, Employee, LeaveRequest, TimesheetEntry, AttendanceRegularization, Project, Task } from '../types';
 
+type PersonaRoleLike = { role?: string } | null | undefined;
+
 /**
  * Checks if the persona is an Admin / Super Administrator (Full access to EVERYTHING in the organization).
  */
-export const isAdminPersona = (persona?: UserPersona | null): boolean => {
+export const isAdminPersona = (persona?: PersonaRoleLike): boolean => {
   if (!persona) return false;
   const role = persona.role;
   return role === 'super_admin' || role === 'admin';
@@ -12,7 +14,7 @@ export const isAdminPersona = (persona?: UserPersona | null): boolean => {
 /**
  * Checks if the persona is an HR Manager / People Ops (Access to EVERYONE across the organization for HR/staff operations).
  */
-export const isHRPersona = (persona?: UserPersona | null): boolean => {
+export const isHRPersona = (persona?: PersonaRoleLike): boolean => {
   if (!persona) return false;
   const role = persona.role;
   return role === 'hr_manager' || (role as string) === 'hr';
@@ -21,7 +23,7 @@ export const isHRPersona = (persona?: UserPersona | null): boolean => {
 /**
  * Checks if the persona has global organization-wide privileges (Admin or HR).
  */
-export const isExecutiveOrAdmin = (persona?: UserPersona | null): boolean => {
+export const isExecutiveOrAdmin = (persona?: PersonaRoleLike): boolean => {
   if (!persona) return false;
   return isAdminPersona(persona) || isHRPersona(persona);
 };

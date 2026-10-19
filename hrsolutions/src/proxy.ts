@@ -183,15 +183,9 @@ export function proxy(request: NextRequest) {
     }
   }
 
-  // Auth cookie gate for setup/dashboard (tenant app)
-  if (pathname.startsWith('/setup') || pathname.startsWith('/dashboard')) {
-    const token = request.cookies.get('BOS_AUTH_TOKEN')?.value;
-
-    if (!token && !pathname.startsWith('/register') && !pathname.startsWith('/login')) {
-      const loginBase = publicRedirectBase(sameHost || onAppHost ? publicOrigin : appOrigin, request);
-      return NextResponse.redirect(new URL('/login', loginBase));
-    }
-  }
+  // Do not cookie-gate /dashboard or /setup here. Access tokens live in localStorage
+  // (cookies are too small for Cognito JWTs and vanish on some browser restarts).
+  // AppShell restores the session client-side and sends unauthenticated users to /login.
 
   return NextResponse.next();
 }

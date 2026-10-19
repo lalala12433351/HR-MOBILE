@@ -98,10 +98,16 @@ export async function createAnnouncement(req: Request, res: Response): Promise<v
 export async function getNotifications(req: Request, res: Response): Promise<void> {
   try {
     const { employeeId } = req.query;
+    const recipientId =
+      (typeof employeeId === 'string' && employeeId.trim()) ||
+      (req.user as any)?.employeeId ||
+      (req.user as any)?.employee_id ||
+      null;
+
     let sql = `SELECT * FROM notifications WHERE 1=1`;
     const params: any[] = [];
-    if (employeeId) {
-      params.push(employeeId);
+    if (recipientId) {
+      params.push(String(recipientId));
       sql += ` AND recipient_employee_id::text = $${params.length}`;
     }
     sql += ` ORDER BY created_at DESC LIMIT 100`;

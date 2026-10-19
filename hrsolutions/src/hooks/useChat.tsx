@@ -6,6 +6,7 @@ import { useApp } from '@/context/AppContext';
 import { api, ApiClientError } from '@/services/apiClient';
 import { connectChatSocket, disconnectChatSocket, getChatSocket, refreshChatSocketAuth } from '@/services/chatSocket';
 import { showRealtimeToast } from '@/lib/sonnerToast';
+import { showAppNotification } from '@/lib/native';
 import type {
   ChatAttachment,
   ChatAttachmentInput,
@@ -379,18 +380,26 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       if (message.type === 'system' || known?.muted || (known && !known.isParticipant)) return;
 
       const title = known ? conversationTitle(known, meRef.current?.employeeId) : 'New message';
+      const toastTitle = known?.type === 'direct' ? title : `${message.senderName || 'Someone'} in ${title}`;
+      const preview = previewOf(message).slice(0, 140);
       showRealtimeToast(
         {
           id: `chat-${message.id}`,
           type: 'message',
-          title: known?.type === 'direct' ? title : `${message.senderName || 'Someone'} in ${title}`,
-          message: previewOf(message).slice(0, 140),
+          title: toastTitle,
+          message: preview,
           timestamp: message.createdAt || new Date().toISOString(),
           senderName: message.senderName || undefined,
           linkModule: 'chat',
         },
         () => router.push(`/chat?c=${encodeURIComponent(id)}`)
       );
+      void showAppNotification({
+        id: `chat:${message.id}`,
+        title: toastTitle,
+        body: preview,
+        linkUrl: `/chat?c=${encodeURIComponent(id)}`,
+      });
     };
 
     const onMessageChanged = (message: ChatMessage) => {

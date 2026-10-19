@@ -48,7 +48,16 @@ export const SchedulesCard: React.FC<{ className?: string }> = ({ className = ''
       const prev = byId.get(ts.id);
       byId.set(ts.id, prev ? { ...prev, ...ts } : ts);
     }
-    const all = Array.from(byId.values()).filter(isScheduleEntry);
+    const personaId = state.currentPersona?.id;
+    const personaName = state.currentPersona?.name?.toLowerCase();
+    // Dashboard schedules are always personal — even for admins.
+    const all = Array.from(byId.values()).filter((ts) => {
+      if (!isScheduleEntry(ts)) return false;
+      const isMine =
+        (!!personaId && ts.employeeId === personaId) ||
+        (!!personaName && ts.employeeName?.toLowerCase() === personaName);
+      return isMine;
+    });
     let filtered = all;
     if (filter === 'today') {
       filtered = all.filter((ts) => ts.date && ts.date.startsWith(todayStr));
@@ -68,7 +77,7 @@ export const SchedulesCard: React.FC<{ className?: string }> = ({ className = ''
         return String(a.startTime || '').localeCompare(String(b.startTime || ''));
       })
       .slice(0, 5);
-  }, [dashboardState.timesheets, state.timesheets, filter, todayStr]);
+  }, [dashboardState.timesheets, state.timesheets, state.currentPersona, filter, todayStr]);
 
   const currentDateFormatted = useMemo(() => {
     return new Date().toLocaleDateString('en-GB', {

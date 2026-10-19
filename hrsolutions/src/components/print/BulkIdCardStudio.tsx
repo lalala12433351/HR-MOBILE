@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { Employee, Organization } from '@/types';
 import { api } from '@/services/apiClient';
 import { compressAvatarImage } from '@/utils/imageUtils';
-import { printHtml } from './printWindow';
+import { newPrintId, printHtml } from './printWindow';
 import {
+  CardField,
   CardOrientation,
   CardPaper,
   CardPresetId,
@@ -25,17 +27,30 @@ import { buildEmployeeIdCardDraft } from './IdCardStudio';
 import {
   ACCENTS,
   AccentPicker,
+  AddRowButton,
   ImagePicker,
   PreviewFrame,
   PrintButton,
+  RowControls,
   SecondaryButton,
   Segmented,
   StudioSection,
   StudioShell,
   TextField,
+  inputClass,
   measureFit,
+  moveItem,
   useFitReport,
 } from './PrintStudioShell';
+
+/** Personal fields that can be edited per person without changing the shared batch defaults. */
+type PersonPatch = Partial<
+  Pick<IdCardDraft, 'photo' | 'name' | 'personId' | 'idCaption' | 'roleLine' | 'bloodGroup' | 'fields'>
+>;
+
+function newField(label: string, value = ''): CardField {
+  return { id: newPrintId('fld'), label, value };
+}
 
 interface BulkIdCardStudioProps {
   employees: Employee[];
@@ -89,27 +104,58 @@ export const BulkIdCardStudio: React.FC<BulkIdCardStudioProps> = ({
     };
   });
 
+  /** Per-person overrides keyed by employee.id — only personal fields, not shared org details. */
+  const [patches, setPatches] = useState<Record<string, PersonPatch>>({});
+
   const drafts = useMemo<IdCardDraft[]>(
     () =>
-      baseDrafts.map((draft) => ({
-        ...draft,
-        orgName: shared.orgName,
-        logo: shared.logo,
-        validThrough: shared.validThrough,
-        returnAddress: shared.returnAddress,
-        signature: shared.signature,
-        signatoryLabel: shared.signatoryLabel,
-      })),
-    [baseDrafts, shared]
+      roster.map((employee, index) => {
+        const base = baseDrafts[index];
+        const patch = patches[employee.id] || {};
+        return {
+          ...base,
+          ...patch,
+          orgName: shared.orgName,
+          logo: shared.logo,
+          validThrough: shared.validThrough,
+          returnAddress: shared.returnAddress,
+          signature: shared.signature,
+          signatoryLabel: shared.signatoryLabel,
+        };
+      }),
+    [roster, baseDrafts, patches, shared]
   );
 
   const previewDraft = drafts[0];
   const [previewIndex, setPreviewIndex] = useState(0);
-  const shownDraft = drafts[Math.min(previewIndex, Math.max(drafts.length - 1, 0))] || previewDraft;
+  const safeIndex = Math.min(previewIndex, Math.max(drafts.length - 1, 0));
+  const shownDraft = drafts[safeIndex] || previewDraft;
+  const selectedEmployee = roster[safeIndex] || null;
 
   useEffect(() => {
     if (previewIndex >= drafts.length) setPreviewIndex(0);
   }, [drafts.length, previewIndex]);
+
+  const patchPerson = <K extends keyof PersonPatch>(key: K, value: PersonPatch[K]) => {
+    if (!selectedEmployee) return;
+    setPatches((current) => ({
+      ...current,
+      [selectedEmployee.id]: { ...current[selectedEmployee.id], [key]: value },
+    }));
+  };
+
+  const updatePersonField = (id: string, patch: Partial<CardField>) => {
+    if (!shownDraft || !selectedEmployee) return;
+    patchPerson(
+      'fields',
+      shownDraft.fields.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    );
+  };
+
+  const pickPersonPhoto = async (file: File) => {
+    const dataUrl = await compressAvatarImage(file, 720, 720, 0.92);
+    if (dataUrl) patchPerson('photo', dataUrl);
+  };
 
   const [design, setDesign] = useState<IdCardDesign>({
     source: 'preset',
@@ -231,7 +277,7 @@ export const BulkIdCardStudio: React.FC<BulkIdCardStudioProps> = ({
     <>
       <StudioSection
         title="Who is printed"
-        description="Every person in this list gets a front and back on the same design. Open a profile to change one card."
+        description="Every person in this list gets a front and back on the same design. Select a name to edit that card."
       >
         <label className="mb-3 flex cursor-pointer items-center gap-2 text-[13px] font-[650] text-[#172234]">
           <input
@@ -248,28 +294,142 @@ export const BulkIdCardStudio: React.FC<BulkIdCardStudioProps> = ({
           </p>
         ) : (
           <ul className="max-h-56 overflow-y-auto rounded-[8px] border border-[#dce2e5]">
-            {roster.map((employee, index) => (
-              <li key={employee.id}>
-                <button
-                  type="button"
-                  onClick={() => setPreviewIndex(index)}
-                  className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors ${
-                    index === Math.min(previewIndex, roster.length - 1)
-                      ? 'bg-[#f8fbfe] text-[#172234]'
-                      : 'text-[#33435a] hover:bg-[#f6f5f1]'
-                  }`}
-                >
-                  <span className="min-w-0 flex-1 truncate font-[650]">{employee.name}</span>
-                  <span className="shrink-0 font-mono text-[11px] text-[#687789]">{employee.employeeId}</span>
-                </button>
-              </li>
-            ))}
+            {roster.map((employee, index) => {
+              const edited = Boolean(patches[employee.id]);
+              return (
+                <li key={employee.id}>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewIndex(index)}
+                    className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] transition-colors ${
+                      index === safeIndex
+                        ? 'bg-[#f8fbfe] text-[#172234]'
+                        : 'text-[#33435a] hover:bg-[#f6f5f1]'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1 truncate font-[650]">{employee.name}</span>
+                    {edited ? (
+                      <span className="shrink-0 rounded-[4px] bg-[#e7eef0] px-1.5 py-0.5 text-[10.5px] font-[650] text-[#33435a]">
+                        Edited
+                      </span>
+                    ) : null}
+                    <span className="shrink-0 font-mono text-[11px] text-[#687789]">{employee.employeeId}</span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
         <p className="mt-2 text-[12.5px] text-[#687789]">
-          {roster.length} {roster.length === 1 ? 'card' : 'cards'} will print. Click a name to preview it.
+          {roster.length} {roster.length === 1 ? 'card' : 'cards'} will print. Click a name to preview and edit it.
         </p>
       </StudioSection>
+
+      {shownDraft && selectedEmployee ? (
+        <StudioSection
+          title="This card"
+          description={`Personal details for ${shownDraft.name || selectedEmployee.name}. Shared org details below still apply.`}
+        >
+          <div className="space-y-4">
+            <ImagePicker
+              label="Photo"
+              description="Passport-style photo for this card only."
+              src={shownDraft.photo}
+              aspect="portrait"
+              onPick={pickPersonPhoto}
+              onClear={() => patchPerson('photo', '')}
+            />
+            <TextField label="Full name" value={shownDraft.name} onChange={(value) => patchPerson('name', value)} />
+            <TextField
+              label="Designation"
+              value={shownDraft.roleLine}
+              onChange={(value) => patchPerson('roleLine', value)}
+            />
+            <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-3">
+              <TextField
+                label="ID label"
+                value={shownDraft.idCaption}
+                onChange={(value) => patchPerson('idCaption', value)}
+              />
+              <TextField
+                label="ID number"
+                mono
+                value={shownDraft.personId}
+                onChange={(value) => patchPerson('personId', value)}
+              />
+            </div>
+            <TextField
+              label="Blood group"
+              value={shownDraft.bloodGroup}
+              placeholder="e.g. B+"
+              onChange={(value) => patchPerson('bloodGroup', value)}
+              hint={<span className="text-[#687789]">Leave empty to hide it from the card.</span>}
+            />
+          </div>
+
+          <div className="mt-5">
+            <div className="mb-2.5 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[13px] font-[650] text-[#172234]">Back of this card</p>
+                <p className="mt-0.5 text-[12.5px] leading-snug text-[#687789]">
+                  Empty values are skipped. Move important details up.
+                </p>
+              </div>
+              <AddRowButton onClick={() => patchPerson('fields', [...shownDraft.fields, newField('New detail')])}>
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                Add
+              </AddRowButton>
+            </div>
+            <div className="space-y-2.5">
+              {shownDraft.fields.map((item, index) => (
+                <div key={item.id} className="rounded-[8px] border border-[#e3e8eb] bg-[#fbfcfc] p-2">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      aria-label="Detail label"
+                      className={`${inputClass} w-[38%] shrink-0 text-[12.5px] font-[600] text-[#33435a]`}
+                      value={item.label}
+                      onChange={(event) => updatePersonField(item.id, { label: event.target.value })}
+                    />
+                    <input
+                      aria-label={`${item.label || 'Detail'} value`}
+                      className={inputClass}
+                      value={item.value}
+                      placeholder="Not printed when empty"
+                      onChange={(event) => updatePersonField(item.id, { value: event.target.value })}
+                    />
+                  </div>
+                  <div className="mt-1 flex items-center justify-end gap-2 pl-0.5">
+                    <RowControls
+                      label={item.label || 'detail'}
+                      onUp={
+                        index > 0
+                          ? () => patchPerson('fields', moveItem(shownDraft.fields, index, -1))
+                          : undefined
+                      }
+                      onDown={
+                        index < shownDraft.fields.length - 1
+                          ? () => patchPerson('fields', moveItem(shownDraft.fields, index, 1))
+                          : undefined
+                      }
+                      onRemove={() =>
+                        patchPerson(
+                          'fields',
+                          shownDraft.fields.filter((row) => row.id !== item.id)
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+              ))}
+              {shownDraft.fields.length === 0 ? (
+                <p className="rounded-[8px] border border-dashed border-[#cad5dc] px-3 py-4 text-center text-[12.5px] text-[#687789]">
+                  No details on the back yet. Add phone, department or an emergency contact.
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </StudioSection>
+      ) : null}
 
       <StudioSection title="Shared details" description="Applied to every card in this print.">
         <div className="space-y-4">
@@ -398,7 +558,7 @@ export const BulkIdCardStudio: React.FC<BulkIdCardStudioProps> = ({
         ) : (
           <p className="text-[#5e6c7b]">
             Previewing {shownDraft?.name || '—'}
-            {drafts.length > 1 ? ` · ${Math.min(previewIndex, drafts.length - 1) + 1} of ${drafts.length}` : ''}
+            {drafts.length > 1 ? ` · ${safeIndex + 1} of ${drafts.length}` : ''}
           </p>
         )
       }

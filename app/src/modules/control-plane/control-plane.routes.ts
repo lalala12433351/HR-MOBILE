@@ -25,14 +25,18 @@ import { validateRequest } from '../../middleware/validateRequest.js';
 import {
   listSupportTicketsQuerySchema,
   sendSupportMessageSchema,
+  supportAttachmentIdParamsSchema,
   supportThreadIdParamsSchema,
+  supportUploadSchema,
   updateSupportTicketSchema,
 } from '../support/support.schema.js';
 import {
+  getPlatformSupportAttachmentUrl,
   getPlatformSupportTicket,
   listPlatformSupportTickets,
   patchPlatformSupportTicket,
   postPlatformSupportReply,
+  postPlatformSupportUpload,
 } from '../support/support.controller.js';
 
 export const controlPlaneRoutes = Router();
@@ -83,4 +87,14 @@ controlPlaneRoutes.patch(
   '/support-tickets/:id',
   validateRequest({ params: supportThreadIdParamsSchema, body: updateSupportTicketSchema }),
   patchPlatformSupportTicket
+);
+controlPlaneRoutes.post(
+  '/support-tickets/:id/uploads',
+  validateRequest({ params: supportThreadIdParamsSchema, body: supportUploadSchema }),
+  postPlatformSupportUpload
+);
+controlPlaneRoutes.get(
+  '/support-attachments/:id/url',
+  validateRequest({ params: supportAttachmentIdParamsSchema }),
+  getPlatformSupportAttachmentUrl
 );

@@ -31,7 +31,7 @@ import type {
   TicketPriority,
   TicketStatus,
 } from './chatTypes';
-import type { SupportMessage, SupportStatus, SupportThread } from './supportTypes';
+import type { SupportAttachment, SupportAttachmentInput, SupportMessage, SupportPriority, SupportStatus, SupportThread } from './supportTypes';
 
 export class ApiClientError extends Error {
   code: string;
@@ -45,10 +45,41 @@ export class ApiClientError extends Error {
   }
 }
 
+const AUTH_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 30;
+const AUTH_JWT_COOKIE_LIMIT = 3500;
+const AUTH_REFRESH_SKEW_MS = 60_000;
+
+function isPresenceMarker(value: string): boolean {
+  return !value || value === '1' || value === 'true' || value === 'present';
+}
+
+function isLikelyJwt(value: string): boolean {
+  if (isPresenceMarker(value)) return false;
+  const parts = value.split('.');
+  return parts.length === 3 && parts[0].length > 8 && parts[1].length > 8;
+}
+
+function isUsableAuthToken(value: string): boolean {
+  return Boolean(value) && !isPresenceMarker(value);
+}
+
+function jwtExpiryMs(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
   private tenantId: string = '';
+  private refreshToken: string | null = null;
+  private authEmail: string = '';
+  private persistAuth = true;
+  private refreshInFlight: Promise<boolean> | null = null;
   /** Coalesce identical in-flight GETs so dashboard/HR/attendance hooks don't stampede the API. */
   private inflightGets = new Map<string, Promise<any>>();
 
@@ -95,8 +126,9 @@ class ApiClient {
 
   private writeCookie(name: string, value: string, persist: boolean) {
     if (typeof document === 'undefined') return;
-    const maxAge = persist ? '; max-age=86400' : '';
-    document.cookie = `${name}=${encodeURIComponent(value)}; path=/${maxAge}; SameSite=Lax`;
+    const maxAge = persist ? `; max-age=${AUTH_COOKIE_MAX_AGE_SEC}` : '';
+    const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${name}=${encodeURIComponent(value)}; path=/${maxAge}; SameSite=Lax${secure}`;
   }
 
   private expireCookie(name: string) {
@@ -133,11 +165,6 @@ class ApiClient {
         this.tenantId = (window as any).__BOS_TENANT_ID__;
         return this.tenantId;
       }
-      const cookieVal = this.readCookieValue('BOS_TENANT_ID');
-      if (cookieVal) {
-        this.tenantId = cookieVal;
-        return cookieVal;
-      }
       try {
         const stored = this.readStorageToken('BOS_TENANT_ID');
         if (stored) {
@@ -153,6 +180,11 @@ class ApiClient {
           }
         }
       } catch (_) {}
+      const cookieVal = this.readCookieValue('BOS_TENANT_ID');
+      if (cookieVal) {
+        this.tenantId = cookieVal;
+        return cookieVal;
+      }
       this.tenantId = '';
       return '';
     }
@@ -161,31 +193,33 @@ class ApiClient {
 
   public getToken(): string {
     if (typeof window !== 'undefined') {
-      if ((window as any).__BOS_AUTH_TOKEN__) {
+      if ((window as any).__BOS_AUTH_TOKEN__ && isUsableAuthToken((window as any).__BOS_AUTH_TOKEN__)) {
         this.token = (window as any).__BOS_AUTH_TOKEN__;
-        return this.token;
-      }
-      const cookieVal = this.readCookieValue('BOS_AUTH_TOKEN');
-      if (cookieVal) {
-        this.token = cookieVal;
-        return cookieVal;
+        return this.token!;
       }
       try {
         const storedToken = this.readStorageToken('BOS_AUTH_TOKEN');
-        if (storedToken) {
+        if (isUsableAuthToken(storedToken)) {
           this.token = storedToken;
+          this.rehydrateAuthCookies(storedToken);
           return storedToken;
         }
         const sessionRaw = this.readStorageToken('BOS_AUTH_SESSION');
         if (sessionRaw) {
           const session = JSON.parse(sessionRaw);
-          if (session.token) {
+          if (isUsableAuthToken(session.token)) {
             this.token = session.token;
             if (session.tenantId) this.tenantId = session.tenantId;
+            this.rehydrateAuthCookies(session.token, session.tenantId);
             return session.token;
           }
         }
       } catch (_) {}
+      const cookieVal = this.readCookieValue('BOS_AUTH_TOKEN');
+      if (isUsableAuthToken(cookieVal)) {
+        this.token = cookieVal;
+        return cookieVal;
+      }
       this.token = null;
       return '';
     }
@@ -193,17 +227,80 @@ class ApiClient {
     return this.token || '';
   }
 
+  public getRefreshToken(): string {
+    if (this.refreshToken) return this.refreshToken;
+    if (typeof window === 'undefined') return '';
+    const stored = this.readStorageToken('BOS_REFRESH_TOKEN');
+    if (stored) {
+      this.refreshToken = stored;
+      return stored;
+    }
+    return '';
+  }
+
+  private getAuthEmail(): string {
+    if (this.authEmail) return this.authEmail;
+    if (typeof window === 'undefined') return '';
+    const stored = this.readStorageToken('BOS_AUTH_EMAIL');
+    if (stored) {
+      this.authEmail = stored;
+      return stored;
+    }
+    try {
+      const token = this.getToken();
+      if (isLikelyJwt(token)) {
+        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        const email = String(payload.email || payload['cognito:username'] || '').trim().toLowerCase();
+        if (email) {
+          this.authEmail = email;
+          return email;
+        }
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  private rehydrateAuthCookies(token: string, tenantId?: string) {
+    if (this.readCookieValue('BOS_AUTH') || this.readCookieValue('BOS_AUTH_TOKEN')) return;
+    const persist = this.readStorageToken('BOS_AUTH_PERSIST') !== '0';
+    this.persistAuth = persist;
+    this.writeCookie('BOS_AUTH', '1', persist);
+    const encoded = encodeURIComponent(token);
+    if (encoded.length <= AUTH_JWT_COOKIE_LIMIT) {
+      this.writeCookie('BOS_AUTH_TOKEN', token, persist);
+    } else {
+      this.writeCookie('BOS_AUTH_TOKEN', '1', persist);
+    }
+    const tid = tenantId || this.getTenantId();
+    if (tid) this.writeCookie('BOS_TENANT_ID', tid, persist);
+  }
+
   /**
    * Persist auth credentials.
-   * persist=true (Remember Me): localStorage + 24h cookie
+   * persist=true (Remember Me): localStorage + 30-day cookies
    * persist=false: sessionStorage + session cookie (cleared when browser closes)
    */
-  public setAuth(token: string, tenantId?: string, options?: { persist?: boolean }) {
+  public setAuth(
+    token: string,
+    tenantId?: string,
+    options?: { persist?: boolean; refreshToken?: string | null; email?: string }
+  ) {
     const persist = options?.persist !== false;
+    this.persistAuth = persist;
     this.token = token;
     if (tenantId) this.tenantId = tenantId;
+    if (options?.email) this.authEmail = options.email.trim().toLowerCase();
+    if (options?.refreshToken) this.refreshToken = options.refreshToken;
+    if (options?.refreshToken === null) this.refreshToken = null;
 
-    this.writeCookie('BOS_AUTH_TOKEN', token, persist);
+    this.writeCookie('BOS_AUTH', '1', persist);
+    const encoded = encodeURIComponent(token);
+    if (encoded.length <= AUTH_JWT_COOKIE_LIMIT) {
+      this.writeCookie('BOS_AUTH_TOKEN', token, persist);
+    } else {
+      // Cookie would be dropped by the browser; keep a presence marker for the proxy.
+      this.writeCookie('BOS_AUTH_TOKEN', '1', persist);
+    }
     if (tenantId) {
       this.writeCookie('BOS_TENANT_ID', tenantId, persist);
     }
@@ -212,13 +309,21 @@ class ApiClient {
       (window as any).__BOS_AUTH_TOKEN__ = token;
       if (tenantId) (window as any).__BOS_TENANT_ID__ = tenantId;
       this.writeBrowserStorage('BOS_AUTH_TOKEN', token, persist);
+      this.writeBrowserStorage('BOS_AUTH_PERSIST', persist ? '1' : '0', persist);
       if (tenantId) this.writeBrowserStorage('BOS_TENANT_ID', tenantId, persist);
+      if (this.authEmail) this.writeBrowserStorage('BOS_AUTH_EMAIL', this.authEmail, persist);
+      if (this.refreshToken) {
+        this.writeBrowserStorage('BOS_REFRESH_TOKEN', this.refreshToken, persist);
+      }
     }
   }
 
   public clearAuth() {
     this.token = null;
     this.tenantId = '';
+    this.refreshToken = null;
+    this.authEmail = '';
+    this.expireCookie('BOS_AUTH');
     this.expireCookie('BOS_AUTH_TOKEN');
     this.expireCookie('BOS_TENANT_ID');
     this.expireCookie('BOS_AUTH_SESSION');
@@ -228,23 +333,101 @@ class ApiClient {
       delete (window as any).__BOS_TENANT_ID__;
       delete (window as any).__BOS_AUTH_SESSION__;
       this.removeBrowserStorage('BOS_AUTH_TOKEN');
+      this.removeBrowserStorage('BOS_AUTH_PERSIST');
       this.removeBrowserStorage('BOS_TENANT_ID');
       this.removeBrowserStorage('BOS_AUTH_SESSION');
+      this.removeBrowserStorage('BOS_REFRESH_TOKEN');
+      this.removeBrowserStorage('BOS_AUTH_EMAIL');
       this.removeBrowserStorage('BOS_STUDENT_AUTH');
     }
   }
 
-  private async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
+  /** Refresh the access token if it is missing or about to expire. */
+  public async ensureFreshToken(): Promise<string> {
+    const token = this.getToken();
+    if (!token) return '';
+    if (!isLikelyJwt(token)) return token;
+    const exp = jwtExpiryMs(token);
+    if (exp && exp > Date.now() + AUTH_REFRESH_SKEW_MS) {
+      return token;
+    }
+    if (!exp) return token;
+    const refreshed = await this.refreshSession();
+    return refreshed ? this.getToken() : token;
+  }
+
+  private async refreshSession(): Promise<boolean> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    this.refreshInFlight = this.performRefresh().finally(() => {
+      this.refreshInFlight = null;
+    });
+    return this.refreshInFlight;
+  }
+
+  private async performRefresh(): Promise<boolean> {
+    let refreshToken = this.getRefreshToken();
+    const current = this.getToken();
+    if (!refreshToken && current && isLikelyJwt(current)) {
+      // Student / platform app JWTs can be reissued from the current token.
+      refreshToken = current;
+    }
+    if (!refreshToken) return false;
+
+    try {
+      const response = await fetch(`${this.baseUrl}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          refreshToken,
+          username: this.getAuthEmail() || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      const nextToken = data?.data?.token;
+      if (!response.ok || !data?.success || !isLikelyJwt(nextToken)) {
+        return false;
+      }
+      this.setAuth(nextToken, this.getTenantId() || undefined, {
+        persist: this.persistAuth,
+        refreshToken: data.data.refreshToken || this.refreshToken || refreshToken,
+        email: this.getAuthEmail() || undefined,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private isPublicAuthEndpoint(endpoint: string): boolean {
+    return (
+      endpoint.startsWith('/auth/login') ||
+      endpoint.startsWith('/auth/refresh') ||
+      endpoint.startsWith('/auth/register') ||
+      endpoint.startsWith('/auth/student-login') ||
+      endpoint.startsWith('/auth/send-verification') ||
+      endpoint.startsWith('/auth/verify-email') ||
+      endpoint.startsWith('/auth/forgot-password') ||
+      endpoint.startsWith('/auth/reset-password') ||
+      endpoint.startsWith('/auth/invite') ||
+      endpoint.startsWith('/auth/accept-invite')
+    );
+  }
+
+  private async request<T = any>(endpoint: string, options: RequestInit = {}, didRetry = false): Promise<ApiResponse<T>> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       ...(options.headers as Record<string, string> || {}),
     };
 
+    if (!this.isPublicAuthEndpoint(endpoint)) {
+      await this.ensureFreshToken();
+    }
+
     const activeToken = this.getToken();
     const activeTenantId = this.getTenantId();
 
-    if (activeToken) {
+    if (activeToken && isUsableAuthToken(activeToken)) {
       headers['Authorization'] = `Bearer ${activeToken}`;
     }
     if (activeTenantId) {
@@ -280,8 +463,19 @@ class ApiClient {
       }
 
       if (!response.ok || !data.success) {
+        const code = data.error?.code || `HTTP_${response.status}`;
+        const authFailed =
+          response.status === 401 ||
+          code === 'INVALID_TOKEN' ||
+          code === 'UNAUTHORIZED';
+        if (authFailed && !didRetry && !this.isPublicAuthEndpoint(endpoint)) {
+          const refreshed = await this.refreshSession();
+          if (refreshed) {
+            return this.request<T>(endpoint, options, true);
+          }
+        }
         throw new ApiClientError(
-          data.error?.code || `HTTP_${response.status}`,
+          code,
           data.error?.message || `HTTP ${response.status}: Request failed`,
           data.error?.details
         );
@@ -311,9 +505,18 @@ class ApiClient {
     login: (payload: { email: string; password: string }) =>
       this.request<{
         token: string;
+        refreshToken?: string;
+        expiresIn?: number;
         tenant: { id: string; slug: string; name: string; schema: string };
         user: { id: string; name: string; email: string; role: string; department?: string; designation?: string; avatar?: string };
       }>('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
+
+    refresh: (payload: { refreshToken: string; username?: string }) =>
+      this.request<{
+        token: string;
+        refreshToken?: string;
+        expiresIn?: number;
+      }>('/auth/refresh', { method: 'POST', body: JSON.stringify(payload) }),
 
     studentLogin: (payload: { identifier?: string; email?: string; password: string; tenantSlug?: string }) =>
       this.request<{
@@ -347,7 +550,7 @@ class ApiClient {
       adminRoleTitle?: string;
       verificationToken: string;
       planId: string;
-      billingCycle?: 'monthly' | 'annual';
+      billingCycle?: 'monthly' | 'annual' | 'trial';
       address?: string;
       city?: string;
       stateProvince?: string;
@@ -422,7 +625,7 @@ class ApiClient {
       plan?: string;
       planId?: string;
       maxEmployees?: number;
-      billingCycle?: 'monthly' | 'annual';
+      billingCycle?: 'monthly' | 'annual' | 'trial';
       industry?: string;
       contactPhone?: string;
     }) => this.request('/control-plane/tenants', { method: 'POST', body: JSON.stringify(payload) }),
@@ -532,10 +735,13 @@ class ApiClient {
     getSupportTicket: (id: string) =>
       this.request<SupportThread>(`/control-plane/support-tickets/${encodeURIComponent(id)}`, { method: 'GET' }),
 
-    replySupportTicket: (id: string, body: string) =>
+    replySupportTicket: (
+      id: string,
+      payload: { body?: string; attachments?: SupportAttachmentInput[] }
+    ) =>
       this.request<SupportThread>(`/control-plane/support-tickets/${encodeURIComponent(id)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ body }),
+        body: JSON.stringify(payload),
       }),
 
     updateSupportTicket: (id: string, payload: { status: SupportStatus }) =>
@@ -543,6 +749,21 @@ class ApiClient {
         method: 'PATCH',
         body: JSON.stringify(payload),
       }),
+
+    createSupportUpload: (
+      ticketId: string,
+      payload: { fileName: string; contentType: string; fileSizeBytes?: number }
+    ) =>
+      this.request<{ uploadUrl: string; s3Key: string; expiresInSeconds: number }>(
+        `/control-plane/support-tickets/${encodeURIComponent(ticketId)}/uploads`,
+        { method: 'POST', body: JSON.stringify(payload) }
+      ),
+
+    getSupportAttachmentUrl: (id: string) =>
+      this.request<SupportAttachment & { downloadUrl: string }>(
+        `/control-plane/support-attachments/${encodeURIComponent(id)}/url`,
+        { method: 'GET' }
+      ),
   };
 
 
@@ -672,7 +893,7 @@ class ApiClient {
       employmentType?: string;
       dateOfJoining?: string | null;
       dateOfBirth?: string | null;
-      gender?: string;
+      gender?: string | null;
       bloodGroup?: string;
       maritalStatus?: string;
       nationality?: string;
@@ -683,10 +904,12 @@ class ApiClient {
       country?: string;
       personalTaxId?: string;
       socialInsurance?: string;
+      healthInsurance?: string;
       emergencyContact?: any;
       customFieldValues?: any;
       uploadedDocuments?: any;
       avatar?: string;
+      bio?: string | null;
     }) => this.request(`/identity/employees/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
 
     updateBankDetails: (employeeId: string, payload: {
@@ -1395,17 +1618,37 @@ class ApiClient {
   public support = {
     listThreads: () => this.request<SupportThread[]>('/support/threads', { method: 'GET' }),
 
-    createThread: (payload: { subject: string; body: string }) =>
-      this.request<SupportThread>('/support/threads', { method: 'POST', body: JSON.stringify(payload) }),
+    createThread: (payload: {
+      subject: string;
+      body?: string;
+      category?: string;
+      priority?: SupportPriority;
+      attachments?: SupportAttachmentInput[];
+    }) => this.request<SupportThread>('/support/threads', { method: 'POST', body: JSON.stringify(payload) }),
 
     listMessages: (id: string) =>
       this.request<SupportMessage[]>(`/support/threads/${encodeURIComponent(id)}/messages`, { method: 'GET' }),
 
-    sendMessage: (id: string, body: string) =>
+    sendMessage: (
+      id: string,
+      payload: { body?: string; attachments?: SupportAttachmentInput[] }
+    ) =>
       this.request<SupportThread>(`/support/threads/${encodeURIComponent(id)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ body }),
+        body: JSON.stringify(payload),
       }),
+
+    createUpload: (payload: { fileName: string; contentType: string; fileSizeBytes?: number }) =>
+      this.request<{ uploadUrl: string; s3Key: string; expiresInSeconds: number }>('/support/uploads', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    getAttachmentUrl: (id: string) =>
+      this.request<SupportAttachment & { downloadUrl: string }>(
+        `/support/attachments/${encodeURIComponent(id)}/url`,
+        { method: 'GET' }
+      ),
   };
 
   // =========================================================================

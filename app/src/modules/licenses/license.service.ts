@@ -93,8 +93,21 @@ export function mapPlanRow(row: any): LicensePlan {
   };
 }
 
-export function computePeriod(plan: LicensePlan, billingCycle: BillingCycle, start = new Date()) {
-  const trialEndsAt = plan.trialDays > 0 ? addDays(start, plan.trialDays) : null;
+export function resolveBillingIntent(raw?: string | null): { billingCycle: BillingCycle; startTrial: boolean } {
+  const value = String(raw || '').trim().toLowerCase();
+  if (value === 'trial') return { billingCycle: 'monthly', startTrial: true };
+  if (value === 'annual') return { billingCycle: 'annual', startTrial: false };
+  return { billingCycle: 'monthly', startTrial: false };
+}
+
+export function computePeriod(
+  plan: LicensePlan,
+  billingCycle: BillingCycle,
+  start = new Date(),
+  startTrial = false
+) {
+  const trialDays = startTrial ? (plan.trialDays > 0 ? plan.trialDays : 14) : 0;
+  const trialEndsAt = trialDays > 0 ? addDays(start, trialDays) : null;
   const periodEnd = trialEndsAt
     ? trialEndsAt
     : billingCycle === 'annual'
@@ -210,13 +223,16 @@ export async function issueLicense(
   input: {
     tenantId: string;
     plan: LicensePlan;
-    billingCycle?: BillingCycle;
+    billingCycle?: BillingCycle | 'trial';
+    startTrial?: boolean;
     maxSeats?: number;
     actorEmail?: string | null;
   }
 ) {
-  const billingCycle: BillingCycle = input.billingCycle === 'annual' ? 'annual' : 'monthly';
-  const { start, trialEndsAt, periodEnd, status } = computePeriod(input.plan, billingCycle);
+  const intent = resolveBillingIntent(input.billingCycle);
+  const billingCycle = intent.billingCycle;
+  const startTrial = input.startTrial === true || intent.startTrial;
+  const { start, trialEndsAt, periodEnd, status } = computePeriod(input.plan, billingCycle, new Date(), startTrial);
   const maxSeats = Math.max(1, Number(input.maxSeats ?? input.plan.maxSeats) || input.plan.maxSeats);
 
   const existing = await db.query(
@@ -280,7 +296,7 @@ export async function issueLicense(
     toStatus: status === 'trialing' ? 'trialing' : 'active',
     periodStart: start,
     periodEnd,
-    details: { billingCycle, maxSeats },
+    details: { billingCycle, maxSeats, startTrial },
   });
 
   return { subscriptionId, status, start, periodEnd, trialEndsAt, maxSeats, billingCycle };
@@ -379,7 +395,8 @@ export async function syncAndSummarizeLicense(
 
   const status = computeLicenseStatus(row);
   const seatsUsed = await countSeatsUsed(db, tenantId, row.schema_name);
-  const summary = {
+  const billingCycle: BillingCycle = row.billing_cycle === 'annual' ? 'annual' : 'monthly';
+  const summary: LicenseSummary = {
     subscriptionId: row.id,
     planId: row.plan_id,
     planKey: row.plan_key || row.tier || row.tenant_plan || 'professional',
@@ -387,7 +404,7 @@ export async function syncAndSummarizeLicense(
     status,
     maxSeats: Number(row.max_employees ?? row.plan_max_seats ?? 0) || 0,
     seatsUsed,
-    billingCycle: row.billing_cycle === 'annual' ? 'annual' : 'monthly',
+    billingCycle,
     periodStart: row.current_period_start ? new Date(row.current_period_start).toISOString() : null,
     periodEnd: row.current_period_end ? new Date(row.current_period_end).toISOString() : null,
     trialEndsAt: row.trial_ends_at ? new Date(row.trial_ends_at).toISOString() : null,

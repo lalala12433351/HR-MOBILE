@@ -6,6 +6,7 @@ import { Employee, Project, Task, AttendanceRecord, LeaveRequest, AttendanceRegu
 import { aggregatePunchesToDaily, mapStudentAttendanceToRecords } from '@/utils/attendancePunches';
 import { mapLeaveRow } from '@/utils/mapLeaveRow';
 import { applyLeaveBalancesToEmployees } from '@/utils/applyLeaveBalances';
+import { splitRegularizationReason } from '@/utils/wfhRegularization';
 
 export function useAttendanceData() {
   const [businessData, setBusinessData] = useState({
@@ -120,6 +121,7 @@ export function useAttendanceData() {
               else if (h > 12) h -= 12;
               return `${String(h).padStart(2, '0')}:${mins} ${period}`;
             };
+            const parsed = splitRegularizationReason(r.reason);
             return {
               id: r.id,
               employeeId: r.employee_id,
@@ -129,8 +131,8 @@ export function useAttendanceData() {
               date: String(r.date || '').slice(0, 10),
               requestedCheckIn: formatTime(r.requested_check_in),
               requestedCheckOut: formatTime(r.requested_check_out),
-              reason: r.reason || 'Forgot Punch In',
-              remarks: '',
+              reason: parsed.reason,
+              remarks: parsed.remarks,
               status: String(r.status || '').toLowerCase() === 'approved'
                 ? 'Approved'
                 : String(r.status || '').toLowerCase() === 'rejected'

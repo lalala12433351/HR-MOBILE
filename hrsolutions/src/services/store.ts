@@ -84,32 +84,52 @@ export interface AppState {
 
 export const initialProjectNotes: ProjectNote[] = [];
 
+/** Cookie/storage presence markers are not usable JWTs (see apiClient isPresenceMarker). */
+const isAuthPresenceMarker = (value: string | null | undefined): boolean => {
+  if (!value) return true;
+  const v = value.trim();
+  return v === '1' || v === 'true' || v === 'present';
+};
+
+const isUsableStoredToken = (value: string | null | undefined): boolean => {
+  if (!value || isAuthPresenceMarker(value)) return false;
+  try {
+    return Boolean(decodeURIComponent(value));
+  } catch {
+    return Boolean(value);
+  }
+};
+
 /** True only when a real auth credential exists — never trust PIXBE.isAuthenticated alone. */
 export const hasStoredAuthCredential = (): boolean => {
   if (typeof window === 'undefined') return false;
-  if ((window as any).__BOS_AUTH_TOKEN__) return true;
+  const mem = (window as any).__BOS_AUTH_TOKEN__;
+  if (typeof mem === 'string' && isUsableStoredToken(mem)) return true;
   try {
+    // Only BOS_AUTH_TOKEN can hold a JWT. BOS_AUTH is always a presence marker ("1").
     const cookieToken = document.cookie
       .split('; ')
       .find((row) => row.startsWith('BOS_AUTH_TOKEN='))
-      ?.split('=')[1];
-    if (cookieToken) return true;
+      ?.split('=')
+      .slice(1)
+      .join('=');
+    if (isUsableStoredToken(cookieToken)) return true;
   } catch (_) {}
   try {
-    if (sessionStorage.getItem('BOS_AUTH_TOKEN')) return true;
+    if (isUsableStoredToken(sessionStorage.getItem('BOS_AUTH_TOKEN'))) return true;
     const sessionRaw = sessionStorage.getItem('BOS_AUTH_SESSION');
     if (sessionRaw) {
       const session = JSON.parse(sessionRaw);
-      if (session?.token) return true;
+      if (isUsableStoredToken(session?.token)) return true;
     }
   } catch (_) {}
   if (!DISABLE_LOCAL_STORAGE) {
     try {
-      if (localStorage.getItem('BOS_AUTH_TOKEN')) return true;
+      if (isUsableStoredToken(localStorage.getItem('BOS_AUTH_TOKEN'))) return true;
       const sessionRaw = localStorage.getItem('BOS_AUTH_SESSION');
       if (sessionRaw) {
         const session = JSON.parse(sessionRaw);
-        if (session?.token) return true;
+        if (isUsableStoredToken(session?.token)) return true;
       }
     } catch (_) {}
   }

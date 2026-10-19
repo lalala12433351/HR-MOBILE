@@ -87,13 +87,28 @@ Code under `src/lib/native/` wraps Capacitor plugins and falls back to browser A
 
 | Helper | Purpose |
 |--------|---------|
-| `getCurrentPosition` | Attendance / office GPS |
-| `getSelfieStream` / `captureSelfiePhoto` | Punch selfie |
+| `getCurrentPosition` / `watchPosition` | Attendance / continuous office GPS |
+| `getSelfieStream` / `captureSelfiePhoto` | Punch selfie (live preview + native camera fallback) |
+| `pickAvatarPhoto` | Profile photo (native camera/gallery prompt; web uses file input) |
 | `openExternalUrl` | Google / meeting links |
 | `downloadBlob` | CSV / document exports (share sheet on device) |
-| `initNativeShell` | Status bar, splash, Android back button |
+| `initNativeShell` | Status bar, splash, Android back button, notification channel |
+| `showAppNotification` / `requestAppNotificationPermission` | OS tray alerts (Capacitor Local Notifications + Web Notification API) |
 
 `NativeShellBootstrap` is mounted from the root layout.
+
+### Workplace auto clock-out (mobile)
+
+While an employee is punched in (non-WFH / non-remote), `useWorkplaceLocationWatch`:
+
+1. Continuously tracks GPS (`watchPosition` + 60s backup polls)
+2. Compares against assigned office geofences
+3. If they stay **outside for 15 minutes**, calls `/attendance/location-check` to clock them out
+4. Fires an **app notification**: “You have been clocked out”
+
+Android: `ACCESS_BACKGROUND_LOCATION` + notification permission.  
+iOS: `NSLocationAlways…` usage strings + `UIBackgroundModes: location`.  
+Enable alerts under Notifications → App notifications.
 
 ## Google Workspace sign-in
 
@@ -117,8 +132,9 @@ On native, Firebase uses `signInWithRedirect` instead of `signInWithPopup` (popu
 2. `npx cap sync`  
 3. Replace launcher icons / splash under `android/` and `ios/`  
 4. Test attendance punch (GPS + camera permissions) on a real device  
-5. Test report download / share sheet  
-6. Test Google Drive/Meet connect flow  
+5. Test profile photo upload from header / employee card (native picker)  
+6. Test report download / share sheet  
+7. Test Google Drive/Meet connect flow (redirect auth on native)  
 
 ## GitHub Actions (APK & IPA)
 
@@ -165,8 +181,17 @@ Manual only (`workflow_dispatch`) — needs a macOS runner and Apple signing mat
 
 Bundle id: `in.pixbe.hrsolutions`. Enable *Upload IPA to TestFlight* in the workflow form when ASC secrets are set.
 
+## App notifications
+
+System tray alerts use **`@capacitor/local-notifications`** on Android/iOS and the browser **Notification** API on web.
+
+- Permission is requested from the Notifications page (“Allow notifications”) or Settings toggle.
+- New inbox items, toasts, and chat messages (when you are not in that conversation) fire OS notifications.
+- Historical inbox items are seeded as “seen” on first load so a sync does not spam the tray.
+- **Remote FCM/APNs push while the app is fully killed** is not wired yet — alerts fire while the app/web shell is running (foreground or background process).
+
 ## Out of scope (current product)
 
-- Push notifications (in-app list only)
+- Remote push via FCM / APNs (device token registry + server send)
 - Offline / local sync
 - Separate Master Admin native app

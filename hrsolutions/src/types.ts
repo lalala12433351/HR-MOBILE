@@ -144,6 +144,8 @@ export interface Employee {
   password?: string;
   phone: string;
   avatar: string;
+  /** Short public about text shown on company public profile */
+  bio?: string;
   department: DepartmentName;
   designation: string;
   gender?: 'Female' | 'Male' | 'Other' | 'None' | 'Non-Binary' | 'Prefer not to say' | string;

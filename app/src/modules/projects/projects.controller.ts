@@ -592,7 +592,32 @@ export async function createTask(req: Request, res: Response): Promise<void> {
 
     const rule = parseRecurrenceRule(recurrence);
     const frequency = String(rule?.frequency || '').toLowerCase();
-    const validBillable = billable === undefined ? true : Boolean(billable);
+    const requestedBillable = billable === undefined ? true : Boolean(billable);
+    let validBillable = requestedBillable;
+    if (requestedBillable) {
+      try {
+        const clients = await req.tenantQuery!(`SELECT id FROM billing_clients LIMIT 1`);
+        if (!clients.rows.length) {
+          if (billable === true) {
+            res.status(400).json({
+              success: false,
+              error: { code: 'NO_BILLABLE_CLIENTS', message: 'Add a billable client before creating billable tasks.' },
+            });
+            return;
+          }
+          validBillable = false;
+        }
+      } catch {
+        if (billable === true) {
+          res.status(400).json({
+            success: false,
+            error: { code: 'NO_BILLABLE_CLIENTS', message: 'Add a billable client before creating billable tasks.' },
+          });
+          return;
+        }
+        validBillable = false;
+      }
+    }
     const validBillingType = String(billingType || 'deliverable').toLowerCase() === 'hourly' ? 'hourly' : 'deliverable';
     const validPrice = Number(unitPrice) || 0;
     const validClientId = isUuid(String(clientId || '')) ? String(clientId) : null;
@@ -895,6 +920,7 @@ export async function updateTask(req: Request, res: Response): Promise<void> {
 
 export async function deleteTask(req: Request, res: Response): Promise<void> {
   try {
+    await ensureTaskExtraColumns(req);
     const { id } = req.params;
     let validTaskId = await resolveTaskId(req, id);
     if (!validTaskId && isUuid(id)) {
@@ -902,13 +928,26 @@ export async function deleteTask(req: Request, res: Response): Promise<void> {
     }
 
     const target = validTaskId
-      ? await req.tenantQuery!('SELECT id, assigned_to_employee_id FROM project_tasks WHERE id = $1', [validTaskId])
+      ? await req.tenantQuery!(
+          'SELECT id, assigned_to_employee_id, invoice_id FROM project_tasks WHERE id = $1',
+          [validTaskId]
+        )
       : await req.tenantQuery!(
-          'SELECT id, assigned_to_employee_id FROM project_tasks WHERE id::text = $1 OR title = $1 LIMIT 1',
+          'SELECT id, assigned_to_employee_id, invoice_id FROM project_tasks WHERE id::text = $1 OR title = $1 LIMIT 1',
           [id]
         );
     if (target.rows.length === 0) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Task not found' } });
+      return;
+    }
+    if (target.rows[0].invoice_id) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: 'ALREADY_BILLED',
+          message: 'This task is already on an invoice and cannot be deleted.',
+        },
+      });
       return;
     }
     if (!(await canManageTaskRow(req, String(target.rows[0].id), target.rows[0].assigned_to_employee_id))) {

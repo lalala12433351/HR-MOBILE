@@ -9,6 +9,7 @@
     "dev:backend": "npm run dev --prefix app",
     "frontend": "npm run dev:frontend",
     "backend": "npm run dev:backend",
+    "build": "npm run build:frontend && npm run build:backend",
     "build:frontend": "npm run build --prefix hrsolutions",
     "build:backend": "npm run build --prefix app",
     "db:migrate": "npm run migrate --prefix app",

@@ -1154,7 +1154,7 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
                                   <span>Select File</span>
                                   <input
                                     type="file"
-                                    className="hidden"
+                                    className="sr-only"
                                     accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
                                     onChange={(e) => handleSimulateFileUpload(field.id, field.label, e)}
                                   />

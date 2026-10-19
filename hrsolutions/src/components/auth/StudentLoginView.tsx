@@ -48,7 +48,11 @@ export const StudentLoginView: React.FC = () => {
       }
 
       const { token, tenant, user } = res.data;
-      api.setAuth(token, tenant.slug, { persist: rememberMe });
+      api.setAuth(token, tenant.slug, {
+        persist: rememberMe,
+        refreshToken: token,
+        email: user.email,
+      });
       AuthService.setSession({
         token,
         sub: user.sub || user.id,
@@ -58,6 +62,7 @@ export const StudentLoginView: React.FC = () => {
         dbSchema: tenant.schema,
         name: user.name,
         persist: rememberMe,
+        refreshToken: token,
       });
 
       const studentPersona: UserPersona = {

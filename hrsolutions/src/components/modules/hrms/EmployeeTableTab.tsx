@@ -330,12 +330,21 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
     const mgrDisplay = mgr
       ? mgr.name
       : emp.managerName || emp.lineManager?.name || '—';
+    const isOrgLead =
+      ((state.customOptions as any)?.departmentRecords || []).some(
+        (d: any) =>
+          (d.leadEmployeeId && String(d.leadEmployeeId) === String(emp.id)) ||
+          (Array.isArray(d.leadEmployeeIds) && d.leadEmployeeIds.some((id: string) => String(id) === String(emp.id)))
+      ) ||
+      ((state.customOptions as any)?.teamRecords || []).some(
+        (t: any) =>
+          (t.leadEmployeeId && String(t.leadEmployeeId) === String(emp.id)) ||
+          (Array.isArray(t.leadEmployeeIds) && t.leadEmployeeIds.some((id: string) => String(id) === String(emp.id)))
+      );
     const isTeamManager =
-      emp.role === 'manager' &&
-      ((state.employees || []).some((e) => e.id !== emp.id && e.managerId === emp.id) ||
-        ((state.customOptions as any)?.teamRecords || []).some(
-          (t: any) => t.leadEmployeeId && String(t.leadEmployeeId) === String(emp.id)
-        ));
+      isOrgLead ||
+      (emp.role === 'manager' &&
+        (state.employees || []).some((e) => e.id !== emp.id && e.managerId === emp.id));
 
     return (
       <tr key={emp.id}>
@@ -608,6 +617,8 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
               </div>
               {deptEmployees.map((emp) => {
                 const branchText = emp.officeName || emp.location || 'No office';
+                const roleLabel =
+                  emp.designation || (emp.role === 'super_admin' ? 'Founder & CEO' : 'Team Member');
                 return (
                   <div
                     key={emp.id}
@@ -621,17 +632,19 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
                   >
                     <div className="people-studio__mobile-top">
                       <div className="people-studio__who">
-                        <UserAvatar src={emp.avatar} name={emp.name} className="h-8 w-8 text-[11px]" />
-                        <div className="min-w-0">
+                        <UserAvatar src={emp.avatar} name={emp.name} className="h-9 w-9 shrink-0 text-[11px]" />
+                        <div className="people-studio__who-copy">
                           <p className="people-studio__who-name">{emp.name}</p>
-                          <p className="people-studio__who-mail">{emp.designation || (emp.role === 'super_admin' ? 'Founder & CEO' : 'Team Member')}</p>
+                          <p className="people-studio__who-mail">{roleLabel}</p>
                         </div>
                       </div>
                       {getStatusBadge(emp)}
                     </div>
                     <div className="people-studio__mobile-meta">
-                      <span>{branchText}</span>
-                      <span className="people-studio__id">{emp.employeeId}</span>
+                      <div className="people-studio__mobile-meta-row">
+                        <span className="people-studio__mobile-branch">{branchText}</span>
+                        {emp.employeeId ? <span className="people-studio__id">{emp.employeeId}</span> : null}
+                      </div>
                     </div>
                   </div>
                 );
@@ -641,6 +654,9 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
         ) : (
           filteredEmployees.map((emp) => {
             const branchText = emp.officeName || emp.location || 'No office';
+            const managerName = emp.managerName || emp.lineManager?.name;
+            const roleLabel =
+              emp.designation || (emp.role === 'super_admin' ? 'Founder & CEO' : 'Team Member');
             return (
               <div
                 key={emp.id}
@@ -654,8 +670,8 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
               >
                 <div className="people-studio__mobile-top">
                   <div className="people-studio__who">
-                    <UserAvatar src={emp.avatar} name={emp.name} className="h-8 w-8 text-[11px]" />
-                    <div className="min-w-0">
+                    <UserAvatar src={emp.avatar} name={emp.name} className="h-9 w-9 shrink-0 text-[11px]" />
+                    <div className="people-studio__who-copy">
                       <p className="people-studio__who-name">{emp.name}</p>
                       <p className="people-studio__who-mail">{emp.email}</p>
                     </div>
@@ -663,15 +679,13 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
                   {getStatusBadge(emp)}
                 </div>
                 <div className="people-studio__mobile-meta">
-                  <span className="inline-flex min-w-0 items-center gap-1">
-                    <span className="truncate">{emp.designation}</span>
-                    <DepartmentTag name={emp.department || ''} code={deptCodeOf(emp.department)} />
-                  </span>
-                  <span className="truncate">
-                    {emp.managerName || emp.lineManager?.name
-                      ? `Reports to ${emp.managerName || emp.lineManager?.name}`
-                      : branchText}
-                  </span>
+                  <div className="people-studio__mobile-meta-row">
+                    <span className="people-studio__mobile-role">{roleLabel}</span>
+                    <DepartmentCodeBadge code={deptCodeOf(emp.department)} />
+                  </div>
+                  <p className="people-studio__mobile-reports">
+                    {managerName ? `Reports to ${managerName}` : branchText}
+                  </p>
                 </div>
               </div>
             );

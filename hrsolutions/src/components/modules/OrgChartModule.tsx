@@ -638,6 +638,12 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
         <div
           onClick={() => {
             if (isGroup) return;
+            // Editors peek in-chart; everyone else goes through parent routing
+            // (full detail for self, public profile modal for coworkers).
+            if (!canEditOrgChart && onSelectEmployee && person) {
+              onSelectEmployee(person);
+              return;
+            }
             setSelectedNode(node);
           }}
           className={`w-52 rounded-2xl border bg-white p-4 pt-4 pb-5 flex flex-col items-center text-center shadow-xs transition-all duration-200 relative select-none ${

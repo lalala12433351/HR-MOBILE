@@ -81,6 +81,11 @@ export async function runPublicMigrations(): Promise<void> {
     const sql011 = fs.readFileSync(getMigrationPath('011_tenant_address.sql'), 'utf8');
     await client.query(sql011);
     log.success('Public Control Plane Migration 011 executed successfully.');
+
+    log.info('Running Public Control Plane Migration 012 (support chat)...');
+    const sql012 = fs.readFileSync(getMigrationPath('012_support_chat.sql'), 'utf8');
+    await client.query(sql012);
+    log.success('Public Control Plane Migration 012 executed successfully.');
   } finally {
     client.release();
   }

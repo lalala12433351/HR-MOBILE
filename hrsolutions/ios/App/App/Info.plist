@@ -67,9 +67,17 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>HR Solutions needs camera access to capture attendance selfies when you punch in or out.</string>
+	<string>HR Solutions needs camera access for attendance selfies and profile photos.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>HR Solutions needs your location to verify you are within the office geofence when punching attendance.</string>
+	<string>HR Solutions needs your location to verify you are within the office geofence when punching attendance and while your shift is open.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>HR Solutions uses continuous location while you are clocked in so it can clock you out and notify you if you leave the office for 15 minutes.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>HR Solutions uses continuous location while you are clocked in so it can clock you out and notify you if you leave the office for 15 minutes.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>HR Solutions needs photo library access so you can upload profile photos and documents.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
