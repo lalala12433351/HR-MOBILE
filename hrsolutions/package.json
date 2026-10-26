@@ -12,12 +12,15 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "build:frontend": "next build",
-    "cap:sync": "npx cap sync",
+    "cap:sync": "node scripts/capacitor-sync.mjs",
     "cap:android": "npx cap open android",
     "cap:ios": "npx cap open ios",
     "cap:add:android": "npx cap add android",
     "cap:add:ios": "npx cap add ios",
-    "cap:copy": "npx cap copy"
+    "cap:copy": "node scripts/capacitor-sync.mjs --copy",
+    "mobile:dev": "next dev --hostname 0.0.0.0 --port 3010",
+    "cap:sync:android": "node scripts/capacitor-sync.mjs android",
+    "cap:sync:ios": "node scripts/capacitor-sync.mjs ios"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

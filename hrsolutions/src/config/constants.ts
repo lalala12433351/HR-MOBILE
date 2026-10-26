@@ -16,7 +16,7 @@ export const API_CONFIG = {
   BASE_URL:
     (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_BACKEND_URL
       ? `${process.env.NEXT_PUBLIC_BACKEND_URL.replace(/\/+$/, '')}/api/v1`
-      : '') || 'http://localhost:8080/api/v1',
+      : '') || '/api/v1',
 } as const;
 
 export const DEFAULT_WORKING_HOURS = {

@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       server_url:
-        description: Capacitor server URL loaded in the WebView
+        description: URL of the new mobile UI deployed from this repository
         required: true
-        default: https://app.pixbe.in
       upload_testflight:
         description: Upload IPA to TestFlight after build
         required: true
@@ -47,7 +46,7 @@ jobs:
       - name: Sync Capacitor iOS
         run: npx cap sync ios
         env:
-          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || 'https://app.pixbe.in' }}
+          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || vars.MOBILE_UI_URL }}
 
       - name: Import signing certificate
         env:

@@ -12,9 +12,8 @@ on:
           - debug
           - release
       server_url:
-        description: Capacitor server URL loaded in the WebView
+        description: URL of the new mobile UI deployed from this repository
         required: true
-        default: https://app.pixbe.in
   push:
     branches: [main, master]
     paths:
@@ -75,7 +74,7 @@ jobs:
       - name: Sync Capacitor Android
         run: npx cap sync android
         env:
-          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || 'https://app.pixbe.in' }}
+          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || vars.MOBILE_UI_URL }}
 
       - name: Decode release keystore
         if: ${{ (github.event.inputs.build_type || 'debug') == 'release' }}
