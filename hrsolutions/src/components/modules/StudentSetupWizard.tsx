@@ -702,7 +702,7 @@ export const StudentSetupWizard: React.FC = () => {
   const activeSchedule = getActiveSchedule();
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-[var(--text-primary)] flex flex-col justify-start items-center px-4 py-8 sm:px-6 md:px-8 font-sans">
+    <div className="student-setup-page min-h-screen bg-[#f8fafc] text-[var(--text-primary)] flex flex-col justify-start items-center px-4 py-8 sm:px-6 md:px-8 font-sans">
       <div className="max-w-4xl w-full space-y-6">
         {/* Executive Header conforming strictly to DESIGN.md */}
         <div className="bg-[var(--bg-surface)] rounded-lg border border-[#e2e8f0] p-5 shadow-[0_1px_3px_0_rgba(15,23,42,0.05)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">

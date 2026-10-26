@@ -1,10 +1,11 @@
 
 'use client';
 
+import { DateInput } from '@/components/common/DateInput';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, UserPlus, Plus, Trash2, MapPin } from 'lucide-react';
-import { Employee, SalaryType, SalaryAllowanceItem } from '../../../types';
+import { Employee, JobRoleRecord, SalaryType, SalaryAllowanceItem } from '../../../types';
 import { AppState } from '../../../services/store';
 import { initialPayrollGroups } from '../../../data/initialData';
 import { normalizeRoleForLeaveQuotas } from '@/utils/leaveRules';
@@ -12,10 +13,26 @@ import { normalizeRoleForLeaveQuotas } from '@/utils/leaveRules';
 interface AddEmployeeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (newEmp: Partial<Employee>) => void;
+  onSubmit: (newEmp: Partial<Employee>) => void | Promise<void>;
   state: AppState;
   isInstitution: boolean;
+  isSaving?: boolean;
   onOpenAddOffice?: () => void;
+}
+
+function sameName(a?: string | null, b?: string | null) {
+  return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+}
+
+function rolesForDepartment(records: JobRoleRecord[], department: string): JobRoleRecord[] {
+  const seen = new Set<string>();
+  return records.filter((role) => {
+    if (!role.title?.trim() || !role.departmentName || !sameName(role.departmentName, department)) return false;
+    const key = role.title.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 const MAJOR_BANKS = [
@@ -51,6 +68,7 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
   onSubmit,
   state,
   isInstitution,
+  isSaving = false,
   onOpenAddOffice,
 }) => {
   const router = useRouter();
@@ -60,6 +78,8 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
   const [newEmpEmail, setNewEmpEmail] = useState('');
   const [newEmpPhone, setNewEmpPhone] = useState('');
   const [phoneError, setPhoneError] = useState('');
+  const [formError, setFormError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [newEmpRole, setNewEmpRole] = useState('');
   const [newEmpDept, setNewEmpDept] = useState('');
   const [newEmpOffice, setNewEmpOffice] = useState('');
@@ -155,6 +175,11 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
     return Array.from(set);
   }, [state.customOptions?.departments, state.employees]);
 
+  const jobRoleRecords = React.useMemo(
+    () => state.customOptions?.jobRoleRecords || [],
+    [state.customOptions?.jobRoleRecords]
+  );
+
   // Available designations from custom options or existing employees
   const availableDesignations = React.useMemo(() => {
     const set = new Set<string>();
@@ -168,6 +193,16 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
     });
     return Array.from(set);
   }, [state.customOptions?.designations, state.employees]);
+
+  const rolesInSelectedDepartment = React.useMemo(
+    () => (newEmpDept ? rolesForDepartment(jobRoleRecords, newEmpDept) : []),
+    [jobRoleRecords, newEmpDept]
+  );
+
+  const presetRoles = React.useMemo(() => {
+    if (jobRoleRecords.length > 0 && newEmpDept && !isCustomDept) return rolesInSelectedDepartment;
+    return availableDesignations.map((title) => ({ id: '', title }));
+  }, [jobRoleRecords.length, newEmpDept, isCustomDept, rolesInSelectedDepartment, availableDesignations]);
 
   // Available offices (filtered so physical street addresses are not treated as office branch names)
   const availableOffices = React.useMemo(() => {
@@ -220,14 +255,45 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
     state.organization?.officeLocation?.address,
   ]);
 
+  const wasOpen = React.useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !isOpen) {
+      setFormError('');
+      setSubmitting(false);
+      setNewEmpName('');
+      setNewEmpEmail('');
+      setNewEmpPhone('');
+      setPhoneError('');
+      setNewEmpManagerId('');
+      setNewEmpManagerIds([]);
+      setNewEmpAllowanceItems([]);
+      setNewAllowanceName('');
+      setNewAllowanceAmount(0);
+    }
+    wasOpen.current = isOpen;
+  }, [isOpen]);
+
   // Default initial values on open
   useEffect(() => {
     if (isOpen) {
-      if (!newEmpRole && availableDesignations.length > 0) {
-        setNewEmpRole(availableDesignations[0]);
-      }
-      if (!newEmpDept && availableDepartments.length > 0) {
+      if (!isCustomDept && !newEmpDept && availableDepartments.length > 0) {
         setNewEmpDept(availableDepartments[0]);
+      }
+      if (!isCustomRole && !isCustomDept && jobRoleRecords.length > 0) {
+        const dept = newEmpDept || availableDepartments[0] || '';
+        const inDept = dept ? rolesForDepartment(jobRoleRecords, dept) : [];
+        if (dept && !newEmpDept) setNewEmpDept(dept);
+        if (inDept.length > 0 && !inDept.some((role) => sameName(role.title, newEmpRole))) {
+          setNewEmpRole(inDept[0].title);
+        } else if (
+          inDept.length === 0 &&
+          newEmpRole &&
+          !jobRoleRecords.some((role) => sameName(role.title, newEmpRole) && sameName(role.departmentName, dept))
+        ) {
+          setNewEmpRole('');
+        }
+      } else if (!isCustomRole && !newEmpRole && availableDesignations.length > 0) {
+        setNewEmpRole(availableDesignations[0]);
       }
       if ((!newEmpOffice || !availableOffices.includes(newEmpOffice)) && availableOffices.length > 0) {
         setNewEmpOffice(availableOffices[0]);
@@ -249,16 +315,23 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
         setNewEmpPayrollGroupId(payrollGroupsList[0].id);
       }
     }
-  }, [isOpen, availableDesignations, availableDepartments, availableOffices, newEmpRole, newEmpDept, newEmpOffice, newEmpOffices, newEmpPrimaryOffice, payrollGroupsList, newEmpPayrollGroupId]);
+  }, [isOpen, availableDesignations, availableDepartments, availableOffices, newEmpRole, newEmpDept, newEmpOffice, newEmpOffices, newEmpPrimaryOffice, payrollGroupsList, newEmpPayrollGroupId, isCustomRole, isCustomDept, jobRoleRecords]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const busy = submitting || isSaving;
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEmpName.trim() || !newEmpEmail.trim()) return;
 
     if (newEmpPhone.trim() && newEmpPhone.trim().length !== 10) {
       setPhoneError('Phone number must be exactly 10 digits');
+      return;
+    }
+
+    if (!newEmpRole.trim()) {
+      setFormError('Choose a job role for this department, or add a custom role.');
       return;
     }
 
@@ -281,14 +354,21 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
       .map((name) => officeRecords.find((r) => r.name.trim().toLowerCase() === name.trim().toLowerCase())?.id)
       .filter(Boolean) as string[];
 
+    const designation = newEmpRole.trim() || (isInstitution ? 'Professor' : 'Software Engineer');
+    const department = newEmpDept.trim() || (isInstitution ? 'Faculty' : 'Development');
+    const matchedRole =
+      jobRoleRecords.find((role) => sameName(role.title, designation) && sameName(role.departmentName, department)) ||
+      jobRoleRecords.find((role) => sameName(role.title, designation) && !role.departmentName);
+
     const newEmp: Partial<Employee> = {
       name: newEmpName.trim(),
       fullName: newEmpName.trim(),
       email: newEmpEmail.trim().toLowerCase(),
       phone: newEmpPhone.trim() || '',
-      designation: newEmpRole.trim() || (isInstitution ? 'Professor' : 'Software Engineer'),
-      department: (newEmpDept.trim() || (isInstitution ? 'Faculty' : 'Development')) as any,
-      team: `${newEmpDept.trim() || 'Core'} Team`,
+      designation,
+      jobRoleId: matchedRole?.id || undefined,
+      department: department as any,
+      team: `${department} Team`,
       officeName: primaryOffice || availableOffices[0],
       location: primaryOffice || availableOffices[0],
       officeId: officeIds[0],
@@ -319,7 +399,9 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
         : undefined,
       joinDate: newEmpJoinDate || new Date().toISOString().split('T')[0],
       joiningDate: newEmpJoinDate || new Date().toISOString().split('T')[0],
-      status: 'Active',
+      status: 'Not Activated',
+      accountStatus: 'Not Activated',
+      isActivated: false,
       employmentType: newEmpEmploymentType as any,
       probationStatus: newEmpProbationStatus,
       probationPeriodMonths: newEmpProbationStatus === 'in_probation' ? newEmpProbationMonths : 0,
@@ -393,45 +475,52 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
       },
     };
 
-    onSubmit(newEmp);
-    setNewEmpName('');
-    setNewEmpEmail('');
-    setNewEmpPhone('');
-    setPhoneError('');
-    setNewEmpManagerId('');
-    setNewEmpManagerIds([]);
-    setNewEmpAllowanceItems([]);
-    setNewAllowanceName('');
-    setNewAllowanceAmount(0);
-    onClose();
+    setFormError('');
+    setSubmitting(true);
+    try {
+      await onSubmit(newEmp);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Could not add this employee.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900">
+    <div className="people-form-overlay studio-form-overlay fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
+      <div role="dialog" aria-modal="true" aria-label={isInstitution ? 'Add staff' : 'Add employee'} className="studio-form-drawer relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900">
         {/* Drawer Header */}
-        <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 gap-3">
+        <div className="px-5 py-4 sm:px-7 border-b border-[#dde4e9] flex items-start justify-between bg-white shrink-0 gap-3">
           <div className="min-w-0 flex-1">
-            <h3 className="text-lg sm:text-xl font-bold text-slate-900 truncate">
-              {isInstitution ? 'Add Staff & Faculty' : 'Add New Employee'}
+            <h3 className="text-[16px] font-bold tracking-[-0.02em] text-[#172234] truncate">
+              {isInstitution ? 'Add Staff' : 'Add Employee'}
             </h3>
-            <p className="text-xs text-slate-500 font-medium mt-0.5 break-words">
-              {isInstitution
-                ? 'Enroll a faculty or staff member into the institution directory'
-                : 'Onboard a new employee with official credentials and payroll'}
+            <p className="text-[13px] text-[#5e6c7b] mt-1 leading-snug">
+              The login stays inactive until they open the invite and choose a password.
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors shrink-0"
+            disabled={busy}
+            aria-label="Close"
+            className="text-[#687789] hover:text-[#172234] p-2 cursor-pointer rounded-[7px] hover:bg-[#f3f5f7] transition-colors shrink-0 disabled:opacity-50"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto custom-scrollbar flex flex-col">
-          <div className="p-4 sm:p-7 sm:px-8 space-y-5 flex-1">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <div className="p-4 sm:p-7 sm:px-8 space-y-5 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            <div className="rounded-[9px] border border-[#c5d0d8] bg-[#f8fbfe] px-3.5 py-3 text-[13px] leading-snug text-[#17324e]">
+              <span className="font-semibold">Inactive account.</span> They are added to the directory now, and can sign in only after accepting the invite.
+            </div>
+            {formError && (
+              <p role="alert" className="rounded-[9px] border border-[#8b3133]/25 bg-[#faeeee] px-3.5 py-3 text-[13px] font-medium text-[#8b3133]">
+                {formError}
+              </p>
+            )}
             {/* Full Name */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-2">
@@ -526,15 +615,32 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
                   <select
                     required
                     value={newEmpRole}
-                    onChange={(e) => setNewEmpRole(e.target.value)}
+                    onChange={(e) => {
+                      const title = e.target.value;
+                      setNewEmpRole(title);
+                      if (isCustomDept || jobRoleRecords.length === 0) return;
+                      const homes = jobRoleRecords.filter((role) => sameName(role.title, title) && role.departmentName);
+                      const departments = [...new Set(homes.map((role) => role.departmentName as string))];
+                      if (departments.length === 1 && !sameName(departments[0], newEmpDept)) {
+                        setNewEmpDept(departments[0]);
+                      }
+                    }}
                     className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
                   >
-                    {availableDesignations.map((d) => (
-                      <option key={d} value={d} className="bg-white text-slate-800">
-                        {d}
+                    {presetRoles.length === 0 && (
+                      <option value="" className="bg-white text-slate-800">
+                        No roles in this department
+                      </option>
+                    )}
+                    {presetRoles.map((role) => (
+                      <option key={role.id || role.title} value={role.title} className="bg-white text-slate-800">
+                        {role.title}
                       </option>
                     ))}
                   </select>
+                )}
+                {!isCustomRole && !isCustomDept && jobRoleRecords.length > 0 && newEmpDept && (
+                  <p className="text-[11px] text-slate-500 mt-1.5">Roles for {newEmpDept}.</p>
                 )}
               </div>
 
@@ -568,7 +674,15 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
                   <select
                     required
                     value={newEmpDept}
-                    onChange={(e) => setNewEmpDept(e.target.value)}
+                    onChange={(e) => {
+                      const dept = e.target.value;
+                      setNewEmpDept(dept);
+                      if (isCustomRole || jobRoleRecords.length === 0) return;
+                      const nextRoles = rolesForDepartment(jobRoleRecords, dept);
+                      if (nextRoles.length > 0 && !nextRoles.some((role) => sameName(role.title, newEmpRole))) {
+                        setNewEmpRole(nextRoles[0].title);
+                      }
+                    }}
                     className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
                   >
                     {availableDepartments.map((dept) => (
@@ -712,10 +826,7 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
                 <label className="block text-xs font-semibold text-slate-700 mb-2">
                   Joining Date
                 </label>
-                <input
-                  type="date"
-                  value={newEmpJoinDate}
-                  onChange={(e) => setNewEmpJoinDate(e.target.value)}
+                <DateInput value={newEmpJoinDate} onChange={(e) => setNewEmpJoinDate(e.target.value)}
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 [color-scheme:light] transition-all cursor-pointer"
                 />
               </div>
@@ -1195,7 +1306,7 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
           </div>
 
           {/* Drawer Form Footer */}
-          <div className="p-4 sm:p-6 sm:px-8 border-t border-slate-100 bg-white flex items-center justify-end gap-2.5 sm:gap-3 shrink-0 pb-7 sm:pb-6">
+          <div className="px-5 py-4 sm:px-7 border-t border-[#dde4e9] bg-white flex items-center justify-between gap-3 shrink-0">
             {isHRorAdmin ? (
               <button
                 type="button"
@@ -1203,26 +1314,32 @@ export const AddEmployeeModal: React.FC<AddEmployeeModalProps> = ({
                   onClose();
                   router.push('/hr?tab=employee_settings&subTab=onboarding');
                 }}
-                className="flex-1 py-2.5 sm:py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer transition-colors shadow-2xs text-center"
+                className="text-[12px] font-semibold text-[#2d628e] hover:text-[#17324e] cursor-pointer"
               >
-                Edit Form
+                Customize form
               </button>
             ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 py-2.5 sm:py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer transition-colors shadow-2xs text-center"
+                disabled={busy}
+                className="people-studio__btn people-studio__btn--secondary"
               >
                 Cancel
               </button>
-            )}
-            <button
-              type="submit"
-              className="flex-1 py-2.5 sm:py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99] flex items-center justify-center gap-2"
-            >
-              <UserPlus className="h-4 w-4" />
-              <span>{isInstitution ? 'Add Staff Member' : 'Add Employee'}</span>
-            </button>
+              <button
+                type="submit"
+                disabled={busy}
+                aria-label={isInstitution ? 'Add Staff' : 'Add Employee'}
+                className="people-studio__btn people-studio__btn--primary"
+              >
+                <UserPlus className="h-3.5 w-3.5" />
+                <span>{busy ? 'Adding…' : isInstitution ? 'Add Staff' : 'Add Employee'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

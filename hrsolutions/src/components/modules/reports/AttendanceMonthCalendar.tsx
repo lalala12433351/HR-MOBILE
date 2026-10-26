@@ -35,9 +35,10 @@ function leavesOnDay(leaves: UserReportLeaveRow[], day: string) {
   return leaves.filter((leave) => leave.startDate <= day && leave.endDate >= day);
 }
 
-type DayTone = 'ok' | 'late' | 'leave' | 'absent' | 'lop' | 'half' | 'muted' | 'empty';
+type DayTone = 'ok' | 'late' | 'leave' | 'absent' | 'lop' | 'half' | 'holiday' | 'muted' | 'empty';
 
 function toneFor(status: string | null, leave: UserReportLeaveRow | null): DayTone {
+  if (status && status.toLowerCase().includes('holiday')) return 'holiday';
   if (leave) {
     if (leave.status === 'Approved' && !leave.paid) return 'lop';
     return 'leave';
@@ -53,6 +54,7 @@ function toneFor(status: string | null, leave: UserReportLeaveRow | null): DayTo
 }
 
 function statusLabel(status: string | null, leave: UserReportLeaveRow | null) {
+  if (status && status.toLowerCase().includes('holiday')) return 'Holiday';
   if (leave) {
     const lop = leave.status === 'Approved' && !leave.paid ? ' · LOP' : '';
     return `${leave.type}${lop}`;
@@ -178,6 +180,7 @@ export function AttendanceMonthCalendar({
       <div className="people-studio__att-cal-legend" aria-hidden="true">
         {[
           ['ok', 'Present / WFH'],
+          ['holiday', 'Holiday'],
           ['late', 'Late'],
           ['half', 'Half day'],
           ['leave', 'Leave'],
@@ -228,7 +231,10 @@ export function AttendanceMonthCalendar({
                 <div className="people-studio__att-cal-day-body">
                   {times ? <span className="people-studio__att-cal-times">{times}</span> : null}
                   {hours ? <span className="people-studio__att-cal-hours">{hours}</span> : null}
-                  {cell.leave && cell.attendance ? (
+                  {cell.attendance?.note ? (
+                    <span className="people-studio__att-cal-leave-note">{cell.attendance.note}</span>
+                  ) : null}
+                  {cell.leave && cell.attendance && cell.tone !== 'holiday' ? (
                     <span className="people-studio__att-cal-leave-note">
                       {cell.leave.status}
                       {!cell.leave.paid && cell.leave.status === 'Approved' ? ' · LOP' : ''}

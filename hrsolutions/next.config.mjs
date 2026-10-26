@@ -8,6 +8,12 @@ const nextConfig = {
   turbopack: {
     root: import.meta.dirname,
   },
+  // Hostinger blocks the loopback port Turbopack uses to reach its PostCSS child
+  // process, which panics on globals.css ("node process exited before we could
+  // connect"). Worker threads keep that work inside the Next.js process.
+  experimental: {
+    turbopackPluginRuntimeStrategy: 'workerThreads',
+  },
   reactStrictMode: true,
   images: {
     remotePatterns: [

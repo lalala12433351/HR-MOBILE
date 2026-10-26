@@ -2,12 +2,10 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { PixbeIcon, PixbeIconName } from '@/components/common/PixbeIcon';
+import { CalendarPlus, ListTodo, FileText, ArrowUpRight } from 'lucide-react';
 import { DashboardClockInCard } from './DashboardClockInCard';
-import { OnLeaveTodayCard } from './OnLeaveTodayCard';
-import { UpcomingHolidaysCard } from './UpcomingHolidaysCard';
 
-export const UserActionCards: React.FC = () => {
+export const UserActionCards: React.FC<{ showClock?: boolean }> = ({ showClock = true }) => {
   const router = useRouter();
 
   const cards = [
@@ -16,29 +14,31 @@ export const UserActionCards: React.FC = () => {
       title: 'Request leave',
       description: 'Apply or check a balance',
       path: '/leaves',
-      iconName: 'leave-action' as PixbeIconName,
+      icon: CalendarPlus,
     },
     {
       id: 'tasks',
       title: 'Open tasks',
       description: 'See what is assigned to you',
       path: '/projects',
-      iconName: 'tasks-action' as PixbeIconName,
+      icon: ListTodo,
     },
     {
       id: 'payslips',
       title: 'Get a payslip',
       description: 'Download a recent slip',
       path: '/payroll',
-      iconName: 'payslips-action' as PixbeIconName,
+      icon: FileText,
     },
   ];
 
   return (
-    <section aria-label="Today’s work" className="dash-figures dash-figures--member">
-      <div className="dash-workday">
-        <DashboardClockInCard />
-      </div>
+    <section aria-label="Today’s work" className={`dash-figures dash-figures--member ${showClock ? '' : 'dash-figures--actions-only'}`}>
+      {showClock && (
+        <div className="dash-workday">
+          <DashboardClockInCard />
+        </div>
+      )}
 
       <div className="dash-action-rail">
         {cards.map((card) => (
@@ -48,8 +48,9 @@ export const UserActionCards: React.FC = () => {
             onClick={() => router.push(card.path)}
             className="dash-action"
           >
+            <ArrowUpRight size={14} className="dash-action-arrow" aria-hidden="true" />
             <span className="inline-flex items-center gap-3 min-w-0">
-              <PixbeIcon name={card.iconName} className="h-4 w-4 text-[var(--studio-navy)] shrink-0" />
+              <card.icon size={18} className="text-[var(--primary-blue)] shrink-0" aria-hidden="true" />
               <span className="dash-action-copy">
                 <strong>{card.title}</strong>
                 <small>{card.description}</small>
@@ -57,11 +58,6 @@ export const UserActionCards: React.FC = () => {
             </span>
           </button>
         ))}
-      </div>
-
-      <div className="dash-today-fill">
-        <OnLeaveTodayCard scope="coworkers" limit={4} />
-        <UpcomingHolidaysCard limit={4} />
       </div>
     </section>
   );

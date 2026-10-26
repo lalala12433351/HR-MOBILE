@@ -15,9 +15,14 @@ function LeavesContent() {
   const applyParam = searchParams.get('apply') === 'true';
 
   const combinedState = { ...uiState, ...businessData };
+  // Chain updates off the latest snapshot. A second save in the same click
+  // (approve, then refresh balances) must not write the pre-approval leaves back.
+  const combinedRef = React.useRef(combinedState);
+  combinedRef.current = combinedState;
 
   const handleUpdateState = (updater: (prev: any) => any) => {
-    const newState = updater(combinedState);
+    const newState = updater(combinedRef.current);
+    combinedRef.current = newState;
 
     updateBusinessData({
       employees: newState.employees,

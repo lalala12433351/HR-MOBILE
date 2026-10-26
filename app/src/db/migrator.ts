@@ -26,7 +26,7 @@ function getMigrationPath(filename: string): string {
 }
 
 /**
- * Runs public control plane migrations (001 + 003 + 004 + 005 + 008 + 010 + 011)
+ * Runs public control plane migrations (001 + 003 + 004 + 005 + 008 + 010 + 011 + 012 + 014)
  */
 export async function runPublicMigrations(): Promise<void> {
   const client = await pool.connect();
@@ -86,6 +86,11 @@ export async function runPublicMigrations(): Promise<void> {
     const sql012 = fs.readFileSync(getMigrationPath('012_support_chat.sql'), 'utf8');
     await client.query(sql012);
     log.success('Public Control Plane Migration 012 executed successfully.');
+
+    log.info('Running Public Control Plane Migration 014 (change email token)...');
+    const sql014 = fs.readFileSync(getMigrationPath('014_change_email_token.sql'), 'utf8');
+    await client.query(sql014);
+    log.success('Public Control Plane Migration 014 executed successfully.');
   } finally {
     client.release();
   }
@@ -109,6 +114,7 @@ export async function provisionTenantSchema(schemaName: string): Promise<void> {
     await client.query(fs.readFileSync(getMigrationPath('006_chat.sql'), 'utf8'));
     await client.query(fs.readFileSync(getMigrationPath('007_unique_org_names.sql'), 'utf8'));
     await client.query(fs.readFileSync(getMigrationPath('009_billing_clients.sql'), 'utf8'));
+    await client.query(fs.readFileSync(getMigrationPath('013_chat_mentions_push.sql'), 'utf8'));
     await client.query('RESET search_path');
     log.success(`Tenant schema "${sanitized}" provisioned and migrated successfully with 15+ isolated domain tables.`);
   } finally {

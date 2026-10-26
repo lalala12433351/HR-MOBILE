@@ -1,38 +1,52 @@
 'use client';
+import { UserAvatar } from '@/components/common/UserAvatar';
+import { DateInput } from '@/components/common/DateInput';
 
-import React, { useState, useMemo, useEffect } from 'react';
-import {
-  AlertCircle,
-  CheckCircle2,
-  Lock,
-  Eye,
-  EyeOff,
-  User,
-  MapPin,
-  ShieldCheck,
-  ArrowRight,
-  ArrowLeft,
-  UploadCloud,
-  FileText,
-  Check,
-  FileCheck,
-  Sparkles,
-  Building,
-  Trash2,
-  Paperclip,
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { AlertCircle, Check, Eye, EyeOff, Trash2, UploadCloud } from 'lucide-react';
+import { PixbeDesignWordmark as PixbeWordmark } from '@/components/common/PixbeBrand';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/services/apiClient';
-import { Employee, UserPersona, CustomProfileField, OnboardingSectionKey } from '@/types';
-import { initialOnboardingFields } from '@/data/initialData';
-import { WORLD_NATIONALITIES, WORLD_COUNTRIES } from '@/data/nations';
 import { saveStoredState } from '@/services/store';
+import { WORLD_COUNTRIES, WORLD_NATIONALITIES } from '@/data/nations';
+import {
+  getCitiesForState,
+  getStatesForCountry,
+  hasLocationSelects,
+} from '@/data/locations';
+import {
+  isOnboardingFieldEnabled,
+  isOnboardingFieldRequired,
+  resolveOnboardingFields,
+  sectionHasEnabledFields,
+} from '@/utils/onboardingFields';
+import { CognitoPasswordPolicyGuide } from '@/components/auth/CognitoPasswordPolicyGuide';
 import { evaluateCognitoPassword } from '@/utils/cognitoPasswordPolicy';
+import type { CustomProfileField, Employee, OnboardingSectionKey, UserPersona } from '@/types';
+import './setup/workspace-setup.css';
+import './setup/onboarding-studio.css';
+import './setup/figma-onboarding.css';
+import { OnboardingAccount, OnboardingHelp } from './setup/OnboardingChrome';
 
 interface EmployeeOnboardingViewProps {
   employeeId?: string;
   onComplete?: () => void;
 }
+
+type StepKey = 'password' | 'personal' | 'address' | 'banking' | 'documents' | 'review';
+
+const STEP_TITLES: Record<StepKey, string> = {
+  password: 'Set a password',
+  personal: 'Personal details',
+  address: 'Address & emergency contact',
+  banking: 'Banking & tax',
+  documents: 'Upload documents',
+  review: 'Review & finish',
+};
+
+const DEFAULT_GENDER_OPTIONS = ['Male', 'Female', 'Non-Binary', 'Prefer not to say'];
+
+const requiredMark = (required: boolean) => (required ? ' *' : '');
 
 export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
   employeeId,
@@ -40,7 +54,6 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
 }) => {
   const { state, updateState, triggerToast, selectPersona, syncWithBackend } = useApp();
 
-  // Find targeted employee or current persona
   const targetEmployee = useMemo(() => {
     if (employeeId) {
       const found = state.employees.find((e) => e.id === employeeId || e.employeeId === employeeId);
@@ -53,260 +66,420 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
         (persona?.email && e.email?.toLowerCase() === persona.email.toLowerCase())
     );
     if (currentMatch) return currentMatch;
-    // Never fall back to a random incomplete row — that can update the wrong employee.
     return undefined;
   }, [employeeId, state.employees, state.currentPersona]);
 
-  // Dynamic configured onboarding fields
-  const configuredFields = useMemo<CustomProfileField[]>(() => {
-    if (state.customOptions?.onboardingFields && state.customOptions.onboardingFields.length > 0) {
-      return state.customOptions.onboardingFields;
-    }
-    return initialOnboardingFields;
-  }, [state.customOptions?.onboardingFields]);
+  const configuredFields = useMemo(
+    () => resolveOnboardingFields(state.customOptions?.onboardingFields),
+    [state.customOptions?.onboardingFields]
+  );
 
-  // Current Step: 1 to 5
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const documentFields = useMemo(
+    () => configuredFields.filter((f) => f.enabled && f.section === 'documents'),
+    [configuredFields]
+  );
 
-  // STEP 1: Change / Set Password State
+  const hasBanking = sectionHasEnabledFields(configuredFields, 'banking');
+  const hasDocuments = documentFields.length > 0;
+
+  const steps = useMemo(() => {
+    const list: { key: StepKey; label: string }[] = [
+      { key: 'password', label: 'Password' },
+      { key: 'personal', label: 'Personal' },
+      { key: 'address', label: 'Address' },
+    ];
+    if (hasBanking) list.push({ key: 'banking', label: 'Banking' });
+    if (hasDocuments) list.push({ key: 'documents', label: 'Documents' });
+    list.push({ key: 'review', label: 'Review' });
+    return list;
+  }, [hasBanking, hasDocuments]);
+
+  const [stepIndex, setStepIndex] = useState(0);
+  const currentStep = steps[Math.min(stepIndex, steps.length - 1)]?.key ?? 'password';
+
+  useEffect(() => {
+    setStepIndex((prev) => Math.min(prev, steps.length - 1));
+  }, [steps.length]);
+
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPass, setShowNewPass] = useState(false);
   const [showConfirmPass, setShowConfirmPass] = useState(false);
-  const [step1Error, setStep1Error] = useState('');
+  const [stepError, setStepError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // STEP 2: Personal Details State
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
-  const [gender, setGender] = useState<string>('None');
-  const [bloodGroup, setBloodGroup] = useState('O+');
-  const [maritalStatus, setMaritalStatus] = useState<string>('Single');
+  const [gender, setGender] = useState('');
+  const [bloodGroup, setBloodGroup] = useState('');
+  const [maritalStatus, setMaritalStatus] = useState('');
   const [nationality, setNationality] = useState('');
   const [personalEmail, setPersonalEmail] = useState('');
-  const [step2Error, setStep2Error] = useState('');
+  const [healthInsurance, setHealthInsurance] = useState('');
+  const [bio, setBio] = useState('');
+  const [avatar, setAvatar] = useState('');
 
-  // STEP 3: Residential Address & Emergency Contacts State
   const [streetAddress, setStreetAddress] = useState('');
   const [city, setCity] = useState('');
   const [stateProvince, setStateProvince] = useState('');
   const [postalCode, setPostalCode] = useState('');
-  const [country, setCountry] = useState('United States');
+  const [country, setCountry] = useState('India');
   const [emergencyName, setEmergencyName] = useState('');
-  const [emergencyRelation, setEmergencyRelation] = useState('Family');
+  const [emergencyRelation, setEmergencyRelation] = useState('');
   const [emergencyPhone, setEmergencyPhone] = useState('');
-  const [step3Error, setStep3Error] = useState('');
 
-  // STEP 4: Document Uploads State
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
+  const [accountHolderName, setAccountHolderName] = useState('');
+  const [personalTaxId, setPersonalTaxId] = useState('');
+  const [socialInsurance, setSocialInsurance] = useState('');
+  const [pfUanNumber, setPfUanNumber] = useState('');
+  const [esiNumber, setEsiNumber] = useState('');
+
   const [uploadedFiles, setUploadedFiles] = useState<
     Record<string, { id: string; name: string; size: string; type: string; uploadDate: string }>
   >({});
-  const [step5Error, setStep5Error] = useState('');
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>({});
+  const [agreedToDeclaration, setAgreedToDeclaration] = useState(false);
 
-  // Custom User-Defined Field Values Map: { [fieldId]: value }
-  const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
+  const fieldEnabled = (name: string) => isOnboardingFieldEnabled(configuredFields, name);
+  const fieldRequired = (name: string) => isOnboardingFieldRequired(configuredFields, name);
+  const genderOptions =
+    configuredFields.find((f) => f.name === 'gender')?.options?.length
+      ? (configuredFields.find((f) => f.name === 'gender')!.options as string[])
+      : DEFAULT_GENDER_OPTIONS;
 
-  // STEP 5: Review & Confirmation State
-  const [agreedToDeclaration, setAgreedToDeclaration] = useState(true);
-  const [step5ReviewError, setStep5ReviewError] = useState('');
+  const useLocationSelects = hasLocationSelects(country);
+  const stateOptions = useMemo(() => getStatesForCountry(country), [country]);
+  const cityOptions = useMemo(
+    () => getCitiesForState(country, stateProvince),
+    [country, stateProvince]
+  );
 
-  // Hydrate fields from target employee
   useEffect(() => {
-    if (targetEmployee) {
-      setFullName(targetEmployee.name || '');
-      setEmail(targetEmployee.email || '');
-      setPhone(targetEmployee.phone && targetEmployee.phone !== '—' ? targetEmployee.phone : '');
-      if (targetEmployee.dateOfBirth) setDateOfBirth(targetEmployee.dateOfBirth);
-      if (targetEmployee.gender) setGender(targetEmployee.gender);
-      if (targetEmployee.bloodGroup) setBloodGroup(targetEmployee.bloodGroup);
-      if (targetEmployee.maritalStatus) setMaritalStatus(targetEmployee.maritalStatus);
-      if (targetEmployee.nationality) setNationality(targetEmployee.nationality);
-      if (targetEmployee.primaryAddress) setStreetAddress(targetEmployee.primaryAddress);
-      if (targetEmployee.city) setCity(targetEmployee.city);
-      if (targetEmployee.stateProvince) setStateProvince(targetEmployee.stateProvince);
-      if (targetEmployee.postalCode) setPostalCode(targetEmployee.postalCode);
-      if (targetEmployee.country) setCountry(targetEmployee.country);
-
-      if (targetEmployee.emergencyContact?.name && targetEmployee.emergencyContact.name !== '—') {
-        setEmergencyName(targetEmployee.emergencyContact.name);
-      }
-      if (targetEmployee.emergencyContact?.relation && targetEmployee.emergencyContact.relation !== '—') {
-        setEmergencyRelation(targetEmployee.emergencyContact.relation);
-      }
-      if (targetEmployee.emergencyContact?.phone && targetEmployee.emergencyContact.phone !== '—') {
-        setEmergencyPhone(targetEmployee.emergencyContact.phone);
-      }
-      if (targetEmployee.customFieldValues) {
-        setCustomFieldValues(targetEmployee.customFieldValues);
-      }
+    if (!targetEmployee) return;
+    setFullName(targetEmployee.name || targetEmployee.fullName || '');
+    setEmail(targetEmployee.email || '');
+    setPhone(targetEmployee.phone && targetEmployee.phone !== '—' ? targetEmployee.phone : '');
+    if (targetEmployee.dateOfBirth) setDateOfBirth(targetEmployee.dateOfBirth);
+    if (targetEmployee.gender && targetEmployee.gender !== 'None' && targetEmployee.gender !== '—') {
+      setGender(targetEmployee.gender);
     }
+    if (targetEmployee.bloodGroup) setBloodGroup(targetEmployee.bloodGroup);
+    if (targetEmployee.maritalStatus) setMaritalStatus(targetEmployee.maritalStatus);
+    if (targetEmployee.nationality) setNationality(targetEmployee.nationality);
+    if (targetEmployee.personalEmail) setPersonalEmail(targetEmployee.personalEmail);
+    if (targetEmployee.healthInsurance) setHealthInsurance(targetEmployee.healthInsurance);
+    if (targetEmployee.bio) setBio(targetEmployee.bio);
+    if (targetEmployee.avatar) setAvatar(targetEmployee.avatar);
+    if (targetEmployee.primaryAddress) setStreetAddress(targetEmployee.primaryAddress);
+    if (targetEmployee.city) setCity(targetEmployee.city);
+    if (targetEmployee.stateProvince) setStateProvince(targetEmployee.stateProvince);
+    if (targetEmployee.postalCode) setPostalCode(targetEmployee.postalCode);
+    if (targetEmployee.country) setCountry(targetEmployee.country);
+    if (targetEmployee.emergencyContact?.name && targetEmployee.emergencyContact.name !== '—') {
+      setEmergencyName(targetEmployee.emergencyContact.name);
+    }
+    if (targetEmployee.emergencyContact?.relation && targetEmployee.emergencyContact.relation !== '—') {
+      setEmergencyRelation(targetEmployee.emergencyContact.relation);
+    }
+    if (targetEmployee.emergencyContact?.phone && targetEmployee.emergencyContact.phone !== '—') {
+      setEmergencyPhone(targetEmployee.emergencyContact.phone);
+    }
+    if (targetEmployee.bankDetails?.bankName) setBankName(targetEmployee.bankDetails.bankName);
+    if (targetEmployee.bankDetails?.accountNumber) setAccountNumber(targetEmployee.bankDetails.accountNumber);
+    if (targetEmployee.bankDetails?.ifscCode) setIfscCode(targetEmployee.bankDetails.ifscCode);
+    if (targetEmployee.bankDetails?.accountHolderName) {
+      setAccountHolderName(targetEmployee.bankDetails.accountHolderName);
+    }
+    if (targetEmployee.personalTaxId) setPersonalTaxId(targetEmployee.personalTaxId);
+    if (targetEmployee.socialInsurance) setSocialInsurance(targetEmployee.socialInsurance);
+    if (targetEmployee.pfUanNumber) setPfUanNumber(targetEmployee.pfUanNumber);
+    if (targetEmployee.esiNumber) setEsiNumber(targetEmployee.esiNumber);
+    if (targetEmployee.customFieldValues) setCustomFieldValues(targetEmployee.customFieldValues);
   }, [targetEmployee]);
 
-  // Helper to handle real file selection
-  const handleSimulateFileUpload = (fieldId: string, fieldLabel: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
-      setUploadedFiles((prev) => ({
-        ...prev,
-        [fieldId]: {
-          id: `doc_${Date.now()}`,
-          name: file.name,
-          size: `${sizeMb} MB`,
-          type: file.type || 'application/pdf',
-          uploadDate: new Date().toISOString().split('T')[0],
-        },
-      }));
+  const handleCountryChange = (nextCountry: string) => {
+    setCountry(nextCountry);
+    setStateProvince('');
+    setCity('');
+  };
+
+  const handleStateChange = (nextState: string) => {
+    setStateProvince(nextState);
+    setCity('');
+  };
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setStepError('Profile photo must be an image file');
+      return;
     }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setAvatar(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFileUpload = (fieldId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+    setUploadedFiles((prev) => ({
+      ...prev,
+      [fieldId]: {
+        id: `doc_${Date.now()}`,
+        name: file.name,
+        size: `${sizeMb} MB`,
+        type: file.type || 'application/pdf',
+        uploadDate: new Date().toISOString().split('T')[0],
+      },
+    }));
   };
 
   const handleRemoveUploadedFile = (fieldId: string) => {
     setUploadedFiles((prev) => {
-      const copy = { ...prev };
-      delete copy[fieldId];
-      return copy;
+      const next = { ...prev };
+      delete next[fieldId];
+      return next;
     });
   };
 
-  // Step Validation & Navigation
-  const handleNextStep = () => {
-    // Step 1: Password Change
-    if (step === 1) {
-      // Optional: the account password was already created from the invite link.
+  const validateCustomSection = (section: OnboardingSectionKey): string | null => {
+    for (const field of configuredFields.filter((f) => f.enabled && !f.isSystemDefault && f.section === section)) {
+      if (!field.required) continue;
+      const val = customFieldValues[field.id];
+      if (val == null || String(val).trim() === '') {
+        return `"${field.label}" is required`;
+      }
+    }
+    return null;
+  };
+
+  const goNext = () => {
+    setStepError('');
+
+    if (currentStep === 'password') {
       if (!newPassword.trim() && !confirmPassword.trim()) {
-        setStep1Error('');
-        setStep(2);
+        setStepIndex((i) => Math.min(i + 1, steps.length - 1));
         return;
       }
       const strength = evaluateCognitoPassword(newPassword);
       if (!strength.isValid) {
-        const missingStr = strength.missingRequirements.join(', ');
-        setStep1Error(`Password must meet all security requirements. Missing: ${missingStr}.`);
+        setStepError(`Password must meet all security requirements. Missing: ${strength.missingRequirements.join(', ')}.`);
         return;
       }
       if (newPassword !== confirmPassword) {
-        setStep1Error('New passwords do not match');
+        setStepError('New passwords do not match');
         return;
       }
-      setStep1Error('');
-      setStep(2);
+      setStepIndex((i) => Math.min(i + 1, steps.length - 1));
       return;
     }
 
-    // Step 2: Personal Details & Basic Info
-    if (step === 2) {
-      const basicPersonalFields = configuredFields.filter(
-        (f) => f.enabled && (f.section === 'basic' || f.section === 'personal')
+    if (currentStep === 'personal') {
+      const basicPersonal = configuredFields.filter(
+        (f) =>
+          f.enabled &&
+          (f.section === 'basic' || f.section === 'personal') &&
+          f.name !== 'designation' &&
+          f.name !== 'department'
       );
-      for (const field of basicPersonalFields) {
+      for (const field of basicPersonal) {
         if (!field.required) continue;
         if (field.name === 'name' && !fullName.trim()) {
-          setStep2Error('Full Legal Name is mandatory');
+          setStepError('Full legal name is required');
           return;
         }
         if (field.name === 'phone' && !phone.trim()) {
-          setStep2Error('Contact Phone Number is mandatory');
-          return;
-        }
-        if (field.name === 'phone' && phone.trim() && phone.replace(/\D/g, '').length !== 10) {
-          setStep2Error('Phone number must be exactly 10 digits');
+          setStepError('Contact phone number is required');
           return;
         }
         if (field.name === 'dateOfBirth') {
           if (!dateOfBirth.trim()) {
-            setStep2Error('Date of Birth is mandatory');
+            setStepError('Date of birth is required');
             return;
           }
-          const today = new Date().toISOString().split('T')[0];
-          if (dateOfBirth > today) {
-            setStep2Error('Date of Birth cannot be in the future');
+          if (dateOfBirth > new Date().toISOString().split('T')[0]) {
+            setStepError('Date of birth cannot be in the future');
             return;
           }
         }
-        // Custom fields validation
-        if (!field.isSystemDefault) {
-          const val = customFieldValues[field.id];
-          if (!val || String(val).trim() === '') {
-            setStep2Error(`"${field.label}" is required`);
-            return;
-          }
+        if (field.name === 'gender' && !gender.trim()) {
+          setStepError('Gender is required');
+          return;
+        }
+        if (field.name === 'bloodGroup' && !bloodGroup.trim()) {
+          setStepError('Blood group is required');
+          return;
+        }
+        if (field.name === 'maritalStatus' && !maritalStatus.trim()) {
+          setStepError('Marital status is required');
+          return;
+        }
+        if (field.name === 'nationality' && !nationality.trim()) {
+          setStepError('Nationality is required');
+          return;
+        }
+        if (field.name === 'personalEmail' && !personalEmail.trim()) {
+          setStepError('Personal backup email is required');
+          return;
+        }
+        if (field.name === 'healthInsurance' && !healthInsurance.trim()) {
+          setStepError('Health insurance is required');
+          return;
+        }
+        if (field.name === 'bio' && !bio.trim()) {
+          setStepError('Bio is required');
+          return;
+        }
+        if (field.name === 'avatar' && !avatar.trim()) {
+          setStepError('Profile photo is required');
+          return;
         }
       }
-      setStep2Error('');
-      setStep(3);
+      if (phone.trim() && phone.replace(/\D/g, '').length !== 10) {
+        setStepError('Phone number must be exactly 10 digits');
+        return;
+      }
+      if (personalEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(personalEmail.trim())) {
+        setStepError('Enter a valid personal backup email');
+        return;
+      }
+      const customError = validateCustomSection('personal') || validateCustomSection('basic');
+      if (customError) {
+        setStepError(customError);
+        return;
+      }
+      setStepIndex((i) => Math.min(i + 1, steps.length - 1));
       return;
     }
 
-    // Step 3: Address & Emergency Contacts
-    if (step === 3) {
-      const addressFields = configuredFields.filter((f) => f.enabled && f.section === 'address');
-      for (const field of addressFields) {
+    if (currentStep === 'address') {
+      for (const field of configuredFields.filter((f) => f.enabled && f.section === 'address')) {
         if (!field.required) continue;
         if (field.name === 'primaryAddress' && !streetAddress.trim()) {
-          setStep3Error('Residential Street Address is required');
+          setStepError('Residential street address is required');
           return;
         }
         if (field.name === 'city' && !city.trim()) {
-          setStep3Error('City is required');
+          setStepError('City is required');
+          return;
+        }
+        if (field.name === 'stateProvince' && !stateProvince.trim()) {
+          setStepError('State / province is required');
           return;
         }
         if (field.name === 'postalCode' && !postalCode.trim()) {
-          setStep3Error('Postal / ZIP Code is required');
+          setStepError('Postal / ZIP code is required');
           return;
         }
-        if (field.name === 'postalCode' && postalCode.trim() && !/^[A-Z0-9][A-Z0-9\s-]{1,9}$/i.test(postalCode.trim())) {
-          setStep3Error('Enter a valid postal / ZIP code (3–10 letters or digits)');
+        if (field.name === 'country' && !country.trim()) {
+          setStepError('Country is required');
           return;
         }
         if (field.name === 'emergencyContactName' && !emergencyName.trim()) {
-          setStep3Error('Emergency Contact Name is required');
+          setStepError('Emergency contact name is required');
+          return;
+        }
+        if (field.name === 'emergencyContactRelation' && !emergencyRelation.trim()) {
+          setStepError('Emergency contact relationship is required');
           return;
         }
         if (field.name === 'emergencyContactPhone' && !emergencyPhone.trim()) {
-          setStep3Error('Emergency Contact Phone is required');
-          return;
-        }
-        if (field.name === 'emergencyContactPhone' && emergencyPhone.trim() && emergencyPhone.replace(/\D/g, '').length !== 10) {
-          setStep3Error('Emergency phone must be exactly 10 digits');
-          return;
-        }
-        if (!field.isSystemDefault) {
-          const val = customFieldValues[field.id];
-          if (!val || String(val).trim() === '') {
-            setStep3Error(`"${field.label}" is required`);
-            return;
-          }
-        }
-      }
-      setStep3Error('');
-      setStep(4);
-      return;
-    }
-
-    // Step 4: Document Uploads
-    if (step === 4) {
-      const docFields = configuredFields.filter((f) => f.enabled && f.section === 'documents');
-      for (const field of docFields) {
-        if (field.required && !uploadedFiles[field.id]) {
-          setStep5Error(`Please upload the required document: "${field.label}"`);
+          setStepError('Emergency contact phone is required');
           return;
         }
       }
-      setStep5Error('');
-      setStep(5);
-      return;
-    }
-
-    // Step 5: Review & Final Submission
-    if (step === 5) {
-      if (!agreedToDeclaration) {
-        setStep5ReviewError('Please confirm the profile accuracy declaration');
+      if (
+        postalCode.trim() &&
+        !/^[A-Z0-9][A-Z0-9\s-]{1,9}$/i.test(postalCode.trim())
+      ) {
+        setStepError('Enter a valid postal / ZIP code (3–10 letters or digits)');
         return;
       }
-      setStep5ReviewError('');
-      handleFinishOnboarding();
+      if (emergencyPhone.trim() && emergencyPhone.replace(/\D/g, '').length !== 10) {
+        setStepError('Emergency phone must be exactly 10 digits');
+        return;
+      }
+      const customError = validateCustomSection('address');
+      if (customError) {
+        setStepError(customError);
+        return;
+      }
+      setStepIndex((i) => Math.min(i + 1, steps.length - 1));
+      return;
+    }
+
+    if (currentStep === 'banking') {
+      for (const field of configuredFields.filter((f) => f.enabled && f.section === 'banking')) {
+        if (!field.required) continue;
+        if (field.name === 'bankName' && !bankName.trim()) {
+          setStepError('Bank name is required');
+          return;
+        }
+        if (field.name === 'accountNumber' && !accountNumber.trim()) {
+          setStepError('Account number is required');
+          return;
+        }
+        if (field.name === 'ifscCode' && !ifscCode.trim()) {
+          setStepError('Routing / IFSC / SWIFT is required');
+          return;
+        }
+        if (field.name === 'accountHolderName' && !accountHolderName.trim()) {
+          setStepError('Account holder name is required');
+          return;
+        }
+        if (field.name === 'personalTaxId' && !personalTaxId.trim()) {
+          setStepError('PAN / tax ID is required');
+          return;
+        }
+        if (field.name === 'socialInsurance' && !socialInsurance.trim()) {
+          setStepError('Social insurance number is required');
+          return;
+        }
+        if (field.name === 'pfUanNumber' && !pfUanNumber.trim()) {
+          setStepError('PF UAN is required');
+          return;
+        }
+        if (field.name === 'esiNumber' && !esiNumber.trim()) {
+          setStepError('ESIC number is required');
+          return;
+        }
+      }
+      const customError = validateCustomSection('banking');
+      if (customError) {
+        setStepError(customError);
+        return;
+      }
+      setStepIndex((i) => Math.min(i + 1, steps.length - 1));
+      return;
+    }
+
+    if (currentStep === 'documents') {
+      for (const field of documentFields) {
+        if (field.required && !uploadedFiles[field.id]) {
+          setStepError(`Upload the required document: "${field.label}"`);
+          return;
+        }
+      }
+      setStepIndex((i) => Math.min(i + 1, steps.length - 1));
+      return;
+    }
+
+    if (currentStep === 'review') {
+      if (!agreedToDeclaration) {
+        setStepError('Confirm the profile accuracy declaration');
+        return;
+      }
+      void handleFinishOnboarding();
     }
   };
 
@@ -323,9 +496,7 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
     }
 
     setIsSubmitting(true);
-    // The password was set from the invite email; only change it if the user chose a new one here.
     const changedPassword = newPassword.trim() || undefined;
-
     const docsArray = Object.entries(uploadedFiles).map(([fieldId, file]) => {
       const fieldDef = configuredFields.find((f) => f.id === fieldId);
       return {
@@ -344,7 +515,12 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
     const lName = nameParts.slice(1).join(' ') || '';
 
     try {
-      // Backend first — localStorage no longer holds domain data, so this must succeed.
+      const hasBankAccountFields =
+        fieldEnabled('bankName') ||
+        fieldEnabled('accountNumber') ||
+        fieldEnabled('ifscCode') ||
+        fieldEnabled('accountHolderName');
+
       await api.identity.updateEmployee(targetEmployee.id, {
         firstName: fName,
         lastName: lName,
@@ -359,11 +535,20 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
         bloodGroup: bloodGroup || undefined,
         maritalStatus: maritalStatus || undefined,
         nationality: nationality || undefined,
+        personalEmail: personalEmail.trim() || undefined,
+        healthInsurance: healthInsurance.trim() || undefined,
+        bio: bio.trim() || undefined,
+        avatar: avatar || undefined,
         primaryAddress: streetAddress || undefined,
         city: city || undefined,
         stateProvince: stateProvince || undefined,
         postalCode: postalCode || undefined,
         country: country || undefined,
+        personalTaxId: personalTaxId || undefined,
+        panNumber: personalTaxId || undefined,
+        socialInsurance: socialInsurance || undefined,
+        pfUanNumber: pfUanNumber || undefined,
+        esiNumber: esiNumber || undefined,
         emergencyContact: {
           name: emergencyName.trim(),
           relation: emergencyRelation.trim(),
@@ -374,6 +559,15 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
         employmentStatus: 'active',
       });
 
+      if (hasBanking && hasBankAccountFields && (bankName.trim() || accountNumber.trim())) {
+        await api.identity.updateBankDetails(targetEmployee.id, {
+          bankName: bankName.trim(),
+          accountNumber: accountNumber.trim(),
+          routingOrIfscCode: ifscCode.trim(),
+          accountHolderName: accountHolderName.trim() || fullName.trim(),
+        });
+      }
+
       const updatedEmployees: Employee[] = (state.employees || []).map((emp) => {
         if (emp.id === targetEmployee.id || emp.employeeId === targetEmployee.employeeId) {
           return {
@@ -382,15 +576,33 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
             fullName: fullName.trim(),
             phone: phone.trim(),
             dateOfBirth: dateOfBirth || emp.dateOfBirth,
-            gender: (gender as any) || emp.gender,
+            gender: (gender as Employee['gender']) || emp.gender,
             bloodGroup: bloodGroup || emp.bloodGroup,
             maritalStatus: maritalStatus || emp.maritalStatus,
             nationality: nationality || emp.nationality,
+            personalEmail: personalEmail.trim() || emp.personalEmail,
+            healthInsurance: healthInsurance.trim() || emp.healthInsurance,
+            bio: bio.trim() || emp.bio,
+            avatar: avatar || emp.avatar,
             primaryAddress: streetAddress || emp.primaryAddress,
             city: city || emp.city,
             stateProvince: stateProvince || emp.stateProvince,
             postalCode: postalCode || emp.postalCode,
             country: country || emp.country,
+            personalTaxId: personalTaxId || emp.personalTaxId,
+            panNumber: personalTaxId || emp.panNumber,
+            socialInsurance: socialInsurance || emp.socialInsurance,
+            pfUanNumber: pfUanNumber || emp.pfUanNumber,
+            esiNumber: esiNumber || emp.esiNumber,
+            bankDetails:
+              hasBanking && hasBankAccountFields && (bankName.trim() || accountNumber.trim())
+                ? {
+                    bankName: bankName.trim(),
+                    accountNumber: accountNumber.trim(),
+                    ifscCode: ifscCode.trim(),
+                    accountHolderName: accountHolderName.trim(),
+                  }
+                : emp.bankDetails,
             customFieldValues: {
               ...(emp.customFieldValues || {}),
               ...customFieldValues,
@@ -415,66 +627,63 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
         id: targetEmployee.id,
         name: fullName.trim(),
         email: targetEmployee.email,
-        role: (targetEmployee.role as any) || 'employee',
+        role: (targetEmployee.role as UserPersona['role']) || 'employee',
         designation: targetEmployee.designation,
         department: targetEmployee.department,
-        avatar: targetEmployee.avatar,
+        avatar: avatar || targetEmployee.avatar,
       };
 
-      const nextState = {
-        ...state,
-        employees: updatedEmployees,
-        currentPersona: updatedPersona,
-        auditLogs: [
-          {
-            id: `log_${Date.now()}`,
-            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-            user: fullName.trim(),
-            action: 'EMPLOYEE_ONBOARDING_COMPLETED',
-            entity: 'EmployeeProfile',
-            entityId: targetEmployee.id,
-            ipAddress: '106.51.72.18',
-            details: `Profile and onboarding successfully completed by ${fullName.trim()} with ${docsArray.length} verified documents.`,
-          },
-          ...(state.auditLogs || []),
-        ],
-      };
+      const nextAudit = [
+        {
+          id: `log_${Date.now()}`,
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+          user: fullName.trim(),
+          action: 'EMPLOYEE_ONBOARDING_COMPLETED',
+          entity: 'EmployeeProfile',
+          entityId: targetEmployee.id,
+          ipAddress: '106.51.72.18',
+          details: `Profile and onboarding completed by ${fullName.trim()}${docsArray.length ? ` with ${docsArray.length} document(s)` : ''}.`,
+        },
+        ...(state.auditLogs || []),
+      ];
 
       updateState((prev) => ({
         ...prev,
         employees: updatedEmployees,
         currentPersona: updatedPersona,
-        auditLogs: nextState.auditLogs,
+        auditLogs: nextAudit,
       }));
       selectPersona(updatedPersona);
       saveStoredState({
         ...state,
-        ...nextState,
+        employees: updatedEmployees,
+        currentPersona: updatedPersona,
+        auditLogs: nextAudit,
       });
 
-      // Re-hydrate from backend so AppShell gates see durable completion flags.
       try {
         await syncWithBackend({
           ...state,
           employees: updatedEmployees,
           currentPersona: updatedPersona,
-        } as any);
+        } as typeof state);
       } catch (syncErr) {
         console.warn('[Onboarding] Post-complete sync note:', syncErr);
       }
 
       triggerToast({
-        title: 'Onboarding Complete',
-        message: `Welcome to the workspace, ${fullName.trim()}! Your profile has been activated.`,
+        title: 'Onboarding complete',
+        message: `Welcome to the workspace, ${fullName.trim()}.`,
         type: 'success',
       });
 
-      if (onComplete) onComplete();
-    } catch (err: any) {
+      onComplete?.();
+    } catch (err: unknown) {
       console.error('[Onboarding] Backend sync error:', err);
+      const message = err instanceof Error ? err.message : 'Your profile was not saved. Please try again.';
       triggerToast({
         title: 'Could not finish onboarding',
-        message: err?.message || 'Your profile was not saved. Please try again.',
+        message,
         type: 'error',
       });
     } finally {
@@ -482,34 +691,36 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
     }
   };
 
-  // Helper to render custom user-added fields
   const renderCustomFieldsForSection = (sec: OnboardingSectionKey) => {
-    const customFields = configuredFields.filter((f) => f.enabled && !f.isSystemDefault && f.section === sec);
+    const customFields = configuredFields.filter(
+      (f) =>
+        f.enabled &&
+        !f.isSystemDefault &&
+        f.section === sec &&
+        f.name !== 'designation' &&
+        f.name !== 'department'
+    );
     if (customFields.length === 0) return null;
 
     return (
-      <div className="pt-4 border-t border-slate-100 dark:border-[#282830] space-y-4">
-        <div>
-          <h4 className="font-extrabold text-slate-900 dark:text-white text-xs uppercase tracking-wider">
-            Additional Required Information
-          </h4>
-          <p className="text-[11px] text-slate-400 mt-0.5">Custom details specified by HR for your onboarding.</p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="setup-fields" style={{ marginTop: 8, paddingTop: 20, borderTop: '1px solid #dce2e5' }}>
+        <h3 style={{ margin: '0 0 14px', fontSize: 15, fontWeight: 750, letterSpacing: '-.02em' }}>
+          Additional information
+        </h3>
+        <div className="setup-form-grid" style={{ marginTop: 0 }}>
           {customFields.map((field) => (
-            <div key={field.id} className={field.type === 'textarea' ? 'sm:col-span-2' : ''}>
-              <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                {field.label} {field.required && <span className="text-red-500">*</span>}
-              </label>
-
+            <label key={field.id} className={`setup-field ${field.type === 'textarea' ? 'is-wide' : ''}`}>
+              {field.label}
+              {field.required ? ' *' : ''}
               {field.type === 'select' ? (
                 <select
-                  value={customFieldValues[field.id] || ''}
-                  onChange={(e) => setCustomFieldValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
-                  className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-600 font-medium cursor-pointer"
+                  className="setup-control"
+                  value={String(customFieldValues[field.id] ?? '')}
+                  onChange={(e) =>
+                    setCustomFieldValues((prev) => ({ ...prev, [field.id]: e.target.value }))
+                  }
                 >
-                  <option value="">Select option...</option>
+                  <option value="">Select…</option>
                   {(field.options || []).map((opt) => (
                     <option key={opt} value={opt}>
                       {opt}
@@ -519,775 +730,952 @@ export const EmployeeOnboardingView: React.FC<EmployeeOnboardingViewProps> = ({
               ) : field.type === 'textarea' ? (
                 <textarea
                   rows={3}
-                  value={customFieldValues[field.id] || ''}
-                  onChange={(e) => setCustomFieldValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
-                  placeholder={field.placeholder || 'Enter details...'}
-                  className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-600 font-medium resize-none"
+                  value={String(customFieldValues[field.id] ?? '')}
+                  onChange={(e) =>
+                    setCustomFieldValues((prev) => ({ ...prev, [field.id]: e.target.value }))
+                  }
+                  placeholder={field.placeholder || 'Enter details…'}
+                  className="setup-control"
+                  style={{ height: 'auto', padding: '10px 14px', resize: 'vertical' }}
                 />
               ) : (
                 <input
-                  type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : field.type === 'email' ? 'email' : field.type === 'tel' ? 'tel' : 'text'}
-                  value={customFieldValues[field.id] || ''}
-                  onChange={(e) => setCustomFieldValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
-                  placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}...`}
-                  className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-600 font-medium transition-all"
+                  className="setup-control"
+                  type={
+                    field.type === 'number'
+                      ? 'number'
+                      : field.type === 'date'
+                        ? 'date'
+                        : field.type === 'email'
+                          ? 'email'
+                          : field.type === 'tel'
+                            ? 'tel'
+                            : 'text'
+                  }
+                  value={String(customFieldValues[field.id] ?? '')}
+                  onChange={(e) =>
+                    setCustomFieldValues((prev) => ({ ...prev, [field.id]: e.target.value }))
+                  }
+                  placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}…`}
                 />
               )}
-              {field.description && <p className="text-[10px] text-slate-400 mt-1">{field.description}</p>}
-            </div>
+              {field.description ? (
+                <span style={{ display: 'block', marginTop: 6, fontSize: 12, color: '#687789', fontWeight: 400 }}>
+                  {field.description}
+                </span>
+              ) : null}
+            </label>
           ))}
         </div>
       </div>
     );
   };
 
+  const primaryLabel =
+    isSubmitting
+      ? 'Saving…'
+      : currentStep === 'review'
+        ? 'Complete onboarding'
+        : 'Continue';
+
+  if (!targetEmployee?.id) {
+    return (
+      <div className="pixbe-setup">
+        <div className="pixbe-setup__content" style={{ display: 'grid', placeItems: 'center', minHeight: '100dvh' }}>
+          <div style={{ textAlign: 'center', maxWidth: 360 }}>
+            <p style={{ margin: 0, fontSize: 15, fontWeight: 750 }}>Loading your employee profile…</p>
+            <p style={{ margin: '8px 0 0', fontSize: 13, color: '#5e6c7b' }}>
+              If this does not resolve in a few seconds, refresh the page or sign in again.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen w-full bg-white dark:bg-[#0c0c0e] flex flex-col font-sans text-slate-900 dark:text-white overflow-hidden">
-      {!targetEmployee?.id ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
-          <p className="text-sm font-semibold text-slate-800 dark:text-white">Loading your employee profile…</p>
-          <p className="text-xs text-slate-500 dark:text-[#9e9ea7] max-w-sm">
-            If this does not resolve in a few seconds, refresh the page or sign in again.
-          </p>
-        </div>
-      ) : null}
-      {/* Split Main Area */}
-      <div className={`flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0 ${!targetEmployee?.id ? 'hidden' : ''}`}>
-        {/* Left Area (Step Progress & Typography) */}
-        <div className="w-full lg:w-[38%] bg-white dark:bg-[#121214] p-6 sm:p-8 md:p-12 lg:p-14 flex flex-col justify-between overflow-y-auto shrink-0 border-r border-slate-100 dark:border-[#282830]">
-          <div>
-            {/* 5 Step Progress Indicators */}
-            <div className="space-y-3 mb-6 sm:mb-8">
-              <div className="flex items-center gap-1.5">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div
-                    key={i}
-                    className={`h-2 rounded-sm transition-all ${
-                      i <= step ? 'w-6 sm:w-7 bg-blue-600' : 'w-6 sm:w-7 bg-slate-200 dark:bg-[#282830]'
-                    }`}
-                  />
-                ))}
+    <div className="pixbe-setup employee-onboarding employee-onboarding-studio figma-employee">
+      <header className="employee-onboarding-header"><PixbeWordmark/><OnboardingAccount compact/></header>
+      <div className="pixbe-setup__main">
+        <div className="pixbe-setup__content">
+          <div className="pixbe-setup__form">
+            <p className="employee-onboarding-eyebrow">{state.organization?.name || 'Your workspace'} / Profile setup</p>
+            <div className="employee-onboarding-welcome"><h1>Welcome to the team{fullName ? `, ${fullName.split(' ')[0]}` : ''}</h1></div>
+            <div className="onboarding-notice"><strong>{state.organization?.name || 'Workspace'}{targetEmployee.designation ? ` · ${targetEmployee.designation}` : ''}</strong><p>{targetEmployee.department || 'Your team'}{targetEmployee.officeName ? ` · ${targetEmployee.officeName}` : ''}. Complete the steps below to finish your profile.</p></div>
+          <ol
+            className="pixbe-setup__steps"
+            style={{ ['--eo-steps' as string]: String(steps.length) }}
+          >
+            {steps.map((step, index) => {
+              const isCurrent = index === stepIndex;
+              const isDone = index < stepIndex;
+              return (
+                <li key={step.key}>
+                  <button
+                    type="button"
+                    disabled={index >= stepIndex || isSubmitting}
+                    onClick={() => { setStepError(''); setStepIndex(index); }}
+                    className={isCurrent ? 'is-current' : isDone ? 'is-done' : undefined}
+                    aria-current={isCurrent ? 'step' : undefined}
+                  >
+                    <span className="pixbe-setup__step-no" aria-hidden="true">
+                      {isDone ? '✓' : index + 1}
+                    </span>
+                    <span>
+                      <strong>{step.label}</strong>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+
+            <div className="pixbe-setup__heading">
+              <h2>{STEP_TITLES[currentStep]}</h2>
+            </div>
+
+            {stepError ? (
+              <div className="pixbe-setup__message is-error" role="alert" style={{ marginTop: 20 }}>
+                <span className="inline-flex items-start gap-2">
+                  <AlertCircle className="size-4 shrink-0 mt-0.5" aria-hidden="true" />
+                  {stepError}
+                </span>
               </div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest pt-1">
-                STEP {step} OF 5
-              </p>
-            </div>
+            ) : null}
 
-            {/* Contextual Step Headings & Copy */}
-            <div className="space-y-3 max-w-md">
-              {step === 1 && (
-                <>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-snug tracking-tight">
-                    Account Security
-                  </h1>
-                  <p className="text-slate-500 dark:text-[#9e9ea7] text-xs sm:text-sm leading-relaxed">
-                    You created your password from the invitation email. You can change it here, or continue to your profile.
-                  </p>
-                </>
-              )}
-
-              {step === 2 && (
-                <>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-snug tracking-tight">
-                    Personal Details & Identity
-                  </h1>
-                  <p className="text-slate-500 dark:text-[#9e9ea7] text-xs sm:text-sm leading-relaxed">
-                    Confirm your official legal identity, date of birth, and primary contact coordinates for company directory records.
-                  </p>
-                </>
-              )}
-
-              {step === 3 && (
-                <>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-snug tracking-tight">
-                    Address & Emergency Contact
-                  </h1>
-                  <p className="text-slate-500 dark:text-[#9e9ea7] text-xs sm:text-sm leading-relaxed">
-                    Provide your residential location and primary emergency contact for workplace compliance and safety.
-                  </p>
-                </>
-              )}
-
-              {step === 4 && (
-                <>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-snug tracking-tight">
-                    Document Uploads
-                  </h1>
-                  <p className="text-slate-500 dark:text-[#9e9ea7] text-xs sm:text-sm leading-relaxed">
-                    Upload official copies of your government photo ID, academic certificates, and signed NDA for verification.
-                  </p>
-                </>
-              )}
-
-              {step === 5 && (
-                <>
-                  <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-snug tracking-tight">
-                    Review & Complete Setup
-                  </h1>
-                  <p className="text-slate-500 dark:text-[#9e9ea7] text-xs sm:text-sm leading-relaxed">
-                    Review your profile summary, accept the accuracy declaration, and enter your workspace.
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Action Navigation Buttons */}
-          <div className="flex items-center gap-3 pt-8 mt-auto">
-            {step > 1 && (
-              <button
-                type="button"
-                onClick={() => setStep((prev) => Math.max(1, prev - 1) as any)}
-                className="px-6 py-3 rounded-xl border border-slate-200 dark:border-[#282830] text-slate-700 dark:text-slate-300 font-bold text-xs sm:text-sm hover:bg-slate-50 dark:hover:bg-[#18181d] transition-all cursor-pointer flex items-center gap-1.5"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>Go Back</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={handleNextStep}
-              disabled={isSubmitting}
-              className="flex-1 py-3 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs sm:text-sm transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] cursor-pointer shadow-md flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <span>{isSubmitting ? 'Saving & Activating Profile...' : step === 5 ? 'Complete Onboarding & Enter' : 'Continue'}</span>
-              {!isSubmitting && step < 5 && <ArrowRight className="w-4 h-4" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Right Area (Scrollable Form Canvas on #f8fafc) */}
-        <div className="flex-1 bg-[#f8fafc] dark:bg-[#0c0c0e] p-4 sm:p-8 md:p-10 lg:p-12 overflow-y-auto custom-scrollbar">
-          <div className="max-w-2xl mx-auto w-full pb-12">
-            
-            {/* ========================================================================= */}
-            {/* STEP 1: CHANGE PASSWORD                                                   */}
-            {/* ========================================================================= */}
-            {step === 1 && (
-              <div className="bg-white dark:bg-[#121214] rounded-3xl p-6 sm:p-8 md:p-9 border border-slate-200/80 dark:border-[#282830] shadow-2xs space-y-5 animate-fade-in text-slate-900 dark:text-white">
-                <div className="border-b border-slate-100 dark:border-[#282830] pb-4">
-                  <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">Change password (optional)</h3>
-                  <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1">Leave these fields empty to keep the password you just created.</p>
-                </div>
-
-                {step1Error && (
-                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-300 text-xs font-bold flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{step1Error}</span>
-                  </div>
-                )}
-
-                <div className="space-y-4">
-                  {/* New Password */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      New Password
-                    </label>
-                    <div className="relative">
+            <div style={{ marginTop: 28 }}>
+              {currentStep === 'password' && (
+                <div className="setup-fields">
+                  <label className="setup-field">
+                    New password
+                    <div className="setup-password">
                       <input
+                        className="setup-control"
                         type={showNewPass ? 'text' : 'password'}
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         placeholder="Leave empty to keep your current password"
                         autoComplete="new-password"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium bg-white dark:bg-[#18181d] text-slate-900 dark:text-white transition-all pr-11"
                       />
                       <button
                         type="button"
-                        onClick={() => setShowNewPass(!showNewPass)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 cursor-pointer"
+                        className="setup-icon-btn"
+                        onClick={() => setShowNewPass((v) => !v)}
+                        aria-label={showNewPass ? 'Hide password' : 'Show password'}
                       >
-                        {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        {showNewPass ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                       </button>
                     </div>
-                  </div>
-
-                  {/* Confirm New Password */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Confirm New Password
-                    </label>
-                    <div className="relative">
+                  </label>
+                  {newPassword.length > 0 ? <CognitoPasswordPolicyGuide password={newPassword} showAlways /> : null}
+                  <label className="setup-field">
+                    Confirm new password
+                    <div className="setup-password">
                       <input
+                        className="setup-control"
                         type={showConfirmPass ? 'text' : 'password'}
-                        autoComplete="new-password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="Re-enter new password"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium bg-white dark:bg-[#18181d] text-slate-900 dark:text-white transition-all pr-11"
+                        autoComplete="new-password"
                       />
                       <button
                         type="button"
-                        onClick={() => setShowConfirmPass(!showConfirmPass)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 cursor-pointer"
+                        className="setup-icon-btn"
+                        onClick={() => setShowConfirmPass((v) => !v)}
+                        aria-label={showConfirmPass ? 'Hide password' : 'Show password'}
                       >
-                        {showConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        {showConfirmPass ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                       </button>
                     </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ========================================================================= */}
-            {/* STEP 2: PERSONAL DETAILS                                                  */}
-            {/* ========================================================================= */}
-            {step === 2 && (
-              <div className="bg-white dark:bg-[#121214] rounded-3xl p-6 sm:p-8 md:p-9 border border-slate-200/80 dark:border-[#282830] shadow-2xs space-y-5 animate-fade-in text-slate-900 dark:text-white">
-                <div className="border-b border-slate-100 dark:border-[#282830] pb-4">
-                  <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">Identity & Contact Info</h3>
-                  <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1">Please confirm your legal name, birthday, and contact numbers.</p>
-                </div>
-
-                {step2Error && (
-                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-300 text-xs font-bold flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{step2Error}</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Full Legal Name <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="e.g. Alex Mercer"
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Official Work Email <span className="text-slate-400 font-normal">(Verified)</span>
-                    </label>
-                    <input
-                      type="email"
-                      disabled
-                      value={email}
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-slate-50 dark:bg-[#18181d] px-4.5 py-3 text-sm text-slate-500 dark:text-[#9e9ea7] font-medium cursor-not-allowed font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Phone Number (10 Digits) <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="tel"
-                      required
-                      maxLength={10}
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      placeholder="e.g. 9876543210"
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Date of Birth <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      max={new Date().toISOString().split('T')[0]}
-                      value={dateOfBirth}
-                      onChange={(e) => setDateOfBirth(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all cursor-pointer"
-                    />
-                  </div>
-                </div>
-
-                {/* Gender Identity */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">
-                    Gender Identity
                   </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
-                    {(['None', 'Male', 'Female', 'Non-Binary', 'Prefer not to say'] as const).map((g) => {
-                      const isSel = gender === g;
-                      return (
-                        <button
-                          key={g}
-                          type="button"
-                          onClick={() => setGender(g)}
-                          className={`px-3 py-2.5 rounded-2xl border text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
-                            isSel
-                              ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 shadow-2xs ring-1 ring-blue-500'
-                              : 'border-slate-200 dark:border-[#282830] text-slate-700 dark:text-slate-300 bg-white dark:bg-[#18181d]'
-                          }`}
-                        >
-                          <span className="truncate">{g}</span>
-                          <div
-                            className={`w-3 h-3 rounded-full border flex items-center justify-center shrink-0 ml-1.5 ${
-                              isSel ? 'border-blue-600 bg-blue-600' : 'border-slate-300 dark:border-slate-600'
-                            }`}
-                          />
-                        </button>
-                      );
-                    })}
-                  </div>
                 </div>
+              )}
 
-                {/* Blood Group & Marital Status */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Blood Group
-                    </label>
-                    <select
-                      value={bloodGroup}
-                      onChange={(e) => setBloodGroup(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-600 font-medium cursor-pointer"
+              {currentStep === 'personal' && (
+                <div className="setup-fields">
+                  {fieldEnabled('avatar') && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 14,
+                        marginBottom: 8,
+                      }}
                     >
-                      {['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'].map((bg) => (
-                        <option key={bg} value={bg}>
-                          {bg}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Marital Status
-                    </label>
-                    <select
-                      value={maritalStatus}
-                      onChange={(e) => setMaritalStatus(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-600 font-medium cursor-pointer"
-                    >
-                      <option value="Single">Single</option>
-                      <option value="Married">Married</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Nationality & Personal Email */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Nationality / Citizenship
-                    </label>
-                    <select
-                      value={nationality}
-                      onChange={(e) => setNationality(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all cursor-pointer"
-                    >
-                      <option value="">Select Nationality</option>
-                      {WORLD_NATIONALITIES.map((nat) => (
-                        <option key={nat} value={nat}>
-                          {nat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Personal Backup Email
-                    </label>
-                    <input
-                      type="email"
-                      value={personalEmail}
-                      onChange={(e) => setPersonalEmail(e.target.value)}
-                      placeholder="e.g. personal@gmail.com"
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                    />
-                  </div>
-                </div>
-
-                {/* Dynamic Custom Fields for Personal section */}
-                {renderCustomFieldsForSection('personal')}
-                {renderCustomFieldsForSection('basic')}
-              </div>
-            )}
-
-            {/* ========================================================================= */}
-            {/* STEP 3: ADDRESS & EMERGENCY CONTACTS                                      */}
-            {/* ========================================================================= */}
-            {step === 3 && (
-              <div className="bg-white dark:bg-[#121214] rounded-3xl p-6 sm:p-8 md:p-9 border border-slate-200/80 dark:border-[#282830] shadow-2xs space-y-5 animate-fade-in text-slate-900 dark:text-white">
-                <div className="border-b border-slate-100 dark:border-[#282830] pb-4">
-                  <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">Residential & Emergency Contact</h3>
-                  <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1">Your residential address and emergency contact details.</p>
-                </div>
-
-                {step3Error && (
-                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-300 text-xs font-bold flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{step3Error}</span>
-                  </div>
-                )}
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Street Address <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={streetAddress}
-                      onChange={(e) => setStreetAddress(e.target.value)}
-                      placeholder="e.g. 42 Park Avenue, Apartment 5B"
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        City <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={city}
-                        onChange={(e) => setCity(e.target.value)}
-                        placeholder="e.g. New York, Bengaluru"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        State / Province <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={stateProvince}
-                        onChange={(e) => setStateProvince(e.target.value)}
-                        placeholder="e.g. NY, Karnataka"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Postal / ZIP Code <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        maxLength={10}
-                        value={postalCode}
-                        onChange={(e) =>
-                          setPostalCode(e.target.value.toUpperCase().replace(/[^A-Z0-9\s-]/g, '').slice(0, 10))
-                        }
-                        placeholder="e.g. 10001"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all font-mono"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Country <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        required
-                        value={country}
-                        onChange={(e) => setCountry(e.target.value)}
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all cursor-pointer"
+                      <div
+                        style={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: '50%',
+                          overflow: 'hidden',
+                          border: '1px solid #dce2e5',
+                          background: '#f3f5f7',
+                          flexShrink: 0,
+                        }}
                       >
-                        <option value="">Select Country</option>
-                        {WORLD_COUNTRIES.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
+                        <UserAvatar src={avatar} name={fullName || targetEmployee.name} className="h-full w-full"/>
+                      </div>
+                      <div className="employee-profile-photo-action"><button type="button" onClick={() => avatarInputRef.current?.click()}>Add profile photo{requiredMark(fieldRequired('avatar'))}</button><input ref={avatarInputRef} type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload}/><p>{fieldRequired('avatar') ? 'Required by your workspace.' : 'Optional. Add a photo your teammates will recognise.'}</p></div>
+                    </div>
+                  )}
+                  <div className="setup-form-grid" style={{ marginTop: 0 }}>
+                    {fieldEnabled('name') && (
+                      <label className="setup-field">
+                        Full legal name{requiredMark(fieldRequired('name'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={fullName}
+                          onChange={(e) => setFullName(e.target.value)}
+                          placeholder="e.g. Alex Mercer"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('email') && (
+                      <label className="setup-field">
+                        Work email
+                        <input className="setup-control" type="email" value={email} disabled />
+                      </label>
+                    )}
+                    {fieldEnabled('phone') && (
+                      <label className="setup-field">
+                        Phone number{requiredMark(fieldRequired('phone'))}
+                        <input
+                          className="setup-control"
+                          type="tel"
+                          maxLength={10}
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                          placeholder="e.g. 9876543210"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('dateOfBirth') && (
+                      <label className="setup-field">
+                        Date of birth{requiredMark(fieldRequired('dateOfBirth'))}
+                        <DateInput className="setup-control" max={new Date().toISOString().split('T')[0]} value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)}
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('bloodGroup') && (
+                      <label className="setup-field">
+                        Blood group{requiredMark(fieldRequired('bloodGroup'))}
+                        <select
+                          className="setup-control"
+                          value={bloodGroup}
+                          onChange={(e) => setBloodGroup(e.target.value)}
+                        >
+                          <option value="">Select blood group</option>
+                          {(
+                            configuredFields.find((f) => f.name === 'bloodGroup')?.options || [
+                              'A+',
+                              'A-',
+                              'B+',
+                              'B-',
+                              'O+',
+                              'O-',
+                              'AB+',
+                              'AB-',
+                            ]
+                          ).map((bg) => (
+                            <option key={bg} value={bg}>
+                              {bg}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {fieldEnabled('maritalStatus') && (
+                      <label className="setup-field">
+                        Marital status{requiredMark(fieldRequired('maritalStatus'))}
+                        <select
+                          className="setup-control"
+                          value={maritalStatus}
+                          onChange={(e) => setMaritalStatus(e.target.value)}
+                        >
+                          <option value="">Select status</option>
+                          {(
+                            configuredFields.find((f) => f.name === 'maritalStatus')?.options || [
+                              'Single',
+                              'Married',
+                              'Other',
+                            ]
+                          ).map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {fieldEnabled('nationality') && (
+                      <label className="setup-field">
+                        Nationality{requiredMark(fieldRequired('nationality'))}
+                        <select
+                          className="setup-control"
+                          value={nationality}
+                          onChange={(e) => setNationality(e.target.value)}
+                        >
+                          <option value="">Select nationality</option>
+                          {WORLD_NATIONALITIES.map((nat) => (
+                            <option key={nat} value={nat}>
+                              {nat}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {fieldEnabled('personalEmail') && (
+                      <label className="setup-field">
+                        Personal backup email{requiredMark(fieldRequired('personalEmail'))}
+                        <input
+                          className="setup-control"
+                          type="email"
+                          value={personalEmail}
+                          onChange={(e) => setPersonalEmail(e.target.value)}
+                          placeholder="e.g. personal@gmail.com"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('healthInsurance') && (
+                      <label className="setup-field">
+                        Health insurance / provider{requiredMark(fieldRequired('healthInsurance'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={healthInsurance}
+                          onChange={(e) => setHealthInsurance(e.target.value)}
+                          placeholder="e.g. Company plan / provider name"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('bio') && (
+                      <label className="setup-field is-wide">
+                        About / bio{requiredMark(fieldRequired('bio'))}
+                        <textarea
+                          className="setup-control"
+                          rows={3}
+                          value={bio}
+                          onChange={(e) => setBio(e.target.value)}
+                          placeholder="Short public about text"
+                          style={{ height: 'auto', padding: '10px 14px', resize: 'vertical' }}
+                        />
+                      </label>
+                    )}
+                  </div>
+
+                  {fieldEnabled('gender') && (
+                    <div style={{ marginTop: 8 }}>
+                      <span
+                        style={{
+                          display: 'block',
+                          color: '#172234',
+                          fontSize: 12,
+                          fontWeight: 650,
+                          marginBottom: 8,
+                        }}
+                      >
+                        Gender{requiredMark(fieldRequired('gender'))}
+                      </span>
+                      <div className="setup-chips" style={{ marginTop: 0 }}>
+                        {genderOptions.map((g) => (
+                          <button
+                            key={g}
+                            type="button"
+                            className={`setup-chip ${gender === g ? 'is-on' : ''}`}
+                            onClick={() => setGender(g)}
+                          >
+                            {g}
+                          </button>
                         ))}
-                      </select>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {renderCustomFieldsForSection('personal')}
+                  {renderCustomFieldsForSection('basic')}
                 </div>
+              )}
 
-                {/* Emergency Contact Section */}
-                <div className="pt-4 border-t border-slate-100 dark:border-[#282830] space-y-4">
-                  <div>
-                    <h4 className="font-extrabold text-slate-900 dark:text-white text-sm">Emergency Point of Contact</h4>
-                    <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-0.5">Primary individual to contact in case of workplace emergencies.</p>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Contact Name <span className="text-red-500">*</span>
+              {currentStep === 'address' && (
+                <div className="setup-fields">
+                  <div className="setup-form-grid" style={{ marginTop: 0 }}>
+                    {fieldEnabled('primaryAddress') && (
+                      <label className="setup-field is-wide">
+                        Street address{requiredMark(fieldRequired('primaryAddress'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={streetAddress}
+                          onChange={(e) => setStreetAddress(e.target.value)}
+                          placeholder="e.g. 42 Park Avenue, Apartment 5B"
+                        />
                       </label>
-                      <input
-                        type="text"
-                        required
-                        value={emergencyName}
-                        onChange={(e) => setEmergencyName(e.target.value)}
-                        placeholder="e.g. Sarah Mercer"
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                        Relationship <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={emergencyRelation}
-                        onChange={(e) => setEmergencyRelation(e.target.value)}
-                        className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-600 font-medium cursor-pointer"
-                      >
-                        <option value="Spouse">Spouse</option>
-                        <option value="Parent">Parent</option>
-                        <option value="Sibling">Sibling</option>
-                        <option value="Family">Family Member</option>
-                        <option value="Friend">Friend / Guardian</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5">
-                      Emergency Phone (10 Digits) <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="tel"
-                      required
-                      maxLength={10}
-                      value={emergencyPhone}
-                      onChange={(e) => setEmergencyPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      placeholder="e.g. 9876543210"
-                      className="w-full rounded-2xl border border-slate-200 dark:border-[#282830] bg-white dark:bg-[#18181d] px-4.5 py-3 text-sm outline-none focus:border-blue-600 font-medium text-slate-900 dark:text-white transition-all font-mono"
-                    />
-                  </div>
-                </div>
-
-                {/* Dynamic Custom Fields for Address section */}
-                {renderCustomFieldsForSection('address')}
-              </div>
-            )}
-
-            {/* ========================================================================= */}
-            {/* STEP 4: DOCUMENT UPLOADS                                                  */}
-            {/* ========================================================================= */}
-            {step === 4 && (
-              <div className="bg-white dark:bg-[#121214] rounded-3xl p-6 sm:p-8 md:p-9 border border-slate-200/80 dark:border-[#282830] shadow-2xs space-y-6 animate-fade-in text-slate-900 dark:text-white">
-                <div className="border-b border-slate-100 dark:border-[#282830] pb-4">
-                  <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">
-                    Compliance & Supporting Documents
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1">
-                    Upload official PDF scans or clear photos for compliance and background verification.
-                  </p>
-                </div>
-
-                {step5Error && (
-                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-300 text-xs font-bold flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{step5Error}</span>
-                  </div>
-                )}
-
-                {/* Document Slots Grid */}
-                <div className="space-y-3">
-                  {configuredFields
-                    .filter((f) => f.enabled && f.section === 'documents')
-                    .map((field) => {
-                      const uploaded = uploadedFiles[field.id];
-
-                      return (
-                        <div
-                          key={field.id}
-                          className="p-4 sm:p-4.5 rounded-2xl border border-slate-200/80 dark:border-[#282830] bg-white dark:bg-[#18181d] hover:border-slate-300 dark:hover:border-[#383842] transition-all"
+                    )}
+                    {fieldEnabled('country') && (
+                      <label className="setup-field">
+                        Country{requiredMark(fieldRequired('country'))}
+                        <select
+                          className="setup-control"
+                          value={country}
+                          onChange={(e) => handleCountryChange(e.target.value)}
                         >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-white">
-                                  {field.label}
-                                </span>
-                                {field.required ? (
-                                  <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 dark:bg-[#25252c] text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-[#32323c]">
-                                    Required
-                                  </span>
-                                ) : (
-                                  <span className="text-[11px] font-normal text-slate-400 dark:text-slate-500">
-                                    Optional
-                                  </span>
-                                )}
-                              </div>
-                              {field.description && (
-                                <p className="text-[11px] text-slate-400 leading-relaxed">{field.description}</p>
-                              )}
-                            </div>
+                          <option value="">Select country</option>
+                          {WORLD_COUNTRIES.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {fieldEnabled('stateProvince') && (
+                      <label className="setup-field">
+                        State / province{requiredMark(fieldRequired('stateProvince'))}
+                        {useLocationSelects ? (
+                          <select
+                            className="setup-control"
+                            value={stateProvince}
+                            onChange={(e) => handleStateChange(e.target.value)}
+                            disabled={!country}
+                          >
+                            <option value="">Select state / province</option>
+                            {stateOptions.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className="setup-control"
+                            type="text"
+                            value={stateProvince}
+                            onChange={(e) => setStateProvince(e.target.value)}
+                            placeholder="e.g. Karnataka"
+                          />
+                        )}
+                      </label>
+                    )}
+                    {fieldEnabled('city') && (
+                      <label className="setup-field">
+                        City{requiredMark(fieldRequired('city'))}
+                        {useLocationSelects ? (
+                          <select
+                            className="setup-control"
+                            value={city}
+                            onChange={(e) => setCity(e.target.value)}
+                            disabled={!stateProvince}
+                          >
+                            <option value="">Select city</option>
+                            {cityOptions.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className="setup-control"
+                            type="text"
+                            value={city}
+                            onChange={(e) => setCity(e.target.value)}
+                            placeholder="e.g. Bengaluru"
+                          />
+                        )}
+                      </label>
+                    )}
+                    {fieldEnabled('postalCode') && (
+                      <label className="setup-field">
+                        Postal / ZIP code{requiredMark(fieldRequired('postalCode'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          maxLength={10}
+                          value={postalCode}
+                          onChange={(e) =>
+                            setPostalCode(
+                              e.target.value.toUpperCase().replace(/[^A-Z0-9\s-]/g, '').slice(0, 10)
+                            )
+                          }
+                          placeholder="e.g. 560001"
+                        />
+                      </label>
+                    )}
+                  </div>
 
-                            {/* Upload Action / Uploaded File Status */}
-                            <div className="shrink-0">
-                              {uploaded ? (
-                                <div className="flex items-center gap-2">
-                                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-[#202026] border border-slate-200/80 dark:border-[#2e2e38] text-slate-700 dark:text-slate-200 text-xs">
-                                    <div className="w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                                      <Check className="w-2.5 h-2.5 stroke-[3]" />
-                                    </div>
-                                    <span className="font-medium text-slate-800 dark:text-slate-200 max-w-[150px] truncate">{uploaded.name}</span>
-                                    <span className="text-[10px] text-slate-400 font-normal">({uploaded.size})</span>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveUploadedFile(field.id)}
-                                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-[#282830] transition-colors cursor-pointer"
-                                    title="Remove file"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <label className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-all shadow-xs cursor-pointer active:scale-95">
-                                  <UploadCloud className="w-3.5 h-3.5" />
-                                  <span>Select File</span>
-                                  <input
-                                    type="file"
-                                    className="sr-only"
-                                    accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
-                                    onChange={(e) => handleSimulateFileUpload(field.id, field.label, e)}
-                                  />
-                                </label>
-                              )}
+                  <h3
+                    style={{
+                      margin: '12px 0 0',
+                      paddingTop: 20,
+                      borderTop: '1px solid #dce2e5',
+                      fontSize: 15,
+                      fontWeight: 750,
+                      letterSpacing: '-.02em',
+                    }}
+                  >
+                    Emergency contact
+                  </h3>
+                  <div className="setup-form-grid">
+                    {fieldEnabled('emergencyContactName') && (
+                      <label className="setup-field">
+                        Contact name{requiredMark(fieldRequired('emergencyContactName'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={emergencyName}
+                          onChange={(e) => setEmergencyName(e.target.value)}
+                          placeholder="e.g. Sarah Mercer"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('emergencyContactRelation') && (
+                      <label className="setup-field">
+                        Relationship{requiredMark(fieldRequired('emergencyContactRelation'))}
+                        <select
+                          className="setup-control"
+                          value={emergencyRelation}
+                          onChange={(e) => setEmergencyRelation(e.target.value)}
+                        >
+                          <option value="">Select relationship</option>
+                          {(
+                            configuredFields.find((f) => f.name === 'emergencyContactRelation')
+                              ?.options || ['Spouse', 'Parent', 'Sibling', 'Family', 'Friend', 'Guardian']
+                          ).map((rel) => (
+                            <option key={rel} value={rel}>
+                              {rel}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {fieldEnabled('emergencyContactPhone') && (
+                      <label className="setup-field is-wide">
+                        Emergency phone{requiredMark(fieldRequired('emergencyContactPhone'))}
+                        <input
+                          className="setup-control"
+                          type="tel"
+                          maxLength={10}
+                          value={emergencyPhone}
+                          onChange={(e) =>
+                            setEmergencyPhone(e.target.value.replace(/\D/g, '').slice(0, 10))
+                          }
+                          placeholder="e.g. 9876543210"
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {renderCustomFieldsForSection('address')}
+                </div>
+              )}
+
+              {currentStep === 'banking' && (
+                <div className="setup-fields">
+                  <div className="setup-form-grid" style={{ marginTop: 0 }}>
+                    {fieldEnabled('bankName') && (
+                      <label className="setup-field">
+                        Bank{requiredMark(fieldRequired('bankName'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={bankName}
+                          onChange={(e) => setBankName(e.target.value)}
+                          placeholder="e.g. HDFC Bank"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('accountHolderName') && (
+                      <label className="setup-field">
+                        Account holder name{requiredMark(fieldRequired('accountHolderName'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={accountHolderName}
+                          onChange={(e) => setAccountHolderName(e.target.value)}
+                          placeholder="As registered with the bank"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('accountNumber') && (
+                      <label className="setup-field">
+                        Account number{requiredMark(fieldRequired('accountNumber'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={accountNumber}
+                          onChange={(e) => setAccountNumber(e.target.value)}
+                          placeholder="000123456789"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('ifscCode') && (
+                      <label className="setup-field">
+                        Routing / IFSC / SWIFT{requiredMark(fieldRequired('ifscCode'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={ifscCode}
+                          onChange={(e) => setIfscCode(e.target.value)}
+                          placeholder="e.g. HDFC0001234"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('personalTaxId') && (
+                      <label className="setup-field">
+                        PAN / SSN / tax ID{requiredMark(fieldRequired('personalTaxId'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={personalTaxId}
+                          onChange={(e) => setPersonalTaxId(e.target.value)}
+                          placeholder="ABCDE1234F"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('socialInsurance') && (
+                      <label className="setup-field">
+                        Social insurance number{requiredMark(fieldRequired('socialInsurance'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={socialInsurance}
+                          onChange={(e) => setSocialInsurance(e.target.value)}
+                          placeholder="e.g. national social insurance ID"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('pfUanNumber') && (
+                      <label className="setup-field">
+                        PF Universal Account (UAN){requiredMark(fieldRequired('pfUanNumber'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={pfUanNumber}
+                          onChange={(e) => setPfUanNumber(e.target.value)}
+                          placeholder="100987654321"
+                        />
+                      </label>
+                    )}
+                    {fieldEnabled('esiNumber') && (
+                      <label className="setup-field">
+                        ESIC insurance number{requiredMark(fieldRequired('esiNumber'))}
+                        <input
+                          className="setup-control"
+                          type="text"
+                          value={esiNumber}
+                          onChange={(e) => setEsiNumber(e.target.value)}
+                          placeholder="e.g. 1234567890"
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {renderCustomFieldsForSection('banking')}
+                </div>
+              )}
+
+              {currentStep === 'documents' && (
+                <div className="setup-fields">
+                  {documentFields.map((field) => {
+                    const uploaded = uploadedFiles[field.id];
+                    return (
+                      <div
+                        key={field.id}
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 14,
+                          padding: '16px 18px',
+                          border: '1px solid #dce2e5',
+                          borderRadius: 12,
+                          background: '#fff',
+                        }}
+                      >
+                        <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+                          <div style={{ fontSize: 14, fontWeight: 750, color: '#172234' }}>
+                            {field.label}
+                            {field.required ? ' *' : ''}
+                          </div>
+                          {field.description ? (
+                            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#687789', lineHeight: 1.45 }}>
+                              {field.description}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div style={{ flex: '0 0 auto' }}>
+                          {uploaded ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  minHeight: 36,
+                                  padding: '0 12px',
+                                  borderRadius: 7,
+                                  border: '1px solid #dde4e9',
+                                  background: '#eaf1ee',
+                                  color: '#17324e',
+                                  fontSize: 12,
+                                  fontWeight: 650,
+                                }}
+                              >
+                                <Check className="size-3.5" aria-hidden="true" />
+                                <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {uploaded.name}
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                className="setup-button setup-button--secondary"
+                                style={{ minHeight: 36, padding: '0 10px' }}
+                                onClick={() => handleRemoveUploadedFile(field.id)}
+                                aria-label={`Remove ${field.label}`}
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
                             </div>
+                          ) : (
+                            <label className="setup-button setup-button--primary" style={{ cursor: 'pointer' }}>
+                              <UploadCloud className="size-4" aria-hidden="true" />
+                              Select file
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                                onChange={(e) => handleFileUpload(field.id, e)}
+                              />
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {currentStep === 'review' && (
+                <div className="setup-fields">
+                  <div className="setup-review-list" style={{ marginTop: 0 }}>
+                    <div className="setup-review-item" style={{ gridTemplateColumns: '1fr' }}>
+                      <div>
+                        <h3>Personal</h3>
+                        <div className="setup-facts-detail">
+                          {fieldEnabled('name') && (
+                            <p>
+                              <strong>Name:</strong> {fullName || '—'}
+                            </p>
+                          )}
+                          {fieldEnabled('email') && (
+                            <p>
+                              <strong>Work email:</strong> {email || '—'}
+                            </p>
+                          )}
+                          {fieldEnabled('phone') && phone && (
+                            <p>
+                              <strong>Phone:</strong> {phone}
+                            </p>
+                          )}
+                          {fieldEnabled('dateOfBirth') && dateOfBirth && (
+                            <p>
+                              <strong>Date of birth:</strong> {dateOfBirth}
+                            </p>
+                          )}
+                          {fieldEnabled('gender') && gender && (
+                            <p>
+                              <strong>Gender:</strong> {gender}
+                            </p>
+                          )}
+                          {fieldEnabled('bloodGroup') && bloodGroup && (
+                            <p>
+                              <strong>Blood group:</strong> {bloodGroup}
+                            </p>
+                          )}
+                          {fieldEnabled('maritalStatus') && maritalStatus && (
+                            <p>
+                              <strong>Marital status:</strong> {maritalStatus}
+                            </p>
+                          )}
+                          {fieldEnabled('nationality') && nationality && (
+                            <p>
+                              <strong>Nationality:</strong> {nationality}
+                            </p>
+                          )}
+                          {fieldEnabled('personalEmail') && personalEmail && (
+                            <p>
+                              <strong>Personal email:</strong> {personalEmail}
+                            </p>
+                          )}
+                          {fieldEnabled('healthInsurance') && healthInsurance && (
+                            <p>
+                              <strong>Health insurance:</strong> {healthInsurance}
+                            </p>
+                          )}
+                          {fieldEnabled('bio') && bio && (
+                            <p>
+                              <strong>Bio:</strong> {bio}
+                            </p>
+                          )}
+                          {fieldEnabled('avatar') && (
+                            <p>
+                              <strong>Profile photo:</strong> {avatar ? 'Uploaded' : 'Not uploaded'}
+                            </p>
+                          )}
+                          {(targetEmployee.designation || targetEmployee.department) && (
+                            <p>
+                              <strong>Role / department:</strong>{' '}
+                              {[targetEmployee.designation, targetEmployee.department]
+                                .filter(Boolean)
+                                .join(' · ')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="setup-review-item" style={{ gridTemplateColumns: '1fr' }}>
+                      <div>
+                        <h3>Address & emergency</h3>
+                        <div className="setup-facts-detail">
+                          <p>
+                            {[streetAddress, city, stateProvince, postalCode, country]
+                              .filter(Boolean)
+                              .join(', ') || '—'}
+                          </p>
+                          {(emergencyName || emergencyPhone) && (
+                            <p>
+                              <strong>Emergency:</strong> {emergencyName || '—'}
+                              {emergencyRelation ? ` (${emergencyRelation})` : ''}
+                              {emergencyPhone ? ` · ${emergencyPhone}` : ''}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {hasBanking && (
+                      <div className="setup-review-item" style={{ gridTemplateColumns: '1fr' }}>
+                        <div>
+                          <h3>Banking & tax</h3>
+                          <div className="setup-facts-detail">
+                            {fieldEnabled('bankName') && bankName && (
+                              <p>
+                                <strong>Bank:</strong> {bankName}
+                                {accountNumber ? ` · ···${accountNumber.slice(-4)}` : ''}
+                              </p>
+                            )}
+                            {fieldEnabled('accountHolderName') && accountHolderName && (
+                              <p>
+                                <strong>Account holder:</strong> {accountHolderName}
+                              </p>
+                            )}
+                            {fieldEnabled('personalTaxId') && personalTaxId && (
+                              <p>
+                                <strong>Tax ID:</strong> {personalTaxId}
+                              </p>
+                            )}
+                            {fieldEnabled('socialInsurance') && socialInsurance && (
+                              <p>
+                                <strong>Social insurance:</strong> {socialInsurance}
+                              </p>
+                            )}
+                            {fieldEnabled('pfUanNumber') && pfUanNumber && (
+                              <p>
+                                <strong>PF UAN:</strong> {pfUanNumber}
+                              </p>
+                            )}
+                            {fieldEnabled('esiNumber') && esiNumber && (
+                              <p>
+                                <strong>ESIC:</strong> {esiNumber}
+                              </p>
+                            )}
                           </div>
                         </div>
-                      );
-                    })}
-                </div>
-              </div>
-            )}
-
-            {/* ========================================================================= */}
-            {/* STEP 5: REVIEW & DECLARATION                                              */}
-            {/* ========================================================================= */}
-            {step === 5 && (
-              <div className="bg-white dark:bg-[#121214] rounded-3xl p-6 sm:p-8 md:p-9 border border-slate-200/80 dark:border-[#282830] shadow-2xs space-y-5 animate-fade-in text-slate-900 dark:text-white">
-                <div className="border-b border-slate-100 dark:border-[#282830] pb-4">
-                  <h3 className="font-extrabold text-slate-900 dark:text-white text-lg tracking-tight">Review Profile & Credentials</h3>
-                  <p className="text-xs text-slate-500 dark:text-[#9e9ea7] mt-1">Please review your submitted profile details before completing onboarding.</p>
-                </div>
-
-                {step5ReviewError && (
-                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-300 text-xs font-bold flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{step5ReviewError}</span>
-                  </div>
-                )}
-
-                {/* Profile Summary Roster */}
-                <div className="space-y-3.5">
-                  <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#16161a] border border-slate-200/90 dark:border-[#282830] space-y-2.5 shadow-2xs">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white pb-2 border-b border-slate-100 dark:border-[#24242c]">
-                      <span>1. Account Credentials</span>
-                      <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 font-semibold text-xs">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Password Configured
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-normal">
-                      Login password updated and secured.
-                    </p>
-                  </div>
-
-                  <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#16161a] border border-slate-200/90 dark:border-[#282830] space-y-3 shadow-2xs">
-                    <div className="text-xs font-bold text-slate-900 dark:text-white pb-2 border-b border-slate-100 dark:border-[#24242c]">2. Personal & Contact Details</div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 text-xs">
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Legal Name</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">{fullName}</span>
                       </div>
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Official Email</span>
-                        <span className="font-semibold text-slate-900 dark:text-white truncate block">{email}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Phone</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">{phone || '—'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Date of Birth</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">{dateOfBirth || '—'}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Gender</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">{gender}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Blood Group</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">{bloodGroup}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#16161a] border border-slate-200/90 dark:border-[#282830] space-y-3 shadow-2xs">
-                    <div className="text-xs font-bold text-slate-900 dark:text-white pb-2 border-b border-slate-100 dark:border-[#24242c]">3. Residence & Emergency</div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Residential Address</span>
-                        <span className="font-semibold text-slate-900 dark:text-white leading-snug">{streetAddress}, {city}, {stateProvince} {postalCode}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-[11px] font-medium block mb-0.5">Emergency Contact</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">{emergencyName} ({emergencyRelation}) — {emergencyPhone}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Uploaded Documents Summary */}
-                  <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#16161a] border border-slate-200/90 dark:border-[#282830] space-y-3 shadow-2xs">
-                    <div className="text-xs font-bold text-slate-900 dark:text-white pb-2 border-b border-slate-100 dark:border-[#24242c]">4. Uploaded Verification Documents</div>
-                    <div className="space-y-2">
-                      {Object.values(uploadedFiles).length === 0 ? (
-                        <span className="text-xs text-slate-400 font-normal">No documents attached</span>
-                      ) : (
-                        Object.entries(uploadedFiles).map(([fieldId, file]) => {
-                          const f = configuredFields.find((x) => x.id === fieldId);
-                          return (
-                            <div key={fieldId} className="flex items-center justify-between text-xs py-1 border-b last:border-b-0 border-slate-50 dark:border-[#222228]">
-                              <span className="text-slate-500 dark:text-slate-400 font-medium">{f?.label || 'Document'}</span>
-                              <span className="font-semibold text-slate-900 dark:text-slate-200 flex items-center gap-1.5">
-                                <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                                <span>{file.name}</span>
-                              </span>
+                    )}
+                    {hasDocuments && (
+                      <div className="setup-review-item" style={{ gridTemplateColumns: '1fr' }}>
+                        <div>
+                          <h3>Documents</h3>
+                          {Object.keys(uploadedFiles).length === 0 ? (
+                            <p>No documents attached</p>
+                          ) : (
+                            <div className="setup-facts-detail">
+                              {Object.entries(uploadedFiles).map(([fieldId, file]) => {
+                                const f = configuredFields.find((x) => x.id === fieldId);
+                                return (
+                                  <p key={fieldId}>
+                                    <strong>{f?.label || 'Document'}:</strong> {file.name}
+                                  </p>
+                                );
+                              })}
                             </div>
-                          );
-                        })
-                      )}
-                    </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
 
-                {/* Legal Declaration Checkbox */}
-                <div className="pt-2">
-                  <label className="flex items-start gap-3 cursor-pointer p-4.5 rounded-2xl border border-slate-200/90 dark:border-[#282830] bg-white dark:bg-[#16161a] hover:border-slate-300 dark:hover:border-[#383842] transition-all shadow-2xs">
+                  <label
+                    className="setup-check"
+                    style={{
+                      marginTop: 8,
+                      alignItems: 'flex-start',
+                      padding: '16px 18px',
+                      border: '1px solid #dce2e5',
+                      borderRadius: 12,
+                      background: '#fff',
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={agreedToDeclaration}
                       onChange={(e) => setAgreedToDeclaration(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      style={{ marginTop: 2 }}
                     />
-                    <div className="text-xs leading-relaxed text-slate-700 dark:text-slate-300">
-                      <span className="font-bold text-slate-900 dark:text-white block mb-0.5">Profile Accuracy Confirmation</span>
-                      I confirm that all personal, residential, and document uploads submitted are accurate, authentic, and up to date.
-                    </div>
+                    <span>
+                      <strong style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>
+                        Profile accuracy confirmation
+                      </strong>
+                      <span style={{ fontSize: 13, color: '#5e6c7b', fontWeight: 400, lineHeight: 1.45 }}>
+                        I confirm that the details I submitted are accurate and up to date.
+                      </span>
+                    </span>
                   </label>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+
+            <div className="setup-form-actions" style={{ marginTop: 32 }}>
+              {stepIndex > 0 ? (
+                <button
+                  type="button"
+                  className="setup-button setup-button--secondary"
+                  onClick={() => {
+                    setStepError('');
+                    setStepIndex((i) => Math.max(0, i - 1));
+                  }}
+                >
+                  Back
+                </button>
+              ) : (
+                <span />
+              )}
+              <button
+                type="button"
+                className="setup-button setup-button--primary"
+                disabled={isSubmitting}
+                onClick={goNext}
+              >
+                {primaryLabel}
+                {!isSubmitting && currentStep !== 'review' ? <span aria-hidden="true">→</span> : null}
+              </button>
+            </div>
           </div>
+          <footer className="employee-onboarding-footer"><span>Your administrator manages your workspace access.</span><OnboardingHelp/></footer>
         </div>
       </div>
+
     </div>
   );
 };

@@ -1,8 +1,10 @@
 import { Request } from 'express';
 import { frontendUrl, sendEmail } from '../../config/ses.js';
+import { withTenantContext } from '../../db/queryRunner.js';
 import { taskAssignedEmail, taskDueSoonEmail } from '../../emails/templates.js';
 import { log } from '../../utils/logger.js';
-import { resolveCallerEmployee } from '../../utils/employeeScope.js';
+import { emitUserNotification } from '../chat/chat.realtime.js';
+import { sendPushToEmployees } from '../push/push.service.js';
 
 export type TenantQuery = (text: string, params?: any[]) => Promise<{ rows: any[] }>;
 
@@ -44,7 +46,7 @@ async function loadAssignees(query: TenantQuery, employeeIds: string[]) {
     const employment = String(row.employment_status || 'active').toLowerCase();
     if (account === 'Deactivated' || account === 'Suspended' || account === 'Terminated') return false;
     if (employment === 'terminated' || employment === 'exited') return false;
-    return Boolean(String(row.email || '').trim());
+    return true;
   });
 }
 
@@ -67,17 +69,40 @@ async function writeInAppNotice(
   title: string,
   message: string,
   linkUrl: string,
-  priority = 'medium'
+  priority = 'medium',
+  tag?: string,
+  tenantKey?: string | null
 ): Promise<void> {
+  let noticeId = '';
   try {
-    await query(
+    const inserted = await query(
       `INSERT INTO notifications (recipient_employee_id, title, message, category, priority, link_url, is_read)
-       VALUES ($1, $2, $3, 'Tasks', $4, $5, false)`,
+       VALUES ($1, $2, $3, 'Tasks', $4, $5, false)
+       RETURNING id`,
       [recipientId, title, message, priority, linkUrl]
     );
+    noticeId = inserted.rows[0]?.id ? String(inserted.rows[0].id) : '';
   } catch (err) {
     log.warn('Could not write task notification', err);
+    return;
   }
+  if (tenantKey && noticeId) {
+    emitUserNotification(tenantKey, recipientId, {
+      id: noticeId,
+      title,
+      message,
+      category: 'Tasks',
+      priority,
+      linkUrl,
+      createdAt: new Date().toISOString(),
+    });
+  }
+  await sendPushToEmployees(query, [recipientId], {
+    title,
+    body: message.slice(0, 180),
+    url: linkUrl,
+    tag: tag || `task-${recipientId}-${title}`,
+  });
 }
 
 async function safeSend(label: string, run: () => Promise<void>): Promise<void> {
@@ -105,27 +130,51 @@ export function queueTaskAssignmentEmails(
   newAssigneeIds: string[],
   previousAssigneeIds: string[] = []
 ): void {
-  const query = req.tenantQuery;
-  if (!query || !taskId || !newAssigneeIds.length) return;
+  const schema = req.dbSchema;
+  if (!schema || !taskId || !newAssigneeIds.length) return;
   const previous = new Set(previousAssigneeIds);
   const added = uniqueIds(newAssigneeIds).filter((id) => !previous.has(id));
   if (!added.length) return;
 
-  void (async () => {
-    const me = await resolveCallerEmployee(req).catch(() => null);
-    await sendTaskAssignmentEmails(query, taskId, added, {
-      actorEmployeeId: me?.id ? String(me.id) : null,
-      actorName: me ? displayName(me) : req.user?.name || null,
-      workspaceName: req.tenant?.name || null,
+  const userSub = req.user?.sub || null;
+  const userEmail = (req.user?.email || '').trim().toLowerCase();
+  const fallbackName = req.user?.name || null;
+  const workspaceName = req.tenant?.name || null;
+
+  // The request client is released when the response finishes, so this work needs its own connection.
+  void withTenantContext(schema, async (_client, tenantQuery) => {
+    const queryOnTenant: TenantQuery = (text, params) => tenantQuery(text, params);
+    let actorEmployeeId: string | null = null;
+    let actorName = fallbackName;
+    if (userSub || userEmail) {
+      const me = await queryOnTenant(
+        `SELECT id, first_name, last_name, email
+         FROM employees
+         WHERE ($1::text IS NOT NULL AND cognito_sub = $1)
+            OR ($2 <> '' AND LOWER(email) = $2)
+         ORDER BY CASE WHEN cognito_sub = $1 THEN 0 ELSE 1 END
+         LIMIT 1`,
+        [userSub, userEmail]
+      );
+      if (me.rows[0]) {
+        actorEmployeeId = String(me.rows[0].id);
+        actorName = displayName(me.rows[0]);
+      }
+    }
+    await sendTaskAssignmentEmails(queryOnTenant, taskId, added, {
+      actorEmployeeId,
+      actorName,
+      workspaceName,
+      tenantKey: schema,
     });
-  })().catch((err) => log.warn('Task assignment emails failed', err));
+  }).catch((err) => log.warn('Task assignment emails failed', err));
 }
 
 export async function sendTaskAssignmentEmails(
   query: TenantQuery,
   taskId: string,
   assigneeIds: string[],
-  ctx: { actorEmployeeId?: string | null; actorName?: string | null; workspaceName?: string | null }
+  ctx: { actorEmployeeId?: string | null; actorName?: string | null; workspaceName?: string | null; tenantKey?: string | null }
 ): Promise<void> {
   const ids = uniqueIds(assigneeIds).filter((id) => id !== ctx.actorEmployeeId);
   if (!ids.length) return;
@@ -156,10 +205,14 @@ export async function sendTaskAssignmentEmails(
       'Task assigned to you',
       ctx.actorName ? `${ctx.actorName} assigned you “${task.title}”.` : `You were assigned “${task.title}”.`,
       '/projects',
-      task.priority === 'urgent' || task.priority === 'high' ? 'high' : 'medium'
+      task.priority === 'urgent' || task.priority === 'high' ? 'high' : 'medium',
+      `task-assign-${taskId}-${person.id}`,
+      ctx.tenantKey
     );
-    await safeSend(`assign:${person.email}`, async () => {
-      await sendEmail({ to: person.email, ...rendered });
+    const email = String(person.email || '').trim();
+    if (!email) continue;
+    await safeSend(`assign:${email}`, async () => {
+      await sendEmail({ to: email, ...rendered });
     });
   }
 }
@@ -175,7 +228,8 @@ function reminderKindForDays(daysUntilDue: number): DueReminderKind | null {
 
 export async function sendDueRemindersForTenant(
   query: TenantQuery,
-  workspaceName?: string | null
+  workspaceName?: string | null,
+  tenantKey?: string | null
 ): Promise<number> {
   await ensureTaskNotificationTables(query);
 
@@ -251,7 +305,9 @@ export async function sendDueRemindersForTenant(
       `Task ${when}`,
       `“${row.title}” is ${when}.`,
       '/projects',
-      daysUntilDue <= 1 ? 'high' : 'medium'
+      daysUntilDue <= 1 ? 'high' : 'medium',
+      `task-due-${row.id}-${row.employee_id}-${kind}`,
+      tenantKey
     );
     await safeSend(`due:${kind}:${row.email}`, async () => {
       await sendEmail({ to: row.email, ...rendered });

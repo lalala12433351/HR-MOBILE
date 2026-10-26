@@ -119,6 +119,72 @@ export function verifyEmailCodeEmail(p: { name?: string; code: string; expiresIn
   };
 }
 
+export function changeLoginEmailCodeEmail(p: {
+  firstName?: string;
+  code: string;
+  newEmail: string;
+  url: string;
+  expiresInMinutes: number;
+}): RenderedEmail {
+  const name = p.firstName?.trim() || 'there';
+  const brandName = env.EMAIL_BRAND_NAME;
+
+  const bodyHtml = [
+    paragraph(`Hi ${escapeHtml(name)},`),
+    paragraph(`Enter this code to confirm ${strong(p.newEmail)} as your login email for ${escapeHtml(brandName)}.`),
+    codeBlock(p.code),
+    paragraph(`<span class="muted" style="font-size:13px;color:${brand.muted};">Expires in ${p.expiresInMinutes} minutes.</span>`),
+    button('Enter the code', p.url),
+    linkFallback(p.url),
+    notice(`Never share this code. ${escapeHtml(brandName)} will never ask for it. If you didn’t request this change, you can ignore this email.`),
+  ].join('');
+
+  return {
+    subject: `${p.code} confirms your new ${brandName} login email`,
+    html: renderLayout({
+      preheader: `Your code is ${p.code}. It expires in ${p.expiresInMinutes} minutes.`,
+      heading: 'Confirm your new login email',
+      bodyHtml,
+    }),
+    text: [
+      `Hi ${name},`,
+      '',
+      `Your code to confirm ${p.newEmail} as your ${brandName} login email is: ${p.code}`,
+      `It expires in ${p.expiresInMinutes} minutes.`,
+      '',
+      `Enter it here: ${p.url}`,
+      '',
+      'Never share this code. If you didn’t request this change, you can ignore this email.',
+    ].join('\n'),
+  };
+}
+
+export function changeLoginEmailNoticeEmail(p: { firstName?: string; newEmail: string }): RenderedEmail {
+  const name = p.firstName?.trim() || 'there';
+  const brandName = env.EMAIL_BRAND_NAME;
+  const bodyHtml = [
+    paragraph(`Hi ${escapeHtml(name)},`),
+    paragraph(`A change of your ${escapeHtml(brandName)} login email to ${strong(p.newEmail)} was requested.`),
+    notice('Your current login still works until that address confirms the code. If you didn’t request this, ask your administrator to leave the login email as it is.'),
+  ].join('');
+
+  return {
+    subject: `A login email change was requested on ${brandName}`,
+    html: renderLayout({
+      preheader: `A change to ${p.newEmail} was requested. Your current login still works.`,
+      heading: 'Login email change requested',
+      bodyHtml,
+    }),
+    text: [
+      `Hi ${name},`,
+      '',
+      `A change of your ${brandName} login email to ${p.newEmail} was requested.`,
+      'Your current login still works until that address confirms the code.',
+      'If you didn’t request this, ask your administrator to leave the login email as it is.',
+    ].join('\n'),
+  };
+}
+
 export function passwordResetEmail(p: {
   firstName?: string;
   workspaceName?: string;

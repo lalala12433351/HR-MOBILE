@@ -1,8 +1,9 @@
 import { api } from './apiClient';
 import { AppState, normalizeTaskPriority, normalizeTaskStatus } from './store';
 import { AuthService } from './authService';
-import { Employee, Role, Task, TimesheetEntry } from '../types';
+import { Employee, Project, Role, Task, TimesheetEntry } from '../types';
 import { initialOrganization } from '../data/initialData';
+import { resolveEmployeeShiftTiming } from '../utils/employeeShift';
 
 function personaFromUser(meUser: any) {
   if (!meUser) return null;
@@ -132,12 +133,18 @@ export function mapApiEmployee(emp: any): Employee {
   if (accountStatus === 'Activated') accountStatus = 'Active';
   const isDeactivated =
     accountStatus === 'Deactivated' || accountStatus === 'Suspended' || accountStatus === 'Terminated';
-  const isActivated =
-    emp.isActivated !== undefined
+  const pendingAccount =
+    accountStatus === 'Not Activated' ||
+    accountStatus === 'Invited' ||
+    accountStatus === 'Inactive' ||
+    accountStatus === 'Auth Error';
+  const isActivated = pendingAccount
+    ? false
+    : emp.isActivated !== undefined
       ? Boolean(emp.isActivated)
       : emp.is_activated !== undefined
         ? Boolean(emp.is_activated)
-        : accountStatus !== 'Not Activated' && accountStatus !== 'Invited' && !isDeactivated;
+        : !isDeactivated;
 
   const emergencyRaw = parseJsonField<any>(emp.emergencyContact ?? emp.emergency_contact, null);
   const emergencyContact = {
@@ -238,6 +245,7 @@ export function mapApiEmployee(emp: any): Employee {
     role: (emp.role || 'employee') as Role,
     status: emp.status || (accountStatus === 'Not Activated' || accountStatus === 'Invited' ? 'Onboarding' : 'Active'),
     accountStatus: accountStatus as any,
+    employmentStatus: pickString(emp.employmentStatus, emp.employment_status) || undefined,
     isActivated,
     isDeactivated,
     hasCompletedProfile:
@@ -274,10 +282,102 @@ export function mapApiEmployee(emp: any): Employee {
     bankDetails,
     customFieldValues,
     uploadedDocuments,
+    noticePeriodEndDate: dateOnly(emp.noticePeriodEndDate ?? emp.notice_period_end) || undefined,
+    exitDate: dateOnly(emp.exitDate ?? emp.exit_date) || undefined,
+    fnfDueDate: dateOnly(emp.fnfDueDate ?? emp.fnf_due_date) || undefined,
+    salaryCurrency: pickString(emp.salaryCurrency, emp.salary_currency) || undefined,
+    buddyEmployeeId: pickString(emp.buddyEmployeeId, emp.buddy_employee_id) || undefined,
+    buddyName: pickString(emp.buddyName, emp.buddy_name) || undefined,
+    probationStatus: (pickString(emp.probationStatus, emp.probation_status) || undefined) as Employee['probationStatus'],
+    probationEndDate: dateOnly(emp.probationEndDate ?? emp.probation_end_date) || undefined,
+    offboardingChecklist: parseJsonField(emp.offboardingChecklist ?? emp.offboarding_checklist, undefined) || undefined,
   } as Employee;
 }
 
+function dateOnly(value: unknown): string {
+  if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${value.getFullYear()}-${month}-${day}`;
+  }
+  const raw = String(value);
+  return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : '';
+}
+
+function mapApprovalStatus(raw: unknown): Project['approvalStatus'] | undefined {
+  const clean = String(raw ?? '').toLowerCase().trim();
+  if (clean === 'pending') return 'Pending';
+  if (clean === 'approved') return 'Approved';
+  if (clean === 'denied' || clean === 'rejected') return 'Denied';
+  return undefined;
+}
+
+export function mapProjectStatusLabel(raw: unknown): Project['status'] {
+  const clean = String(raw ?? '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+  if (clean === 'planning' || clean === 'planned') return 'Planning';
+  if (clean === 'onhold' || clean === 'paused') return 'On Hold';
+  if (clean === 'completed' || clean === 'done' || clean === 'finished') return 'Completed';
+  if (clean === 'pendingapproval') return 'Pending Approval';
+  if (clean === 'approved') return 'Approved';
+  if (clean === 'denied' || clean === 'rejected') return 'Denied';
+  if (clean === 'inprogress' || clean === 'active' || clean === '') return 'In Progress';
+  const text = String(raw ?? '').trim();
+  return (text || 'In Progress') as Project['status'];
+}
+
+export function mapProjectPriorityLabel(raw: unknown): Project['priority'] {
+  const clean = String(raw ?? '').toLowerCase().trim();
+  if (clean === 'low') return 'Low';
+  if (clean === 'high') return 'High';
+  if (clean === 'urgent') return 'Urgent';
+  if (clean === 'critical') return 'Critical';
+  return 'Medium';
+}
+
+/** Normalize projects API rows into the app Project shape. */
+export function mapApiProject(p: any): Project {
+  const managerName = String(p.manager_name || p.managerName || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^null null$/i, '');
+  const hoursRaw = p.total_work_hours ?? p.totalWorkHours;
+  return {
+    id: p.id,
+    name: p.name,
+    code: p.code || '',
+    clientName: p.client_name || p.clientName || '',
+    clientId: p.client_id || p.clientId || undefined,
+    description: p.description || '',
+    managerId: p.manager_id || p.managerId || '',
+    managerName,
+    teamMembers: Array.isArray(p.teamMembers) ? p.teamMembers : [],
+    startDate: dateOnly(p.start_date || p.startDate),
+    endDate: dateOnly(p.end_date || p.endDate),
+    budget: Number(p.budget) || 0,
+    currency: p.currency || 'INR',
+    billingMode: String(p.billing_mode || p.billingMode || 'deliverable').toLowerCase() === 'hourly' ? 'hourly' : 'deliverable',
+    hourlyRate: p.hourly_rate != null ? Number(p.hourly_rate) : p.hourlyRate != null ? Number(p.hourlyRate) : undefined,
+    category: p.category || undefined,
+    totalWorkHours: hoursRaw == null || hoursRaw === '' ? undefined : Number(hoursRaw),
+    approvalStatus: mapApprovalStatus(p.approval_status || p.approvalStatus),
+    denialReason: p.denial_reason || p.denialReason || undefined,
+    status: mapProjectStatusLabel(p.status),
+    priority: mapProjectPriorityLabel(p.priority),
+    progress: Number(p.progress) || 0,
+  };
+}
+
 /** Normalize project_tasks API rows into app Task shape (snake_case or camelCase). */
+/** Keep a task's written description when subtasks share the same stored field. */
+export function encodeTaskBody(description: string, subtasks: Array<{ id: string; title: string; completed: boolean }> = []) {
+  if (!subtasks.length) return description;
+  return JSON.stringify({
+    text: description,
+    subtasks: subtasks.map((item) => ({ id: item.id, title: item.title, completed: Boolean(item.completed) })),
+  });
+}
+
 export function mapApiTask(t: any): Task {
   const assigneeIds = Array.from(
     new Set(
@@ -312,16 +412,20 @@ export function mapApiTask(t: any): Task {
   let subtasks: Task['subtasks'] = [];
   const descRaw = t.description;
   let description = typeof descRaw === 'string' ? descRaw : '';
-  if (typeof descRaw === 'string' && descRaw.trim().startsWith('[')) {
+  if (typeof descRaw === 'string' && /^[\[{]/.test(descRaw.trim())) {
     try {
       const parsed = JSON.parse(descRaw);
-      if (Array.isArray(parsed) && parsed.every((x) => x && typeof x === 'object' && 'title' in x)) {
-        subtasks = parsed.map((st: any, idx: number) => ({
+      const list = Array.isArray(parsed) ? parsed : parsed?.subtasks;
+      const storedText = !Array.isArray(parsed) && typeof parsed?.text === 'string' ? parsed.text : null;
+      if (Array.isArray(list) && list.every((x) => x && typeof x === 'object' && 'title' in x)) {
+        subtasks = list.map((st: any, idx: number) => ({
           id: String(st.id || `st_${idx}`),
           title: String(st.title || ''),
           completed: Boolean(st.completed),
         }));
-        description = '';
+        description = storedText ?? '';
+      } else if (storedText !== null) {
+        description = storedText;
       }
     } catch {
       /* plain description */
@@ -352,6 +456,7 @@ export function mapApiTask(t: any): Task {
     assigneeAvatar: t.assigneeAvatar || t.assignee_avatar || '',
     reporterName: t.reporterName || t.reporter_name || undefined,
     priority: normalizeTaskPriority(t.priority),
+    boardOrder: parseBoardOrder(t.boardOrder ?? t.board_order),
     status: normalizeTaskStatus(t.status),
     startDate: start,
     dueDate: due,
@@ -381,6 +486,12 @@ export function mapApiTask(t: any): Task {
     occurrenceDate: t.occurrenceDate || t.occurrence_date ? String(t.occurrenceDate || t.occurrence_date).slice(0, 10) : undefined,
     parentTaskId: t.parentTaskId || t.parent_task_id || undefined,
   };
+}
+
+function parseBoardOrder(raw: unknown): number | undefined {
+  if (raw === null || raw === undefined || raw === '') return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
 }
 
 function parseAttachedDocs(t: any): NonNullable<Task['attachedDocs']> {
@@ -591,6 +702,15 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
       }
       if (rolesRes.success && Array.isArray(rolesRes.data)) {
         updates.customOptions!.designations = rolesRes.data.map((r: any) => r.title).filter(Boolean);
+        updates.customOptions!.jobRoleRecords = rolesRes.data
+          .filter((r: any) => r?.id && r?.title)
+          .map((r: any) => ({
+            id: String(r.id),
+            title: String(r.title).trim(),
+            departmentId: r.department_id || r.departmentId || undefined,
+            departmentName: r.department_name || r.departmentName || undefined,
+            level: r.level || undefined,
+          }));
       }
       if ((teamsRes as any).success && Array.isArray((teamsRes as any).data)) {
         const teamRows = (teamsRes as any).data as any[];
@@ -606,14 +726,16 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
 
       const settings = (settingsRes as any)?.success ? (settingsRes as any).data || {} : {};
       const employment = settings['employment-types'] || {};
-      if (Array.isArray(employment.employmentTypes)) {
+      const hasEmploymentTypesKey = Array.isArray(employment.employmentTypes);
+      if (hasEmploymentTypesKey) {
         updates.customOptions!.employmentTypeCategories = employment.employmentTypes;
         updates.customOptions!.employmentTypes = employment.employmentTypes
           .map((et: any) => (typeof et === 'string' ? et : et.name))
           .filter(Boolean);
       }
       const onboarding = settings['onboarding-fields'] || {};
-      if (Array.isArray(onboarding.fields)) {
+      const hasOnboardingFieldsKey = Array.isArray(onboarding.fields);
+      if (hasOnboardingFieldsKey) {
         updates.customOptions!.onboardingFields = onboarding.fields;
       }
       const general = settings.general || {};
@@ -632,6 +754,11 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
         'probationSettings',
         'taskPriorities',
       ] as const) {
+        // Dedicated settings keys win over stale copies embedded in general.
+        if (key === 'employmentTypes' || key === 'employmentTypeCategories') {
+          if (hasEmploymentTypesKey) continue;
+        }
+        if (key === 'onboardingFields' && hasOnboardingFieldsKey) continue;
         if (general[key] !== undefined) (updates.customOptions as any)[key] = general[key];
       }
       const payroll = settings.payroll || {};
@@ -727,28 +854,17 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
           {};
         const shifts =
           updates.customOptions?.shifts || currentState.customOptions?.shifts || [];
-        const shiftById = new Map(shifts.map((s: any) => [s.id, s]));
-
         updates.employees = mapped.map((emp) => {
-          const assignedShiftId = assignments[emp.id];
-          const targetShift = assignedShiftId ? shiftById.get(assignedShiftId) : undefined;
-          const rosterSchedule = rosterMatrix[emp.id];
-          if (!targetShift && !rosterSchedule) return emp;
+          const rosterSchedule = rosterMatrix[emp.id] || rosterMatrix[String(emp.id)];
+          const shiftTiming = resolveEmployeeShiftTiming(emp, shifts, assignments, { allowDefault: true });
+          if (!shiftTiming && !rosterSchedule) return emp;
           return {
             ...emp,
-            ...(targetShift
+            ...(shiftTiming
               ? {
-                  shiftId: targetShift.id,
-                  shiftTiming: {
-                    shiftId: targetShift.id,
-                    shiftName: targetShift.name,
-                    startTime: targetShift.startTime || 'Flexible',
-                    endTime: targetShift.endTime || 'Flexible',
-                    graceMinutes: targetShift.gracePeriodMinutes || 0,
-                    isHourlyShift: Boolean(targetShift.isHourlyShift),
-                    hourlyRate: (emp as any).hourlyRate || targetShift.hourlyRate || 650,
-                  },
-                  rosterShiftId: targetShift.id,
+                  shiftId: shiftTiming.shiftId,
+                  shiftTiming,
+                  rosterShiftId: shiftTiming.shiftId,
                 }
               : {}),
             ...(rosterSchedule ? { rosterSchedule } : {}),
@@ -825,6 +941,12 @@ export async function syncBackendDataToState(currentState: AppState): Promise<Pa
         ...(stateProvince ? { stateProvince } : {}),
         ...(postalCode ? { postalCode } : {}),
         ...(country ? { country } : {}),
+        ...(meTenant.createdAt || meTenant.created_at
+          ? { createdAt: String(meTenant.createdAt || meTenant.created_at) }
+          : {}),
+        ...(meTenant.adminEmail || meTenant.admin_email
+          ? { adminEmail: String(meTenant.adminEmail || meTenant.admin_email) }
+          : {}),
         ...(syncedOfficeLocation
           ? { officeLocation: syncedOfficeLocation }
           : formattedAddress

@@ -56,34 +56,39 @@ export function MyAttendanceTodayPanel({
       />
 
       {week ? (
-        <section className="workday-week" aria-label="This week">
-          <h2 className="workday-week-title">This week</h2>
-          <p className="workday-week-hours">
-            <strong>{week.loggedHours}h</strong>
-            <span> / {week.scheduleLabel}</span>
-          </p>
-          <div
-            className="att-meter workday-week-meter"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(progress)}
-            aria-label="Hours logged this week"
-          >
-            <span style={{ width: `${Math.max(progress, progress > 0 ? 2 : 0)}%` }} />
-          </div>
-
+        <div className="attendance-week-rail">
+          <section className="workday-week" aria-label="This week">
+            <h2 className="workday-week-title">This week</h2>
+            <p className="workday-week-hours">
+              <strong>{week.loggedHours}h</strong>
+              <span> / {week.scheduleLabel}</span>
+            </p>
+            <div
+              className="att-meter workday-week-meter"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(progress)}
+              aria-label="Hours logged this week"
+            >
+              <span style={{ width: `${Math.max(progress, progress > 0 ? 2 : 0)}%` }} />
+            </div>
+            <p className="attendance-week-target">{Math.round(progress)}% of your weekly target</p>
+          </section>
           {week.figures && week.figures.length > 0 ? (
-            <dl className="workday-week-figures">
-              {week.figures.map((fig) => (
-                <div key={fig.label} className="workday-week-figure" title={fig.hint}>
-                  <dt>{fig.label}</dt>
-                  <dd>{fig.value}</dd>
-                </div>
-              ))}
-            </dl>
+            <section className="attendance-hourly-card" aria-label="Hourly earnings">
+              <h2>Hourly / flexible shift</h2>
+              <dl className="workday-week-figures">
+                {week.figures.map((fig) => (
+                  <div key={fig.label} className="workday-week-figure" title={fig.hint}>
+                    <dt>{fig.label}</dt>
+                    <dd>{fig.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
           ) : null}
-        </section>
+        </div>
       ) : null}
     </div>
   );

@@ -1,4 +1,6 @@
 'use client';
+import './people-attendance.css';
+import { DateInput } from '@/components/common/DateInput';
 
 import React, { useState, useMemo, useEffect } from 'react';
 import {
@@ -38,6 +40,7 @@ import { useApp } from '../../context/AppContext';
 import { isInstitutionMode } from '@/utils/organizationMode';
 import { toApiAuthRole } from '@/utils/roleMapping';
 import { resolveOrCreateTeamId } from '@/utils/teamResolve';
+import { alignedDepartment } from '@/utils/departmentTeam';
 import { Employee, LeaveRequest, AttendanceRecord, AttendanceRegularization, TimesheetEntry, PayrollRecord, Role, Student, AccountStatus } from '../../types';
 import { api } from '../../services/apiClient';
 import { leaveBelongsToEmployee, toApiLeaveType } from '@/utils/mapLeaveRow';
@@ -480,7 +483,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     const targetLeave = state.leaves.find((l) => l.id === id);
     if (!targetLeave) return;
 
-    if (!canApproveLeave(state.currentPersona, targetLeave, state.employees)) {
+    if (!canApproveLeave(state.currentPersona, targetLeave, state.employees, state.customOptions?.leaveSettings?.approvalWorkflow)) {
       showToast('Permission denied: You can only approve leaves for your direct reports.');
       return;
     }
@@ -556,7 +559,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     const targetLeave = state.leaves.find((l) => l.id === id);
     if (!targetLeave) return;
 
-    if (!canApproveLeave(state.currentPersona, targetLeave, state.employees)) {
+    if (!canApproveLeave(state.currentPersona, targetLeave, state.employees, state.customOptions?.leaveSettings?.approvalWorkflow)) {
       showToast('Permission denied: You can only approve leaves for your direct reports.');
       return;
     }
@@ -624,7 +627,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     setIsSaving(true);
     try {
       const pendingIds = state.leaves
-        .filter((l) => l.status === 'Pending' && canApproveLeave(state.currentPersona, l, state.employees))
+        .filter((l) => (l.status === 'Pending' || l.status === 'Manager approved') && canApproveLeave(state.currentPersona, l, state.employees, state.customOptions?.leaveSettings?.approvalWorkflow))
         .map((l) => l.id);
       if (pendingIds.length === 0) {
         showToast('No leave requests you can approve.');
@@ -938,8 +941,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     });
 
     if (dup) {
-      alert(`Cannot create employee: An employee matching these details (${dup.name}, email: ${dup.email}) already exists.`);
-      return;
+      throw new Error(`An employee matching these details (${dup.name}, ${dup.email}) already exists.`);
     }
 
     const selectedMgrIds = Array.from(
@@ -971,7 +973,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
 
     const newEmp: Employee = {
       id: `emp_${Date.now()}`,
-      employeeId: `EMP-${100 + state.employees.length + 1}`,
+      employeeId: '',
       name: (newEmpData.name || '').trim(),
       fullName: (newEmpData.name || '').trim(),
       email: cleanEmail,
@@ -980,6 +982,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       department: (newEmpData.department as any) || (isInstitution ? 'Faculty' : 'Development'),
       designation: newEmpData.designation || (isInstitution ? 'Professor' : 'Software Engineer'),
       team: newEmpData.team || `${newEmpData.department || 'General'} Core Team`,
+      jobRoleId: newEmpData.jobRoleId,
       role: mappedRole,
       joiningDate: new Date().toISOString().substring(0, 10),
       employmentType: (newEmpData.employmentType as any) || 'Full-time',
@@ -1065,7 +1068,6 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       });
 
       const createRes = await api.identity.createEmployee({
-        employeeCode: newEmp.employeeId,
         firstName,
         lastName,
         email: newEmp.email,
@@ -1076,11 +1078,18 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         department: newEmp.department,
         teamId,
         designation: newEmp.designation,
+        jobRoleId: newEmp.jobRoleId,
         role: toApiAuthRole(newEmp.role),
         reportingManagerId: selectedMgr?.id,
         managerIds: selectedMgrIds,
         employmentType: newEmp.employmentType,
-        employmentStatus: newEmp.status?.toLowerCase() === 'active' ? 'active' : newEmp.status?.toLowerCase() === 'probation' ? 'on_probation' : 'active',
+        employmentStatus: newEmp.probationStatus === 'in_probation' ? 'on_probation' : 'active',
+        probationStatus: newEmp.probationStatus,
+        probationEndDate: newEmp.probationEndDate,
+        salaryCurrency:
+          state.customOptions?.payrollSettings?.defaultCurrency ||
+          state.customOptions?.employeeIdSettings?.defaultCurrency ||
+          'INR',
         accountStatus: 'Not Activated',
         dateOfJoining: newEmp.joiningDate,
         sendInvite: state.customOptions?.onboardingAutomation?.autoSendWelcomeEmail !== false,
@@ -1093,24 +1102,33 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       if (createRes.data?.id) {
         newEmp.id = createRes.data.id;
       }
+      const assignedCode = (createRes.data as any)?.employee_code || (createRes.data as any)?.employeeCode;
+      if (assignedCode) {
+        newEmp.employeeId = String(assignedCode);
+      }
       const inviteSent = Boolean((createRes.data as any)?.invite_sent);
       if (inviteSent) {
         newEmp.accountStatus = 'Invited';
       }
 
-      if (newEmp.salaryDetails) {
-        await api.payroll.setSalaryStructure({
-          employeeId: newEmp.id,
-          baseSalary: newEmp.salaryDetails.basic,
-          hra: newEmp.salaryDetails.hra,
-          specialAllowance: newEmp.salaryDetails.specialAllowance,
-          conveyanceAllowance: newEmp.salaryDetails.conveyanceAllowance,
-          medicalAllowance: newEmp.salaryDetails.medicalAllowance,
-          otherAllowances: newEmp.salaryDetails.otherAllowances,
-          allowances: newEmp.salaryDetails.allowanceItems,
-          providentFundDeduction: newEmp.salaryDetails.pfDeduction,
-          taxDeduction: newEmp.salaryDetails.taxDeduction,
-        });
+      if (newEmp.salaryDetails && Number(newEmp.salaryDetails.basic) > 0) {
+        try {
+          await api.payroll.setSalaryStructure({
+            employeeId: newEmp.id,
+            baseSalary: newEmp.salaryDetails.basic,
+            hra: newEmp.salaryDetails.hra,
+            specialAllowance: newEmp.salaryDetails.specialAllowance,
+            conveyanceAllowance: newEmp.salaryDetails.conveyanceAllowance,
+            medicalAllowance: newEmp.salaryDetails.medicalAllowance,
+            otherAllowances: newEmp.salaryDetails.otherAllowances,
+            allowances: newEmp.salaryDetails.allowanceItems,
+            providentFundDeduction: newEmp.salaryDetails.pfDeduction,
+            taxDeduction: newEmp.salaryDetails.taxDeduction,
+          });
+        } catch (salaryErr) {
+          console.error('Employee created but salary was not saved', salaryErr);
+          showToast('Employee added. Salary could not be saved, so add it from their profile.');
+        }
       }
 
       onUpdateState((prev) => ({
@@ -1157,7 +1175,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       );
     } catch (err) {
       console.error('Failed to add employee', err);
-      showToast(err instanceof Error ? err.message : 'Failed to add employee');
+      const message = err instanceof Error ? err.message : 'Failed to add employee';
+      showToast(message);
+      throw err instanceof Error ? err : new Error(message);
     } finally {
       setIsSaving(false);
     }
@@ -1171,9 +1191,14 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
 
     setIsSaving(true);
     try {
-      const teamName = updatedEmp.team || `${updatedEmp.department || 'General'} Team`;
+      const department = alignedDepartment(
+        updatedEmp.department,
+        updatedEmp.team,
+        state.customOptions?.departments || []
+      );
+      const teamName = updatedEmp.team || `${department || 'General'} Team`;
       const teamId = await resolveOrCreateTeamId({
-        departmentName: updatedEmp.department,
+        departmentName: department,
         teamName,
         leadEmployeeId: updatedEmp.managerId || undefined,
       });
@@ -1189,8 +1214,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         officeName: updatedEmp.officeName || updatedEmp.location,
         officeId: updatedEmp.officeId,
         officeIds: updatedEmp.officeIds,
-        department: updatedEmp.department,
+        department,
         teamId,
+        team: teamName,
         designation: updatedEmp.designation,
         role: toApiAuthRole(updatedEmp.role),
         reportingManagerId: updatedEmp.managerId || undefined,
@@ -1224,6 +1250,13 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         customFieldValues: updatedEmp.customFieldValues,
         uploadedDocuments: updatedEmp.uploadedDocuments,
         bio: updatedEmp.bio ?? null,
+        exitDate: updatedEmp.exitDate || null,
+        noticePeriodEndDate: updatedEmp.noticePeriodEndDate || null,
+        fnfDueDate: updatedEmp.fnfDueDate || null,
+        offboardingChecklist: updatedEmp.offboardingChecklist || null,
+        salaryCurrency: updatedEmp.salaryCurrency || null,
+        probationStatus: updatedEmp.probationStatus || null,
+        probationEndDate: updatedEmp.probationEndDate || null,
       });
 
       if (!updateRes.success) {
@@ -1237,6 +1270,13 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
         fullName: fullName || updatedEmp.fullName,
         officeId: apiEmp.office_id || apiEmp.officeId || updatedEmp.officeId,
         officeName: apiEmp.office_name || apiEmp.officeName || updatedEmp.officeName,
+        department: apiEmp.department_name || apiEmp.departmentName || department || updatedEmp.department,
+        designation: apiEmp.job_title || apiEmp.jobTitle || updatedEmp.designation,
+        team:
+          apiEmp.team_name != null || apiEmp.teamName != null
+            ? String(apiEmp.team_name || apiEmp.teamName || '')
+            : updatedEmp.team,
+        teamId: apiEmp.team_id || apiEmp.teamId || updatedEmp.teamId,
         officeIds: Array.isArray(apiEmp.office_ids)
           ? apiEmp.office_ids.map(String)
           : Array.isArray(apiEmp.offices)
@@ -1452,7 +1492,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
             ];
 
   return (
-    <div className={moduleScope === 'employees' ? 'people-studio' : 'w-full min-w-0 max-w-full space-y-3.5'}>
+    <div className={moduleScope === 'employees' ? 'people-studio employees-page' : 'w-full min-w-0 max-w-full space-y-3.5'}>
       <div className={moduleScope === 'employees' ? 'people-studio__head' : 'flex flex-col justify-between gap-3 sm:flex-row sm:items-center'}>
         <h1 className={moduleScope === 'employees' ? 'people-studio__title' : 'text-lg font-bold tracking-tight text-[#0f172a] sm:text-xl'}>
           {activeTab === 'directory'
@@ -1484,7 +1524,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
               <Printer className="h-3.5 w-3.5" /> Print ID cards
             </button>
             <button type="button" onClick={() => setShowAddEmployeeModal(true)} className="people-studio__btn people-studio__btn--primary">
-              <Plus className="h-3.5 w-3.5" /> {isInstitution ? 'Add staff' : 'Add employee'}
+              <Plus className="h-3.5 w-3.5" /> {isInstitution ? 'Add Staff' : 'Add Employee'}
             </button>
           </div>
         )}
@@ -1506,8 +1546,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
               <Printer className="h-3.5 w-3.5 text-slate-500" /> Print ID cards
             </button>
             <button
+              type="button"
               onClick={() => setShowAddEmployeeModal(true)}
-              className="flex items-center gap-1.5 rounded-xl bg-[#2563eb] px-4 py-2.5 text-xs font-bold text-white shadow-[0_12px_22px_-14px_rgba(37,99,235,0.9)] transition-all hover:-translate-y-px hover:bg-[#1d4ed8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer"
+              className="people-studio__btn people-studio__btn--primary"
             >
               <Plus className="h-3.5 w-3.5" /> {isInstitution ? 'Add Staff' : 'Add Employee'}
             </button>
@@ -1516,13 +1557,15 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       </div>
 
       {moduleScope !== 'attendance' && (
-        <div className={moduleScope === 'employees' ? 'people-studio__tabs no-scrollbar touch-pan-x' : 'flex w-full items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100/80 p-1.5 no-scrollbar touch-pan-x'}>
+        <div role="tablist" aria-label="People views" className={moduleScope === 'employees' ? 'people-studio__tabs no-scrollbar touch-pan-x' : 'flex w-full items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-100/80 p-1.5 no-scrollbar touch-pan-x'}>
           {peopleTabs.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 type="button"
+                role="tab"
+                aria-selected={isActive}
                 onClick={() => setActiveTab(tab.id as any)}
                 className={
                   moduleScope === 'employees'
@@ -1552,7 +1595,6 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
           isSuperAdmin={isSuperAdmin}
           isHR={isHR}
           isInstitution={isInstitution}
-          accessibleEmployees={accessibleEmployees}
           initialScope={
             (activeTab as string) === 'my_team' ? 'team' : 'all'
           }
@@ -2016,8 +2058,8 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
                             </span>
                           </td>
                           <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
-                            {canApproveLeave(state.currentPersona, leave, state.employees) ? (
-                              leave.status === 'Pending' ? (
+                            {canApproveLeave(state.currentPersona, leave, state.employees, state.customOptions?.leaveSettings?.approvalWorkflow) ? (
+                              leave.status === 'Pending' || leave.status === 'Manager approved' ? (
                                 <>
                                   {(() => {
                                     const emp = state.employees.find(
@@ -2321,11 +2363,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
                   {/* Date Input Pickers with min date restriction */}
                   {dayMode === 'single' ? (
                     <div>
-                      <input
-                        type="date"
-                        min={todayStr}
-                        value={singleDate}
-                        onChange={(e) => setSingleDate(e.target.value)}
+                      <DateInput min={todayStr} value={singleDate} onChange={(e) => setSingleDate(e.target.value)}
                         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 [color-scheme:light] transition-all cursor-pointer shadow-2xs"
                         required
                       />
@@ -2333,21 +2371,13 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
-                        <input
-                          type="date"
-                          min={todayStr}
-                          value={startDate}
-                          onChange={(e) => handleStartDateChange(e.target.value)}
+                        <DateInput min={todayStr} value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
                           className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 [color-scheme:light] transition-all cursor-pointer shadow-2xs"
                           required
                         />
                       </div>
                       <div>
-                        <input
-                          type="date"
-                          min={startDate || todayStr}
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
+                        <DateInput min={startDate || todayStr} value={endDate} onChange={(e) => setEndDate(e.target.value)}
                           className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 [color-scheme:light] transition-all cursor-pointer shadow-2xs"
                           required
                         />
@@ -2447,6 +2477,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       <AddEmployeeModal
         isOpen={showAddEmployeeModal}
         onClose={() => setShowAddEmployeeModal(false)}
+        isSaving={isSaving}
         onSubmit={handleAddEmployee}
         state={state}
         isInstitution={isInstitution}

@@ -7,9 +7,11 @@ import { AppState } from '../../services/store';
 import { NotificationItem } from '../../types';
 import { GoogleIcon } from '../ui/GoogleIcon';
 import { SlideOverDrawer, slideOverBodyClass, slideOverFooterClass, slideOverPrimaryClass } from '@/components/common/SlideOverDrawer';
+import { disableDesktopPush, enableDesktopPush, pushPreferenceEnabled } from '@/services/desktopPush';
 import {
   getAppNotificationPermission,
   getAppNotificationsEnabled,
+  isNativePlatform,
   requestAppNotificationPermission,
   setAppNotificationsEnabled,
 } from '@/lib/native';
@@ -32,35 +34,56 @@ export const NotificationsModule: React.FC<NotificationsModuleProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushStatus, setPushStatus] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!showSettings) return;
     let cancelled = false;
     void (async () => {
-      const permission = await getAppNotificationPermission();
-      const enabled = getAppNotificationsEnabled() && permission === 'granted';
+      if (isNativePlatform()) {
+        const permission = await getAppNotificationPermission();
+        if (cancelled) return;
+        setPushEnabled(getAppNotificationsEnabled() && permission === 'granted');
+        setPushStatus(null);
+        return;
+      }
+      const granted = typeof Notification !== 'undefined' && Notification.permission === 'granted';
       if (cancelled) return;
-      setPushEnabled(enabled);
+      setPushEnabled(pushPreferenceEnabled() && granted);
+      setPushStatus(null);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showSettings]);
 
-  const enableAppNotifications = async () => {
-    const granted = await requestAppNotificationPermission();
-    setPushEnabled(granted);
-    if (!granted) {
-      alert('Notification permission was denied. You can enable it in your device or browser settings.');
-    }
-  };
-
-  const toggleAppNotifications = async (next: boolean) => {
-    if (next) {
-      await enableAppNotifications();
+  const onPushChange = async (checked: boolean) => {
+    setPushBusy(true);
+    setPushStatus(null);
+    if (isNativePlatform()) {
+      if (checked) {
+        const granted = await requestAppNotificationPermission();
+        setPushEnabled(granted);
+        if (!granted) {
+          setPushStatus('Notification permission was denied. You can enable it in your device settings.');
+        }
+      } else {
+        setAppNotificationsEnabled(false);
+        setPushEnabled(false);
+      }
+      setPushBusy(false);
       return;
     }
-    setAppNotificationsEnabled(false);
-    setPushEnabled(false);
+    if (checked) {
+      const result = await enableDesktopPush();
+      setPushEnabled(result.ok);
+      if (!result.ok) setPushStatus(result.reason || 'Desktop alerts could not be turned on.');
+    } else {
+      await disableDesktopPush();
+      setPushEnabled(false);
+    }
+    setPushBusy(false);
   };
 
   const allNotifications: NotificationItem[] = useMemo(() => {
@@ -190,7 +213,7 @@ export const NotificationsModule: React.FC<NotificationsModuleProps> = ({
   ];
 
   return (
-    <div className="w-full max-w-3xl mx-auto space-y-5 font-sans text-[var(--text-primary)] animate-fade-in">
+    <div className="notifications-page w-full max-w-3xl mx-auto space-y-5 font-sans text-[var(--text-primary)] animate-fade-in">
       <div className="flex items-center justify-between gap-3">
         <h1
           className="font-bold tracking-tight text-[var(--text-primary)]"
@@ -354,18 +377,16 @@ export const NotificationsModule: React.FC<NotificationsModuleProps> = ({
           <div className={`${slideOverBodyClass} text-[var(--text-secondary)] space-y-3`}>
             <label className="flex items-center justify-between p-3 rounded-[9px] bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] cursor-pointer">
               <div>
-                <p className="font-semibold text-[13px] text-[var(--text-primary)]">App notifications</p>
-                <p className="text-[12px] text-[var(--text-muted)] mt-0.5">
-                  System alerts for leave, tasks, chat, and auto clock-out
-                </p>
+                <p className="font-semibold text-[13px] text-[var(--text-primary)]">Push notifications</p>
+                <p className="text-[12px] text-[var(--text-muted)] mt-0.5">Alerts arrive even when Pixbe is closed</p>
+                {pushStatus && <p className="text-[12px] text-[#8b3133] dark:text-red-300 mt-1">{pushStatus}</p>}
               </div>
               <input
                 type="checkbox"
                 checked={pushEnabled}
-                onChange={(e) => {
-                  void toggleAppNotifications(e.target.checked);
-                }}
-                className="h-4 w-4 rounded accent-[var(--primary-navy,#17324e)] cursor-pointer"
+                disabled={pushBusy}
+                onChange={(e) => void onPushChange(e.target.checked)}
+                className="h-4 w-4 rounded accent-[var(--primary-navy,#17324e)] cursor-pointer disabled:opacity-50"
               />
             </label>
 

@@ -1,4 +1,5 @@
 'use client';
+import { DateInput } from '@/components/common/DateInput';
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -139,7 +140,7 @@ export const GoogleMeetComponent: React.FC<GoogleMeetComponentProps> = ({
         id: `mtg_meet_${Date.now()}`,
         title: `Instant Google Meet (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
         organizer: state.currentPersona.name,
-        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        date: new Date().toLocaleDateString('en-GB', { month: 'short', day: 'numeric', year: 'numeric' }),
         startTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         endTime: '11:00 AM',
         link: meetingUri,
@@ -578,10 +579,7 @@ export const GoogleMeetComponent: React.FC<GoogleMeetComponentProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-800 block mb-1">Date</label>
-                  <input
-                    type="date"
-                    value={newDate}
-                    onChange={(e) => setNewDate(e.target.value)}
+                  <DateInput value={newDate} onChange={(e) => setNewDate(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-medium outline-none"
                   />
                 </div>

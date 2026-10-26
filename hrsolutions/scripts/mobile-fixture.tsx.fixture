@@ -1,0 +1,77 @@
+// Local-only visual fixture. API calls are replaced by inert responses by mobile-preview.cjs.
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { FixtureProvider, useApp } from '@/context/AppContext';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { getDefaultState } from '../src/services/store';
+import { initialOrganization, initialCustomizableOptions } from '../src/data/initialData';
+import { DashboardModule } from '../src/components/modules/DashboardModule';
+import { ProjectsModule } from '../src/components/modules/ProjectsModule';
+import { TimesheetsModule } from '../src/components/modules/TimesheetsModule';
+import { KekaAttendanceModule } from '../src/components/modules/KekaAttendanceModule';
+import { HRMSModule } from '../src/components/modules/HRMSModule';
+import { SettingsWorkspace } from '../src/components/modules/SettingsWorkspace';
+import { ReportsWorkspace } from '../src/components/modules/reports/ReportsWorkspace';
+import { PayrollRunModule } from '../src/components/modules/payroll/PayrollRunModule';
+import { PayrollBillableModule } from '../src/components/modules/payroll/PayrollBillableModule';
+import { AnnouncementsModule } from '../src/components/modules/AnnouncementsModule';
+import { NotificationsModule } from '../src/components/modules/NotificationsModule';
+import { StudentDirectoryModule } from '../src/components/modules/StudentDirectoryModule';
+import { StudentTimetableModule } from '../src/components/modules/students/StudentTimetableModule';
+import { WorkspaceSetupWizard } from '../src/components/modules/setup/WorkspaceSetupWizard';
+import { StudentSetupWizard } from '../src/components/modules/StudentSetupWizard';
+import { EmployeeOnboardingView } from '../src/components/modules/EmployeeOnboardingView';
+import { AuthOnboardingView } from '../src/components/auth/AuthOnboardingView';
+import { ForgotPasswordView } from '../src/components/auth/ForgotPasswordView';
+import { ResetPasswordView } from '../src/components/auth/ResetPasswordView';
+import { AcceptInviteView } from '../src/components/auth/AcceptInviteView';
+import { ChangeEmailView } from '../src/components/auth/ChangeEmailView';
+import { StudentLoginView } from '../src/components/auth/StudentLoginView';
+import { MasterAdminDashboard } from '../src/components/modules/master-admin/MasterAdminDashboard';
+import MorePage from '../src/app/more/page';
+import ChatPage from '../src/app/chat/page';
+import { Header } from '../src/components/layout/Header';
+import { Sidebar } from '../src/components/layout/Sidebar';
+import { MobileBottomBar } from '../src/components/layout/MobileBottomBar';
+import '../src/components/modules/payroll/finance-studio.css';
+
+const today = new Date().toISOString().slice(0,10);
+const role = new URLSearchParams(location.search).get('role') || 'super_admin';
+const employee = (id:string,name:string,index:number) => ({id,name,email:`person${index}@example.test`,employeeId:`EMP00${index}`,role:index === 1 ? role : 'employee',designation:index===1?'Company admin':'Product designer',department:'Design',avatar:'',status:'Active',salaryType:'Monthly',salary:60000,hourlyRate:500,monthlySalary:60000,employmentType:'Full-time',joinDate:'2026-01-01',joiningDate:'2026-01-01',hasCompletedProfile:true,onboardingProgress:100,officeName:'Bengaluru HQ',location:'Bengaluru HQ',leaveBalances:{Annual:12,Sick:10,Casual:8},annualLeaveBalance:12,sickLeaveBalance:10,casualLeaveBalance:8,salaryDetails:{basic:30000,hra:15000,specialAllowance:15000,grossSalary:60000},bankDetails:{bankName:'Example Bank',accountNumber:'123456789',ifsc:'EXAM0001234'}});
+const employees=[employee('emp_1','Alex Kim',1),employee('emp_2','Maya Patel',2),employee('emp_3','Jordan Lee',3)];
+const initial:any={...getDefaultState(),isAuthenticated:true,onboardingStatus:new URLSearchParams(location.search).get('stage') || 'NEW',currentPersona:employees[0],organization:{...initialOrganization,name:'Northstar Labs',industry:new URLSearchParams(location.search).has('institute')?'Educational Institute':'Corporate / Technology',isSetupComplete:true,setupCompleted:true},customOptions:{...initialCustomizableOptions,departments:['Design','Engineering'],offices:['Bengaluru HQ'],setupStatus:{completed:true},academicBatches:[{id:'batch1',grade:'Aviation Operations',section:'A',startTime:'09:00',endTime:'15:30'}],timetableSlots:[{id:'slot1',batchId:'batch1',dayOfWeek:'Monday',title:'Airport Operations',subjectCode:'AV101',facultyName:'Maya Patel',room:'Room 301',startTime:'09:00',endTime:'10:00',type:'class',color:'blue'},{id:'slot2',batchId:'batch1',dayOfWeek:'Tuesday',title:'Cabin Services',startTime:'10:00',endTime:'11:00',type:'class',color:'blue'}]},employees,students:[{id:'student1',name:'Aarav Shah',email:'student@example.test',rollNumber:'001',grade:'Aviation Operations',section:'A',batchId:'batch1',status:'Active',guardianName:'Guardian',guardianPhone:'9999999999'}],projects:[{id:'project1',name:'Northstar rollout',code:'NORTH',status:'In Progress',progress:30,managerId:'emp_1',managerName:'Alex Kim',memberIds:['emp_1','emp_2'],team:['Alex Kim','Maya Patel'],startDate:today,endDate:'2026-12-31',priority:'High',clientName:'Atlas Works'}],tasks:['To Do','In Progress','Review','Completed'].map((status,index)=>({id:`task${index}`,title:['Update employee handbook','Finalize onboarding flow','Review monthly report','Prepare equipment'][index],projectId:'project1',projectName:'Northstar rollout',status,priority:'High',type:'Task',assigneeId:'emp_1',assigneeIds:['emp_1'],assigneeName:'Alex Kim',assignee:'Alex Kim',dueDate:today,startDate:today,description:'Complete the workspace checklist and review the details.',subtasks:index===0&&new URLSearchParams(location.search).has('modal')?[{id:'step1',title:'Send welcome email',completed:true},{id:'step2',title:'Prepare equipment',completed:true},{id:'step3',title:'Schedule first-week check-in',completed:false}]:[],comments:[],attachedDocs:index===0&&new URLSearchParams(location.search).has('modal')?[{id:'file1',name:'Onboarding checklist.pdf',s3Key:'fixture/checklist.pdf',size:'120 KB',owner:'Alex Kim'},{id:'file2',name:'Welcome email copy.docx',s3Key:'fixture/welcome.docx',size:'24 KB',owner:'Maya Patel'}]:[]})),timesheets:[{id:'time1',date:today,employeeId:'emp_1',employeeName:'Alex Kim',projectId:'project1',projectName:'Northstar rollout',taskId:'task1',taskTitle:'Finalize onboarding flow',startTime:'09:00',endTime:'11:30',hours:2.5,status:'Pending',billable:true,notes:'Reviewed onboarding'}],attendance:[{id:'att1',date:today,employeeId:'emp_1',employeeName:'Alex Kim',clockIn:'09:00 AM',clockOut:'06:00 PM',status:'Present',totalHours:8,checkIn:today+'T09:00:00',checkOut:today+'T18:00:00',loginTime:'09:00 AM',logoutTime:'06:00 PM',location:'Bengaluru HQ'}],leaves:[{id:'leave1',employeeId:'emp_2',employeeName:'Maya Patel',type:'Casual Leave',leaveType:'Casual Leave',startDate:today,endDate:today,days:1,status:'Pending',reason:'Family visit',appliedOn:today}],regularizations:[],notifications:[{id:'n1',title:'Task assigned',message:'Your handbook task is ready.',type:'task',category:'Tasks',timestamp:new Date().toISOString(),read:false}],announcements:[{id:'a1',title:'Welcome to the team',body:'Please review the updated employee handbook.',content:'Please review the updated employee handbook.',authorName:'Alex Kim',createdAt:new Date().toISOString(),publishedAt:new Date().toISOString(),category:'General',priority:'Normal',readBy:[],tags:[],comments:[],reactions:[],acknowledgements:[],attachments:[],audience:'all'}],auditLogs:[],payrolls:[],invoices:[],customers:[],driveItems:[],meetings:[]};
+
+class Boundary extends React.Component<{children:React.ReactNode},{error:string}>{state={error:''};static getDerivedStateFromError(error:Error){return{error:error.stack||error.message}};render(){return this.state.error?<pre id="fixture-error">{this.state.error}</pre>:this.props.children}}
+function Preview(){const {state,updateState,mobileSidebarOpen,setMobileSidebarOpen}=useApp();const path=usePathname();const params=useSearchParams();const screen=params.get('screen')||path.slice(1)||'dashboard';const props={state,onUpdateState:updateState};let content:React.ReactNode;
+ switch(screen){
+ case'dashboard':content=<DashboardModule/>;break;
+ case'projects':content=<ProjectsModule {...props}/>;break;
+ case'timesheets':content=<TimesheetsModule {...props}/>;break;
+ case'attendance':case'leaves':case'regularizations':case'holidays':case'team-attendance':case'student-attendance':content=<KekaAttendanceModule {...props} initialSubTab={screen==='leaves'?'leaves':screen==='regularizations'?'regularizations':screen==='holidays'?'holidays':screen==='team-attendance'?'team_attendance':'my_attendance'} mode={screen==='student-attendance'?'student':'staff'}/>;break;
+ case'hr':content=<HRMSModule {...props} initialTab={(params.get('tab') as any)||'employees'}/>;break;
+ case'settings':content=<SettingsWorkspace {...props}/>;break;
+ case'reports':content=<ReportsWorkspace state={state}/>;break;
+ case'payroll':case'adjustments':case'export':content=<PayrollRunModule {...props} step={screen==='payroll'?'review':screen as any}/>;break;
+ case'billable':content=<PayrollBillableModule state={state}/>;break;
+ case'announcements':content=<AnnouncementsModule {...props}/>;break;
+ case'notifications':content=<NotificationsModule {...props}/>;break;
+ case'student-directory':content=<StudentDirectoryModule {...props}/>;break;
+ case'timetable':content=<StudentTimetableModule {...props}/>;break;
+ case'setup':content=<WorkspaceSetupWizard/>;break;
+ case'setup-students':content=<StudentSetupWizard/>;break;
+ case'employee-onboarding':content=<EmployeeOnboardingView/>;break;
+ case'login':case'signup':case'otp':case'onboarding':content=<AuthOnboardingView initialView={screen==='signup'?'signup':screen==='otp'?'otp':screen==='onboarding'?'onboarding':'login'}/>;break;
+ case'forgot-password':content=<ForgotPasswordView/>;break;
+ case'reset-password':content=<ResetPasswordView/>;break;
+ case'change-email':content=<ChangeEmailView email=""/>;break;
+ case'accept-invite':content=<AcceptInviteView token=""/>;break;
+ case'student-login':content=<StudentLoginView/>;break;
+ case'master-admin':content=<MasterAdminDashboard/>;break;
+ case'more':content=<MorePage/>;break;
+ case'chat':content=<ChatPage/>;break;
+ default:content=<p>Unknown screen: {screen}</p>;
+ }
+ const bare=['setup','setup-students','employee-onboarding','login','signup','otp','onboarding','forgot-password','reset-password','change-email','accept-invite','student-login','master-admin'].includes(screen);
+ return <Boundary>{bare?content:<div className="pixbe-app flex h-screen overflow-hidden" data-workspace-page={'/'+screen}><Sidebar mobileOpen={mobileSidebarOpen} onCloseMobile={()=>setMobileSidebarOpen(false)}/><div className="workspace-canvas flex flex-1 flex-col min-w-0 h-full lg:pl-[var(--sidebar-width)]"><Header currentPersona={state.currentPersona} notifications={state.notifications} onToggleMobileSidebar={()=>setMobileSidebarOpen(true)} onSelectPersona={()=>{}} onOpenCommandPalette={()=>{}} onOpenAIAssistant={()=>{}} onMarkNotificationRead={()=>{}}/><main className={`pixbe-main ${screen==='chat'?'chat-main':''} flex-1 min-h-0 min-w-0 overflow-y-auto px-4 pb-24`}>{content}</main><MobileBottomBar/></div></div>}</Boundary>;
+}
+createRoot(document.getElementById('root')!).render(<FixtureProvider initial={initial}><Preview/></FixtureProvider>);

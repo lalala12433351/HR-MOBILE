@@ -1,0 +1,112 @@
+/* Dashboard frame geometry from the role-based Figma workspaces.
+   Scoped to the dashboard so other modules keep their existing surfaces. */
+.dash-page { width: 100%; gap: 24px; }
+.dash-page .dash-board { align-items: start; row-gap: 24px; }
+.dash-page .dash-metric { justify-content: flex-start; border-radius: 10px; padding: 16px; gap: 12px; }
+.dash-page .dash-metric .dash-kpi-label { font-size: 12px; }
+.dash-page .dash-metric[data-tone="attendance"] .dash-kpi-label { color: var(--accent-teal-foreground); }
+.dash-page .dash-metric[data-tone="people"] .dash-kpi-label { color: var(--module-people-foreground); }
+.dash-page .dash-metric[data-tone="leave"] .dash-kpi-label { color: var(--accent-rose-foreground); }
+.dash-page .dash-metric[data-tone="projects"] .dash-kpi-label { color: var(--module-projects-foreground); }
+.dash-page .dash-metric:hover { background: var(--bg-surface-hover); }
+.dash-page .dash-panel { border-radius: 10px; }
+.dash-page .dash-panel-head { padding: 20px 20px 0; min-height: auto; align-items: baseline; flex-wrap: wrap; }
+.dash-page .dash-panel-body { padding: 16px 20px 20px; }
+.dash-page .dash-panel-body--flush { padding: 16px 20px 20px; }
+.dash-page .dash-quiet-link { font-weight: 400; white-space: nowrap; }
+.dash-page .dash-quiet-link:hover { text-decoration: underline; }
+.dash-page .dash-quiet-link:focus-visible,
+.dash-page .dash-row--clickable:focus-visible { outline: 2px solid var(--primary-blue); outline-offset: 3px; }
+.dash-page .dash-row { padding-block: 14px; }
+.dash-page .dash-people-name { font-weight: 500; overflow-wrap: anywhere; }
+.dash-page .dash-people-meta { white-space: normal; overflow-wrap: anywhere; }
+.dash-page .dash-people-return { font-weight: 400; }
+.dash-page .heat-grid { grid-template-columns: 60px repeat(5, minmax(0, 1fr)); gap: 8px; }
+.dash-page .heat-grid + .heat-grid { margin-top: 8px; }
+.dash-page .heat-cell { border-radius: 4px; font-weight: 400; }
+.dash-page .heat-today { color: var(--primary-blue); }
+.dash-page .heat-meta { flex-wrap: wrap; margin-bottom: 16px; }
+.dash-page .heat-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; font-size: 12px; color: var(--text-muted); }
+.dash-page .dash-pill { border-radius: 4px; font-weight: 500; }
+.dash-page .dash-pill--remote { background: var(--accent-cyan-surface, #e7f5fa); color: var(--accent-cyan-foreground, #156b87); }
+.dash-page .cal-w { height: auto; border-radius: 10px; padding: 20px; }
+.dash-page .cal-w-circle { border-radius: 4px; }
+.dash-page .cal-w-month-label { font-size: 15px; font-weight: 600; }
+.dash-page .cal-w-footer { margin-top: 16px; }
+.dash-page .dash-hr-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; min-width: 0; }
+.dash-page .dash-figures--member { grid-template-columns: minmax(0, 1fr); grid-template-areas: none; }
+.dash-page .dash-figures--member > .dash-workday,
+.dash-page .dash-figures--member > .dash-action-rail { grid-area: auto; }
+.dash-page .dash-figures--member > .dash-action-rail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; height: auto; }
+.dash-page .dash-action { position: relative; min-height: 140px; padding: 20px; border-radius: 10px; }
+.dash-page .dash-action > span { flex-direction: column; align-items: flex-start; gap: 16px; }
+.dash-page .dash-action-copy { gap: 8px; }
+/* The dashboard uses the compact clock; attendance keeps its full workday ring. */
+.dash-workday-card { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 20px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-surface); }
+.dash-workday-heading, .dash-workday-time { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.dash-workday-heading h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.dash-workday-elapsed { font-size: 26px; line-height: 1.2; font-weight: 400; font-variant-numeric: tabular-nums; }
+.dash-workday-shift { margin: 0; font-size: 12px; color: var(--text-muted); }
+.dash-workday-location .dash-clock-location { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.dash-workday-location select { width: 100%; min-height: 40px; }
+.dash-workday-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.dash-workday-buttons > button { flex: 1; min-height: 40px; }
+.dash-page .dash-figures--member > .dash-action-rail { border: 0; background: transparent; padding: 0; overflow: visible; }
+.dash-page .dash-action { border: 1px solid var(--border-color); background: var(--bg-surface); box-shadow: none; }
+.dash-page .dash-attendance-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; font-size: 12px; color: var(--text-muted); }
+.dash-page .dash-attendance-live { color: var(--accent-cyan-foreground, #156b87); background: var(--accent-cyan-surface, #e7f5fa); padding: 4px 8px; border-radius: 4px; }
+.dash-page .dash-attendance-tools { margin-bottom: 16px; }
+.dash-page .dash-attendance-table th { font-size: 12px; font-weight: 400; }
+.dash-page .dash-attendance-table td { font-size: 13px; height: 56px; }
+.dash-page .dash-attendance-table tr { background: transparent; }
+.dash-page .dash-attendance-table tbody tr:hover { background: var(--bg-surface-hover); }
+@media (min-width: 860px) {
+  .dash-page--hr > .dash-figures { grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); align-items: start; }
+  .dash-page .dash-figures--member { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); align-items: start; }
+}
+@media (max-width: 859px) {
+  .dash-page { padding-block: 24px; }
+  .dash-page .dash-intro { align-items: flex-start; flex-wrap: wrap; }
+  .dash-page .dash-header-title { font-size: 20px; }
+  .dash-page .dash-hr-metrics { grid-template-columns: minmax(0, 1fr); }
+  .dash-page .dash-figures--member > .dash-action-rail { grid-template-columns: minmax(0, 1fr); }
+  .dash-page .dash-action { min-height: 96px; }
+  .dash-page .dash-action > span { flex-direction: row; align-items: center; }
+  .dash-page .heat-grid { grid-template-columns: 44px repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .dash-page .heat-cell { font-size: 11px; }
+  .dash-page .dash-panel-head { padding: 16px 16px 0; }
+  .dash-page .dash-panel-body { padding: 16px; }
+}
+
+.dash-page .dash-action-arrow { position: absolute; top: 20px; right: 20px; color: var(--primary-blue); }
+.dash-page .dash-quota { background: transparent; border: 0; padding: 0; }
+.dash-page .dash-quota-grid { gap: 24px; }
+
+/* Independent employee columns keep short cards from leaving grid-row holes. */
+.dash-employee-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: stretch; }
+.dash-employee-main, .dash-employee-aside { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.dash-page .dash-figures--actions-only { display: block; }
+.dash-page .dash-employee-main .dash-action { min-height: 120px; padding: 16px; }
+.dash-page .dash-employee-tasks { flex: 1; min-height: 480px; }
+.dash-page .dash-employee-tasks .dash-task-list { display: flex; flex-direction: column; }
+.dash-page .dash-employee-tasks .dash-row { min-height: 76px; padding-block: 18px; }
+.dash-page .dash-employee-tasks .dash-people-name { font-size: 14px; line-height: 1.5; }
+.dash-page .dash-employee-tasks .dash-empty-state { min-height: 340px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.dash-tasks-more { display: inline-flex; margin-top: 16px; min-height: 40px; align-items: center; }
+@media (min-width: 1100px) {
+  .dash-employee-columns { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); }
+}
+@media (max-width: 859px) {
+  .dash-page .dash-employee-tasks { min-height: 320px; }
+  .dash-page .dash-employee-tasks .dash-empty-state { min-height: 200px; }
+  .dash-page .dash-employee-main .dash-action { min-height: 88px; }
+}
+
+/* Keep empty work/activity cards at the Figma card height. */
+.dash-page .dash-panel--empty-work { min-height: 249px; }
+.dash-page .dash-panel--empty-work > .dash-panel-body { display: flex; flex-direction: column; }
+.dash-work-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-width: 0; padding: 24px 16px; text-align: center; }
+.dash-work-empty-title { margin: 0; color: var(--studio-ink); font-size: 13px; font-weight: 600; line-height: 1.5; }
+.dash-work-empty-description { margin: 0; max-width: 280px; color: var(--text-muted); font-size: 12px; font-weight: 400; line-height: 1.5; text-wrap: pretty; }
+.dash-work-empty-action { display: inline-flex; align-items: center; min-height: 40px; margin-top: 4px; }
+.dash-work-empty-action:focus-visible { outline: 2px solid var(--primary-blue); outline-offset: 4px; border-radius: 4px; }

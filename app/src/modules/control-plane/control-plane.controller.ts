@@ -301,6 +301,7 @@ export async function updateTenantPlan(req: Request, res: Response): Promise<voi
         plan: req.body.plan,
         maxSeats: req.body.maxSeats,
         billingCycle: req.body.billingCycle,
+        term: req.body.term,
         extendDays: req.body.extendDays,
         periodEnd: req.body.periodEnd,
         revoke: Boolean(req.body.revoke),

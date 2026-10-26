@@ -45,37 +45,97 @@ export const normalizeRoleForLeaveQuotas = (
   return 'employee';
 };
 
+function probationToken(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+}
+
+/** Calendar date in local time. Date-only strings must not shift a day via UTC. */
+function parseLocalDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const text = String(value).trim().slice(0, 10);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (match) {
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function addCalendarMonths(date: Date, months: number): Date {
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function resolveProbationEnd(
+  employee: Partial<Employee>,
+  probationSettings?: CustomizableOptions['probationSettings']
+): Date | null {
+  const explicit = parseLocalDate(employee.probationEndDate);
+  if (explicit) return explicit;
+  const join = parseLocalDate(employee.joiningDate || (employee as { joinDate?: string }).joinDate);
+  if (!join) return null;
+  const months = employee.probationPeriodMonths ?? (probationSettings?.defaultDurationMonths || 3);
+  if (!Number.isFinite(months) || months <= 0) return join;
+  return addCalendarMonths(join, months);
+}
+
 /**
  * Determines if an employee is currently on probation.
+ * Active employment is not probation. A joining date alone must not zero leave.
+ * An explicit in-probation flag ends once the probation end date has passed.
  */
 export const isEmployeeInProbation = (
   employee?: Partial<Employee> | null,
   probationSettings?: CustomizableOptions['probationSettings']
 ): boolean => {
   if (!employee) return false;
-  // If explicitly confirmed
-  if (employee.probationStatus === 'confirmed') return false;
-  // If explicitly flagged as in probation or extended
-  if (
-    employee.probationStatus === 'in_probation' ||
-    employee.probationStatus === 'extended' ||
-    (employee as any).isProbation === true
-  ) {
+  if (probationSettings?.enabled === false) return false;
+
+  const flag = probationToken(employee.probationStatus);
+  if (flag === 'confirmed' || flag === 'completed' || flag === 'passed') return false;
+
+  const employment = probationToken(employee.employmentStatus || (employee as { employment_status?: string }).employment_status);
+  const explicit =
+    flag === 'in_probation' ||
+    flag === 'extended' ||
+    flag === 'probation' ||
+    flag === 'on_probation' ||
+    (employee as { isProbation?: boolean }).isProbation === true ||
+    employment === 'on_probation' ||
+    employment === 'probation' ||
+    employment === 'in_probation';
+
+  const end = resolveProbationEnd(employee, probationSettings);
+  const periodOver =
+    probationSettings?.autoConfirmAfterPeriod !== false &&
+    end != null &&
+    startOfToday().getTime() >= end.getTime();
+
+  if (explicit) {
+    if (periodOver && flag !== 'extended') return false;
+    if (periodOver && flag === 'extended' && employee.probationEndDate) return false;
     return true;
   }
-  // Check if probation policy is enabled and check joining date vs duration
-  if (probationSettings?.enabled !== false && employee.joiningDate) {
-    const months = employee.probationPeriodMonths ?? (probationSettings?.defaultDurationMonths || 3);
-    const joinDate = new Date(employee.joiningDate);
-    if (!isNaN(joinDate.getTime())) {
-      const endDate = new Date(joinDate);
-      endDate.setMonth(endDate.getMonth() + months);
-      if (new Date() < endDate) {
-        return true;
-      }
-    }
-  }
-  return false;
+
+  // Confirmed hires are stored as employment_status = active with no probation flag.
+  // Do not invent a probation window from date of joining.
+  if (employment === 'active' || employment === 'confirmed') return false;
+  if (employment) return false;
+
+  if (!employee.joiningDate && !(employee as { joinDate?: string }).joinDate) return false;
+  if (!end) return false;
+  return startOfToday().getTime() < end.getTime();
 };
 
 /**
@@ -96,7 +156,9 @@ export const getEffectiveLeaveQuotas = (
   leaveSettings?: CustomizableOptions['leaveSettings'],
   probationSettings?: CustomizableOptions['probationSettings']
 ) => {
-  const inProbation = isEmployeeInProbation(employee as any, probationSettings);
+  const inProbation =
+    probationSettings?.restrictLeaveDuringProbation !== false &&
+    isEmployeeInProbation(employee as any, probationSettings);
 
   const roleKey = normalizeRoleForLeaveQuotas(
     (employee as any)?.role,
@@ -250,7 +312,9 @@ export const validateLeaveApproval = (
   message?: string;
   suggestedAction?: 'approve_as_lop' | 'reject';
 } => {
-  const inProbation = isEmployeeInProbation(employee, probationSettings);
+  const inProbation =
+    probationSettings?.restrictLeaveDuringProbation !== false &&
+    isEmployeeInProbation(employee, probationSettings);
   const isPaid = isPaidLeaveType(leave.leaveType, (leave as any).isPaid);
 
   if (inProbation && isPaid) {

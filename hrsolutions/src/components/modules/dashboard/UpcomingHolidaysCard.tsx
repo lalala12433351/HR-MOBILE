@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import { CalendarDays } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { GoogleIcon } from '@/components/ui/GoogleIcon';
 import { useApp } from '@/context/AppContext';
 import { DashPanel } from './DashPanel';
 import { dateKey, formatWeekday, localDateKey, upcomingHolidays } from '@/utils/dashboardPeople';
@@ -38,10 +38,9 @@ export const UpcomingHolidaysCard: React.FC<UpcomingHolidaysCardProps> = ({
         <button
           type="button"
           onClick={() => router.push('/attendance?tab=holidays')}
-          className="text-xs font-semibold text-[var(--studio-navy)] hover:underline inline-flex items-center gap-1 cursor-pointer"
+          className="dash-quiet-link"
         >
-          {manageHref ? 'Calendar' : 'All'}
-          <GoogleIcon name="arrow_forward" size={15} weight={600} />
+          Calendar ›
         </button>
       }
     >
@@ -55,16 +54,27 @@ export const UpcomingHolidaysCard: React.FC<UpcomingHolidaysCardProps> = ({
             const isToday = key === today;
             return (
               <li key={holiday.id} className="dash-people-row">
-                <span className="dash-date-tile" aria-hidden="true">
-                  <b>{Number.isNaN(d.getTime()) ? '—' : d.getDate()}</b>
-                  <small>{Number.isNaN(d.getTime()) ? '' : monthNames[d.getMonth()]}</small>
-                </span>
+                <CalendarDays size={18} className="shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
                   <p className="dash-people-name">{holiday.name}</p>
                   <p className="dash-people-meta">
-                    {isToday ? 'Today' : formatWeekday(holiday.date) || holiday.dayOfWeek}
+                    {Number.isNaN(d.getTime())
+                      ? holiday.dayOfWeek
+                      : `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`}
+                    {isToday ? '' : formatWeekday(holiday.date) ? ` · ${formatWeekday(holiday.date)}` : ''}
                   </p>
                 </div>
+                <span className="dash-people-return">
+                  {Number.isNaN(d.getTime())
+                    ? ''
+                    : (() => {
+                        const start = new Date();
+                        start.setHours(0, 0, 0, 0);
+                        const days = Math.round((d.getTime() - start.getTime()) / 86400000);
+                        if (days <= 0) return 'Today';
+                        return days === 1 ? '1 day' : `${days} days`;
+                      })()}
+                </span>
               </li>
             );
           })}

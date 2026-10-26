@@ -12,6 +12,7 @@ import {
   chatMediaKind,
   formatBytes,
   formatClock,
+  mentionPlainText,
 } from './chatUi';
 import type { ChatAttachment } from '@/services/chatTypes';
 
@@ -84,7 +85,7 @@ export function MessageItem({
   if (message.type === 'system') {
     return (
       <div className="flex justify-center px-4 py-1.5" id={`msg-${message.id}`}>
-        <p className="max-w-[80%] rounded-full bg-[var(--bg-surface-subtle)] px-3 py-1 text-center text-[11.5px] text-[var(--text-secondary)]">
+        <p className="chat-system-message max-w-[80%] rounded-full bg-[var(--bg-surface-subtle)] px-3 py-1 text-center text-[11.5px] text-[var(--text-secondary)]">
           {message.body}
           <span className="ml-1.5 text-[var(--text-muted)]">{formatClock(message.createdAt)}</span>
         </p>
@@ -116,7 +117,7 @@ export function MessageItem({
   return (
     <div
       id={`msg-${message.id}`}
-      className={`group relative flex gap-3 px-4 ${compact ? 'pt-0.5 pb-0.5' : 'pt-3 pb-0.5'} hover:bg-[var(--bg-surface-subtle)]/70 transition-colors`}
+      className={`chat-message-row group relative flex gap-3 px-4 ${compact ? 'pt-0.5 pb-0.5' : 'pt-3 pb-0.5'} hover:bg-[var(--bg-surface-subtle)]/70 transition-colors`}
       onMouseLeave={() => setPickerOpen(false)}
     >
       <div className="w-8 shrink-0">
@@ -130,7 +131,7 @@ export function MessageItem({
 
       <div className="min-w-0 flex-1">
         {!compact && (
-          <div className="flex items-baseline gap-2">
+          <div className="chat-message-byline flex items-baseline gap-2">
             <span className="text-[13px] font-bold text-[var(--text-primary)]">{mine ? 'You' : message.senderName || 'Former employee'}</span>
             <span className="text-[11px] text-[var(--text-muted)]">{formatClock(message.createdAt)}</span>
           </div>
@@ -140,13 +141,13 @@ export function MessageItem({
           <button
             type="button"
             onClick={() => onJumpTo(message.parent!.id)}
-            className="mt-1 mb-1 block max-w-full rounded-[7px] border-l-[3px] border-[#2d628e]/60 bg-[var(--bg-surface-subtle)] px-2.5 py-1 text-left hover:bg-[var(--bg-surface-hover)]"
+            className="chat-message-quote mt-1 mb-1 block max-w-full rounded-[7px] border-l-[3px] border-[#2d628e]/60 bg-[var(--bg-surface-subtle)] px-2.5 py-1 text-left hover:bg-[var(--bg-surface-hover)]"
           >
             <span className="block text-[11px] font-semibold text-[var(--text-secondary)]">
               Replying to {message.parent.senderName || 'a message'}
             </span>
             <span className="block truncate text-[12px] text-[var(--text-muted)]">
-              {message.parent.isDeleted ? 'Message deleted' : message.parent.body || 'Attachment'}
+              {message.parent.isDeleted ? 'Message deleted' : message.parent.body ? mentionPlainText(message.parent.body) : 'Attachment'}
             </span>
           </button>
         )}
@@ -195,7 +196,7 @@ export function MessageItem({
           <p className="text-[13px] italic text-[var(--text-muted)]">This message was deleted.</p>
         ) : (
           message.body && (
-            <p className={`whitespace-pre-wrap break-words text-[13.5px] leading-[1.55] ${pending ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'}`}>
+            <p className={`chat-message-text whitespace-pre-wrap break-words text-[13.5px] leading-[1.55] ${pending ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'}`}>
               <RichText text={message.body} />
               {message.editedAt && <span className="ml-1 text-[11px] text-[var(--text-muted)]">(edited)</span>}
             </p>
@@ -397,16 +398,17 @@ function AttachmentTile({
         type="button"
         disabled={pending}
         onClick={onOpen}
-        className="flex max-w-[280px] items-center gap-2.5 rounded-[8px] border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-left hover:border-[#2d628e]/50 hover:bg-[var(--bg-surface-hover)] disabled:cursor-wait"
-        title={`Open ${attachment.fileName}`}
+        className="chat-file-attachment flex max-w-full items-center gap-2.5 rounded-[8px] border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-left hover:border-[#2d628e]/50 hover:bg-[var(--bg-surface-hover)] disabled:cursor-wait"
+        title={`Download ${attachment.fileName}`}
       >
-        <FileText className="h-4 w-4 shrink-0 text-[#2d628e] dark:text-sky-300" aria-hidden />
-        <span className="min-w-0">
+        <FileText className="h-6 w-6 shrink-0 text-[#2d628e] dark:text-sky-300" aria-hidden />
+        <span className="min-w-0 flex-1">
           <span className="block truncate text-[12.5px] font-semibold text-[var(--text-primary)]">{attachment.fileName}</span>
           <span className="block text-[11px] text-[var(--text-muted)]">
-            {pending ? 'Uploading…' : formatBytes(attachment.sizeBytes) || 'File'}
+            {pending ? 'Uploading…' : [attachment.fileName.split('.').pop()?.toUpperCase(), formatBytes(attachment.sizeBytes)].filter(Boolean).join(' · ')}
           </span>
         </span>
+        <span className="chat-file-download">Download</span>
       </button>
     );
   }

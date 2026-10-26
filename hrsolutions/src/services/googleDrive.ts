@@ -1,9 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
+  getRedirectResult,
   signInWithPopup,
   signInWithRedirect,
-  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   User,
@@ -38,34 +38,6 @@ WORKSPACE_SCOPES.forEach((scope) => provider.addScope(scope));
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 
-/**
- * Initialize Google Auth listener and complete any pending redirect sign-in.
- */
-export const initGoogleWorkspaceAuth = (
-  onAuthSuccess?: (user: User, token: string) => void,
-  onAuthFailure?: () => void
-) => {
-  void completeGoogleWorkspaceRedirectSignIn().then((redirect) => {
-    if (redirect && onAuthSuccess) {
-      onAuthSuccess(redirect.user, redirect.accessToken);
-    }
-  });
-
-  return onAuthStateChanged(auth, async (user: User | null) => {
-    if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        cachedAccessToken = null;
-        if (onAuthFailure) onAuthFailure();
-      }
-    } else {
-      cachedAccessToken = null;
-      if (onAuthFailure) onAuthFailure();
-    }
-  });
-};
-
 function tokenFromResult(result: Awaited<ReturnType<typeof signInWithPopup>>) {
   const credential = GoogleAuthProvider.credentialFromResult(result);
   if (!credential?.accessToken) {
@@ -96,8 +68,35 @@ export const completeGoogleWorkspaceRedirectSignIn = async (): Promise<{
 };
 
 /**
- * Trigger Sign in with Google for Drive, Sheets, and Meet scopes.
- * Uses redirect on native (popups fail in Capacitor WebViews).
+ * Initialize Google Auth listener and complete any pending redirect sign-in.
+ */
+export const initGoogleWorkspaceAuth = (
+  onAuthSuccess?: (user: User, token: string) => void,
+  onAuthFailure?: () => void
+) => {
+  void completeGoogleWorkspaceRedirectSignIn().then((redirect) => {
+    if (redirect && onAuthSuccess) {
+      onAuthSuccess(redirect.user, redirect.accessToken);
+    }
+  });
+
+  return onAuthStateChanged(auth, async (user: User | null) => {
+    if (user) {
+      if (cachedAccessToken) {
+        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+      } else if (!isSigningIn) {
+        cachedAccessToken = null;
+        if (onAuthFailure) onAuthFailure();
+      }
+    } else {
+      cachedAccessToken = null;
+      if (onAuthFailure) onAuthFailure();
+    }
+  });
+};
+
+/**
+ * Trigger Sign in with Google for Drive, Sheets, and Meet scopes
  */
 export const googleWorkspaceSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {

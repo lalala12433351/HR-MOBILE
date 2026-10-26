@@ -29,11 +29,11 @@ export const EmployeeTimePanel: React.FC<EmployeeTimePanelProps> = ({
   }, []);
 
   // Formatters
-  const dayName = time.toLocaleDateString('en-US', { weekday: 'long' });
-  const dayShort = time.toLocaleDateString('en-US', { weekday: 'short' });
+  const dayName = time.toLocaleDateString('en-GB', { weekday: 'long' });
+  const dayShort = time.toLocaleDateString('en-GB', { weekday: 'short' });
   const dayNumber = time.getDate();
-  const monthShort = time.toLocaleDateString('en-US', { month: 'short' });
-  const fullDate = time.toLocaleDateString('en-US', {
+  const monthShort = time.toLocaleDateString('en-GB', { month: 'short' });
+  const fullDate = time.toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',

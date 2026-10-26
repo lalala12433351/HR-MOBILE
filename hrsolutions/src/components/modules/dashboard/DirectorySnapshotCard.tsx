@@ -2,7 +2,7 @@
 
 import React, { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { GoogleIcon } from '@/components/ui/GoogleIcon';
+import { ArrowUpRight } from 'lucide-react';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
@@ -32,7 +32,7 @@ export const DirectorySnapshotCard: React.FC<{ className?: string }> = ({ classN
           className="text-xs font-semibold text-[var(--studio-navy)] hover:underline inline-flex items-center gap-1 cursor-pointer"
         >
           People
-          <GoogleIcon name="arrow_forward" size={15} weight={600} />
+          <ArrowUpRight size={15} aria-hidden="true" />
         </button>
       }
     >

@@ -39,18 +39,20 @@ export function ConversationDetails({ conversation, onClose }: { conversation: C
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-[var(--border-color)] px-4 py-3">
+      <div className="chat-details-heading flex items-center justify-between gap-2 border-b border-[var(--border-color)] px-4 py-3">
         <h2 className="text-[13px] font-bold text-[var(--text-primary)]">Details</h2>
         <button type="button" className={iconButton} onClick={onClose} aria-label="Hide details">
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto custom-scrollbar px-4 py-4">
+      <div className="chat-details-body min-h-0 flex-1 space-y-5 overflow-y-auto custom-scrollbar px-4 py-4">
         {conversation.type === 'hr_ticket' && conversation.ticket && <HrTicketPanel conversation={conversation} />}
 
         {isGroup && (
           <section aria-label="Chat name">
+            <h3 className="chat-details-label">Group chat</h3>
+            <p className="chat-details-name">{conversation.name || 'Group chat'}</p>
             {renaming ? (
               <div className="space-y-2">
                 <label htmlFor="rename-chat" className="sr-only">
@@ -84,7 +86,7 @@ export function ConversationDetails({ conversation, onClose }: { conversation: C
                     setName(conversation.name || '');
                     setRenaming(true);
                   }}
-                  className="text-[12.5px] font-semibold text-[#2d628e] dark:text-sky-300 hover:underline"
+                  className={`${buttonSecondary} w-full`}
                 >
                   Rename chat
                 </button>
@@ -94,10 +96,14 @@ export function ConversationDetails({ conversation, onClose }: { conversation: C
         )}
 
         {conversation.type === 'team_channel' && (
-          <p className="rounded-[8px] bg-[var(--bg-surface-subtle)] px-3 py-2 text-[12px] leading-relaxed text-[var(--text-secondary)]">
+          <section>
+            <h3 className="chat-details-label">About this channel</h3>
+            <p className="chat-details-name">{conversation.name}</p>
+            <p className="text-[12px] leading-relaxed text-[var(--text-muted)]">
             Everyone in {conversation.teamId ? `the ${conversation.name} team` : `the ${conversation.name} department`} is a member. Membership follows
             the org structure, so changes happen in Team &amp; Employees.
-          </p>
+            </p>
+          </section>
         )}
 
         {conversation.isParticipant && (
@@ -114,7 +120,7 @@ export function ConversationDetails({ conversation, onClose }: { conversation: C
         <section aria-label="Members">
           <div className="mb-2 flex items-center justify-between gap-2">
             <h3 className="text-[12px] font-bold uppercase tracking-[0.06em] text-[var(--text-muted)]">
-              Members · {conversation.participants.length}
+              {conversation.type === 'hr_ticket' ? 'Visible to' : `Members · ${conversation.participants.length}`}
             </h3>
             <span className="text-[11.5px] text-[var(--text-muted)]">{onlineCount} online</span>
           </div>
@@ -139,7 +145,7 @@ export function ConversationDetails({ conversation, onClose }: { conversation: C
                   <button
                     type="button"
                     onClick={() => void run(() => removeParticipant(conversation.id, p.employeeId))}
-                    className="hidden rounded-[6px] px-2 py-1 text-[11px] font-semibold text-[#8b3133] hover:bg-[#faeeee] group-hover:block focus:block"
+                    className="rounded-[6px] px-2 py-1 text-[11px] font-semibold text-[#8b3133] hover:bg-[#faeeee] group-hover:block focus:block"
                   >
                     Remove
                   </button>

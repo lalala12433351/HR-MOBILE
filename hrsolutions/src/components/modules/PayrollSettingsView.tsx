@@ -1,5 +1,7 @@
 'use client';
+import { ResponsiveTable } from '@/components/common/ResponsiveTable';
 
+import { SettingsPageHeader, SettingsButton, SettingsCard } from './settings/SettingsPrimitives';
 import React, { useState, useMemo } from 'react';
 import { AppState } from '@/services/store';
 import { api } from '@/services/apiClient';
@@ -51,16 +53,27 @@ interface PayrollSettingsViewProps {
   state: AppState;
   onUpdateState: (updater: (prev: AppState) => AppState) => void;
   onBackToPayroll?: () => void;
+  pane?: string;
+  paneLabel?: string;
+  onPaneChange?: (pane: string) => void;
 }
 
 export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
   state,
   onUpdateState,
   onBackToPayroll,
+  pane,
+  paneLabel,
+  onPaneChange,
 }) => {
-  const [activeTab, setActiveTab] = useState<
-    'groups' | 'salary_types' | 'general_settings' | 'compliance' | 'components'
+  const [activeTabState, setActiveTabState] = useState<
+    'groups' | 'general_settings' | 'components'
   >('groups');
+  const activeTab = (pane as typeof activeTabState) || activeTabState;
+  const setActiveTab = (next: typeof activeTabState) => {
+    if (onPaneChange) onPaneChange(next);
+    else setActiveTabState(next);
+  };
 
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -200,104 +213,6 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
     ...payrollSettings,
     attendancePay: { ...DEFAULT_ATTENDANCE_PAY, ...(payrollSettings.attendancePay || {}) },
   }));
-
-  // Live Gross-to-Net Simulator State (Rupees)
-  const [simSalaryType, setSimSalaryType] = useState<SalaryType>('monthly');
-  const [simBaseOrCtc, setSimBaseOrCtc] = useState<number>(75000);
-  const [simHourlyRate, setSimHourlyRate] = useState<number>(650);
-  const [simLoggedHours, setSimLoggedHours] = useState<number>(160);
-  const [simOvertimeHours, setSimOvertimeHours] = useState<number>(10);
-
-  // Simulator Calculation Engine (Rupees)
-  const simResults = useMemo(() => {
-    if (simSalaryType === 'hourly') {
-      const regularPay = simHourlyRate * Math.min(simLoggedHours, 160);
-      const overtimeRate = simHourlyRate * 1.5;
-      const overtimePay = overtimeRate * simOvertimeHours;
-      const gross = regularPay + overtimePay;
-      const tds = Math.round(gross * 0.1);
-      const totalDeductions = tds;
-      const netPay = gross - totalDeductions;
-
-      return {
-        gross,
-        basic: regularPay,
-        hra: 0,
-        special: 0,
-        overtimePay,
-        epfEmployee: 0,
-        epfEmployer: 0,
-        esicEmployee: 0,
-        esicEmployer: 0,
-        pt: 0,
-        tds,
-        totalDeductions,
-        netPay,
-      };
-    } else if (simSalaryType === 'compliance') {
-      const ctc = simBaseOrCtc;
-      const basic = Math.round(ctc * 0.5);
-      const hra = Math.round(basic * 0.4);
-      const statutoryBonus = Math.round(basic * 0.0833);
-      const special = Math.max(0, ctc - basic - hra - statutoryBonus);
-      const gross = basic + hra + statutoryBonus + special;
-
-      const epfBase = Math.min(basic, 15000);
-      const epfEmployee = Math.round(epfBase * 0.12);
-      const epfEmployer = epfEmployee;
-      const isEsicEligible = gross <= 21000;
-      const esicEmployee = isEsicEligible ? Math.round(gross * 0.0075) : 0;
-      const esicEmployer = isEsicEligible ? Math.round(gross * 0.0325) : 0;
-      const pt = 200;
-      const tds = Math.round(gross * 0.08);
-      const totalDeductions = epfEmployee + esicEmployee + pt + tds;
-      const netPay = gross - totalDeductions;
-
-      return {
-        gross,
-        basic,
-        hra,
-        special,
-        overtimePay: 0,
-        epfEmployee,
-        epfEmployer,
-        esicEmployee,
-        esicEmployer,
-        pt,
-        tds,
-        totalDeductions,
-        netPay,
-      };
-    } else {
-      // Monthly Fixed CTC
-      const base = Math.round(simBaseOrCtc * 0.6);
-      const hra = Math.round(base * 0.4);
-      const special = Math.max(0, simBaseOrCtc - base - hra);
-      const gross = simBaseOrCtc;
-
-      const epf = Math.round(Math.min(base, 15000) * 0.12);
-      const pt = 200;
-      const tds = Math.round(gross * 0.08);
-      const totalDeductions = epf + pt + tds;
-      const netPay = gross - totalDeductions;
-
-      return {
-        gross,
-        basic: base,
-        hra,
-        special,
-        overtimePay: 0,
-        epfEmployee: epf,
-        epfEmployer: epf,
-        esicEmployee: 0,
-        esicEmployer: 0,
-        pt,
-        tds,
-        totalDeductions,
-        netPay,
-      };
-    }
-  }, [simSalaryType, simBaseOrCtc, simHourlyRate, simLoggedHours, simOvertimeHours]);
 
   // Group Allowance Handlers
   const handleAddGroupAllowance = (preset?: Partial<GroupAllowanceItem>) => {
@@ -829,58 +744,19 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
     <div className="settings-page">
       <SettingsToast message={toastMessage} />
 
-      <div className="settings-page__header">
-        <h2 className="settings-page__heading">
-          Payroll & Compensation Settings
-        </h2>
-
-        <div className="settings-page__actions">
-          {onBackToPayroll && (
-            <button
-              type="button"
-              onClick={onBackToPayroll}
-              className="settings-page__action--secondary"
-            >
-              Back to Payslips
-            </button>
-          )}
-          {activeTab === 'groups' && (
-            <button
-              type="button"
-              onClick={handleOpenCreateGroup}
-              className="settings-page__action"
-            >
-              Create Pay Group
-            </button>
-          )}
-          {activeTab === 'general_settings' && (
-            <button
-              type="button"
-              onClick={handleSaveGeneralSettings}
-              className="settings-page__action"
-            >
-              Save Settings
-            </button>
-          )}
-          {activeTab === 'components' && (
-            <button
-              type="button"
-              onClick={handleOpenCreateComponent}
-              className="settings-page__action"
-            >
-              Add Component
-            </button>
-          )}
-        </div>
-      </div>
+      <SettingsPageHeader title={paneLabel || 'Payroll'} actions={<>
+        {onBackToPayroll && <SettingsButton variant="secondary" onClick={onBackToPayroll}>Back to payslips</SettingsButton>}
+        {activeTab === 'groups' && <SettingsButton onClick={handleOpenCreateGroup}>Create pay group</SettingsButton>}
+        {activeTab === 'general_settings' && <SettingsButton loading={isSaving} onClick={handleSaveGeneralSettings}>{isSaving ? 'Saving…' : 'Save changes'}</SettingsButton>}
+        {activeTab === 'components' && <SettingsButton onClick={handleOpenCreateComponent}>Add component</SettingsButton>}
+      </>} />
 
       {/* Navigation Tabs */}
+      {!pane && (
       <div className="settings-page__tabs" role="tablist" aria-label="Payroll settings categories">
         {[
           { id: 'groups', label: `Payroll Groups (${payrollGroups.length})` },
-          { id: 'salary_types', label: 'Salary Simulator' },
           { id: 'general_settings', label: 'Pay Cycles & Rules' },
-          { id: 'compliance', label: 'Statutory Compliance' },
           { id: 'components', label: `Salary Components (${salaryComponents.length})` },
         ].map((tab) => {
           const isActive = activeTab === tab.id;
@@ -902,6 +778,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
           );
         })}
       </div>
+      )}
 
       <div id={`payroll-settings-${activeTab}`} role="tabpanel" className="space-y-5">
       {/* ========================================================================= */}
@@ -940,8 +817,8 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
           </div>
 
           {/* Clean Groups Table */}
-          <div className="settings-page__data-card overflow-hidden">
-            <table className="w-full text-left text-xs border-collapse">
+          <SettingsCard className="settings-page__data-card overflow-hidden">
+            <ResponsiveTable className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold text-[11px]">
                 <tr>
                   <th className="p-3.5 pl-4">Group Name & Code</th>
@@ -1054,192 +931,8 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
                   })
                 )}
               </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 2: SALARY TYPES & SIMULATOR                                           */}
-      {/* ========================================================================= */}
-      {activeTab === 'salary_types' && (
-        <div className="space-y-6">
-          {/* Explanation Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="settings-page__card space-y-2">
-              <h3 className="text-sm font-bold text-slate-900 ">1. Monthly Fixed CTC</h3>
-              <p className="text-xs text-slate-500  leading-relaxed">
-                Traditional salaried model with fixed gross pay comprising Basic, HRA (40%), Special Allowances, and standard deductions.
-              </p>
-              <div className="pt-2 text-xs text-slate-600  font-mono">
-                Gross = Basic + HRA + Allowances
-              </div>
-            </div>
-
-            <div className="settings-page__card space-y-2">
-              <h3 className="text-sm font-bold text-slate-900 ">2. Hourly Timesheet Wages</h3>
-              <p className="text-xs text-slate-500  leading-relaxed">
-                Wages calculated based on logged timesheet hours, hourly base rates (e.g. ₹650/hr), and 1.5x overtime rates with contractor TDS.
-              </p>
-              <div className="pt-2 text-xs text-slate-600  font-mono">
-                Gross = (Hours × Rate) + (OT × 1.5× Rate)
-              </div>
-            </div>
-
-            <div className="settings-page__card space-y-2">
-              <h3 className="text-sm font-bold text-slate-900 ">3. Statutory Compliance</h3>
-              <p className="text-xs text-slate-500  leading-relaxed">
-                Automated Indian labour statutory structure: EPF (12%), ESIC (0.75%), Professional Tax (₹200), and TDS withholding.
-              </p>
-              <div className="pt-2 text-xs text-slate-600  font-mono">
-                Net = Gross - (EPF + ESIC + PT + TDS)
-              </div>
-            </div>
-          </div>
-
-          {/* Clean Gross-to-Net Calculator */}
-          <div className="settings-page__card space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200  pb-3">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 ">Gross-to-Net Salary Calculator</h3>
-                <p className="text-xs text-slate-500 ">Test salary parameters and preview net take-home in Rupees (₹)</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {(['monthly', 'hourly', 'compliance'] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setSimSalaryType(t)}
-                    className={`px-3 py-1 text-xs font-bold rounded-lg capitalize cursor-pointer transition-all ${simSalaryType === t
-                        ? 'bg-blue-600 text-white'
-                        : 'border border-slate-200  text-slate-600  hover:bg-white'
-                      }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Inputs */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {simSalaryType === 'hourly' ? (
-                <>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600  mb-1">
-                      Hourly Rate (₹ / hr)
-                    </label>
-                    <input
-                      type="number"
-                      value={simHourlyRate}
-                      onChange={(e) => setSimHourlyRate(Number(e.target.value))}
-                      className="w-full px-3.5 py-2 text-xs bg-white  border border-slate-200  rounded-lg-xl outline-none font-bold text-slate-900 "
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600  mb-1">
-                      Logged Hours
-                    </label>
-                    <input
-                      type="number"
-                      value={simLoggedHours}
-                      onChange={(e) => setSimLoggedHours(Number(e.target.value))}
-                      className="w-full px-3.5 py-2 text-xs bg-white  border border-slate-200  rounded-lg-xl outline-none font-bold text-slate-900 "
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600  mb-1">
-                      Overtime Hours
-                    </label>
-                    <input
-                      type="number"
-                      value={simOvertimeHours}
-                      onChange={(e) => setSimOvertimeHours(Number(e.target.value))}
-                      className="w-full px-3.5 py-2 text-xs bg-white  border border-slate-200  rounded-lg-xl outline-none font-bold text-slate-900 "
-                    />
-                  </div>
-                </>
-              ) : (
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-600  mb-1">
-                    Monthly Gross / CTC (₹)
-                  </label>
-                  <input
-                    type="number"
-                    value={simBaseOrCtc}
-                    onChange={(e) => setSimBaseOrCtc(Number(e.target.value))}
-                    className="w-full px-3.5 py-2 text-xs bg-white  border border-slate-200  rounded-lg-xl outline-none font-bold text-slate-900 "
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Results Table */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
-              <div className="p-4 rounded-lg-xl border border-slate-200  bg-white/50  space-y-2.5 text-xs">
-                <div className="font-bold text-slate-900  border-b border-slate-200  pb-2">
-                  Earnings Breakdown
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Basic Pay</span>
-                  <span className="font-bold">₹{simResults.basic.toLocaleString('en-IN')}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">House Rent Allowance (HRA)</span>
-                  <span className="font-bold">₹{simResults.hra.toLocaleString('en-IN')}</span>
-                </div>
-                {simResults.special > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Special Allowance</span>
-                    <span className="font-bold">₹{simResults.special.toLocaleString('en-IN')}</span>
-                  </div>
-                )}
-                {simResults.overtimePay > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Overtime Pay (1.5x)</span>
-                    <span className="font-bold">₹{simResults.overtimePay.toLocaleString('en-IN')}</span>
-                  </div>
-                )}
-                <div className="flex justify-between border-t border-slate-200  pt-2 font-bold text-slate-900 ">
-                  <span>Gross Remuneration</span>
-                  <span>₹{simResults.gross.toLocaleString('en-IN')}</span>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-lg-xl border border-slate-200  bg-white/50  space-y-2.5 text-xs">
-                <div className="font-bold text-slate-900  border-b border-slate-200  pb-2">
-                  Deductions & Statutory
-                </div>
-                {simResults.epfEmployee > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Provident Fund (EPF 12%)</span>
-                    <span className="font-semibold text-slate-800 ">-₹{simResults.epfEmployee.toLocaleString('en-IN')}</span>
-                  </div>
-                )}
-                {simResults.esicEmployee > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">ESIC (0.75%)</span>
-                    <span className="font-semibold text-slate-800 ">-₹{simResults.esicEmployee.toLocaleString('en-IN')}</span>
-                  </div>
-                )}
-                {simResults.pt > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Professional Tax (PT)</span>
-                    <span className="font-semibold text-slate-800 ">-₹{simResults.pt.toLocaleString('en-IN')}</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-slate-500">TDS / Income Tax</span>
-                  <span className="font-semibold text-slate-800 ">-₹{simResults.tds.toLocaleString('en-IN')}</span>
-                </div>
-                <div className="flex justify-between border-t border-slate-200  pt-2 font-bold text-slate-900 ">
-                  <span>Net Take-Home Pay</span>
-                  <span className="font-bold text-slate-900  text-sm">
-                    ₹{simResults.netPay.toLocaleString('en-IN')}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+            </ResponsiveTable>
+          </SettingsCard>
         </div>
       )}
 
@@ -1247,20 +940,8 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
       {/* TAB 3: PAY CYCLES & GENERAL RULES                                         */}
       {/* ========================================================================= */}
       {activeTab === 'general_settings' && (
-        <div className="settings-page__card space-y-6">
+        <SettingsCard className="settings-page__card space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700  mb-1.5">
-                Default Currency
-              </label>
-              <input
-                type="text"
-                disabled
-                value="INR (₹) - Indian Rupee"
-                className="w-full px-3.5 py-2.5 text-xs bg-white  border border-slate-200  rounded-lg-xl font-bold text-slate-700  cursor-not-allowed"
-              />
-            </div>
-
             <div>
               <label className="block text-xs font-semibold text-slate-700  mb-1.5">
                 Default Pay Frequency
@@ -1318,63 +999,7 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
               Save Settings
             </button>
           </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 4: STATUTORY COMPLIANCE RULES                                         */}
-      {/* ========================================================================= */}
-      {activeTab === 'compliance' && (
-        <div className="settings-page__data-card overflow-hidden">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-white  text-slate-600  border-b border-slate-200  font-semibold text-[11px]">
-              <tr>
-                <th className="p-3.5 pl-4">Statutory Component</th>
-                <th className="p-3.5">Employee Share</th>
-                <th className="p-3.5">Employer Share</th>
-                <th className="p-3.5">Statutory Wage Cap</th>
-                <th className="p-3.5 pr-4">Description</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100  text-slate-700  font-medium">
-              <tr className="hover:bg-white/60 ">
-                <td className="p-3.5 pl-4 font-bold text-slate-900 ">Employees' Provident Fund (EPF)</td>
-                <td className="p-3.5">12% of Basic</td>
-                <td className="p-3.5">12% (3.67% EPF + 8.33% EPS)</td>
-                <td className="p-3.5 font-mono">₹15,000 / month</td>
-                <td className="p-3.5 pr-4 text-slate-500">Standard statutory retirement fund for salaried employees</td>
-              </tr>
-              <tr className="hover:bg-white/60 ">
-                <td className="p-3.5 pl-4 font-bold text-slate-900 ">Employees' State Insurance (ESIC)</td>
-                <td className="p-3.5">0.75% of Gross</td>
-                <td className="p-3.5">3.25% of Gross</td>
-                <td className="p-3.5 font-mono">₹21,000 gross wage ceiling</td>
-                <td className="p-3.5 pr-4 text-slate-500">Medical insurance benefit for employees with gross &le; ₹21,000</td>
-              </tr>
-              <tr className="hover:bg-white/60 ">
-                <td className="p-3.5 pl-4 font-bold text-slate-900 ">Professional Tax (PT)</td>
-                <td className="p-3.5 font-mono">₹200 / month</td>
-                <td className="p-3.5">—</td>
-                <td className="p-3.5 font-mono">₹2,500 / year max</td>
-                <td className="p-3.5 pr-4 text-slate-500">State-level tax on professions and employment</td>
-              </tr>
-              <tr className="hover:bg-white/60 ">
-                <td className="p-3.5 pl-4 font-bold text-slate-900 ">Gratuity (Payment of Gratuity Act)</td>
-                <td className="p-3.5">—</td>
-                <td className="p-3.5">4.81% (15/26 days per year)</td>
-                <td className="p-3.5 font-mono">₹20,00,000 statutory max</td>
-                <td className="p-3.5 pr-4 text-slate-500">Lump sum statutory benefit paid upon 5+ years of continuous service</td>
-              </tr>
-              <tr className="hover:bg-white/60 ">
-                <td className="p-3.5 pl-4 font-bold text-slate-900 ">TDS (Tax Deducted at Source)</td>
-                <td className="p-3.5">As per Tax Slabs</td>
-                <td className="p-3.5">—</td>
-                <td className="p-3.5">Sec 115BAC (New Regime)</td>
-                <td className="p-3.5 pr-4 text-slate-500">Income tax withheld and remitted directly to Government</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        </SettingsCard>
       )}
 
       {/* ========================================================================= */}
@@ -1431,8 +1056,8 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
           </div>
 
           {/* Interactive Components Table */}
-          <div className="settings-page__data-card overflow-hidden">
-            <table className="w-full text-left text-xs border-collapse">
+          <SettingsCard className="settings-page__data-card overflow-hidden">
+            <ResponsiveTable className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold text-[11px]">
                 <tr>
                   <th className="p-3.5 pl-4">Component & Code</th>
@@ -1536,8 +1161,8 @@ export const PayrollSettingsView: React.FC<PayrollSettingsViewProps> = ({
                   ))
                 )}
               </tbody>
-            </table>
-          </div>
+            </ResponsiveTable>
+          </SettingsCard>
         </div>
       )}
 

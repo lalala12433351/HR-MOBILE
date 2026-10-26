@@ -1,4 +1,5 @@
 'use client';
+import './finance-studio.css';
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -7,6 +8,9 @@ import { api } from '@/services/apiClient';
 import { AppState } from '@/services/store';
 import { BillingClient } from '@/types';
 import { PayrollHeaderSwitch } from './PayrollHeaderSwitch';
+import { FinanceNote, FinanceStatus } from './FinanceUi';
+import { Trash2 } from 'lucide-react';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 
 type InnerTab = 'clients' | 'unbilled' | 'invoices';
 
@@ -97,6 +101,7 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
   const [year, setYear] = useState(now.getFullYear());
   const [invoiceKind, setInvoiceKind] = useState<'monthly' | 'project'>('monthly');
   const [detail, setDetail] = useState<any | null>(null);
+  const [pendingUnbilledDelete, setPendingUnbilledDelete] = useState<UnbilledLine | null>(null);
   const [projects, setProjects] = useState(state.projects || []);
 
   const setTab = (tab: InnerTab, invoiceId?: string) => {
@@ -277,10 +282,16 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
     }
   };
 
-  const deleteUnbilledTask = async (line: UnbilledLine) => {
+  const deleteUnbilledTask = (line: UnbilledLine) => {
     const taskId = String(line.sourceTaskId || '').trim();
     if (!taskId || line.kind !== 'deliverable') return;
-    if (!window.confirm(`Delete unbilled task “${line.description}”? This cannot be undone.`)) return;
+    setPendingUnbilledDelete(line);
+  };
+
+  const confirmDeleteUnbilledTask = async () => {
+    const line = pendingUnbilledDelete;
+    const taskId = String(line?.sourceTaskId || '').trim();
+    if (!line || !taskId || line.kind !== 'deliverable') return;
     setSaving(true);
     try {
       const res = await api.projects.deleteTask(taskId);
@@ -290,6 +301,7 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
       }
       toast.success('Unbilled task deleted.');
       setLines((prev) => prev.filter((row) => row.sourceTaskId !== taskId));
+      setPendingUnbilledDelete(null);
       void loadAll();
     } catch (err: any) {
       toast.error(err?.message || 'Could not delete the task.');
@@ -314,23 +326,16 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
   const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-5">
-      <header className="flex shrink-0 flex-col gap-4 border-b border-[var(--border-color)] pb-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <PayrollHeaderSwitch active="billable" />
-          <p className="mt-1 max-w-[62ch] text-[14px] leading-6 text-[var(--text-secondary)]">
-            Create clients, pull approved timesheets and completed tasks, then invoice monthly or by project.
-          </p>
-        </div>
-      </header>
+    <div className="finance-page billable-studio flex flex-1 flex-col gap-5">
+      <header className="finance-page-head"><h1>Billable hours</h1><PayrollHeaderSwitch active="billable" /></header>
 
-      <div className="work-tabs shrink-0 overflow-x-auto no-scrollbar">
+      <div className="finance-billable-tabs work-tabs shrink-0 overflow-x-auto no-scrollbar" role="tablist" aria-label="Billable views">
         {([
           ['clients', 'Clients'],
           ['unbilled', 'Unbilled'],
           ['invoices', 'Invoices'],
         ] as Array<[InnerTab, string]>).map(([id, label]) => (
-          <button key={id} type="button" className="work-tab" aria-selected={innerTab === id} onClick={() => setTab(id)}>
+          <button key={id} type="button" role="tab" className="work-tab" aria-selected={innerTab === id} onClick={() => setTab(id)}>
             {label}
             {id === 'unbilled' && lines.length > 0 && (
               <span className={`work-chip ${innerTab === 'unbilled' ? 'work-chip-navy' : 'work-chip-muted'}`}>{lines.length}</span>
@@ -340,9 +345,11 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
       </div>
 
       {innerTab === 'clients' && (
-        <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
-          <div className="min-h-0 overflow-auto rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)]">
-            <table className="w-full text-left text-xs">
+        <div className="finance-client-layout grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="finance-client-list">
+          <section className="finance-table-panel" aria-busy={loading}>
+            <header><h2>Clients</h2><span>{loading ? 'Loading...' : `${clients.length} clients`}</span></header>
+            <div className="finance-table-scroll"><table className="finance-client-table w-full text-left text-xs">
               <thead className="sticky top-0 bg-[#f8fbfe] text-[12px] font-bold uppercase tracking-wide text-[var(--text-muted)]">
                 <tr>
                   <th className="px-4 py-3">Client</th>
@@ -363,79 +370,88 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
                 {clients.map((client) => (
                   <tr
                     key={client.id}
+                    data-selected={editingId === client.id}
                     className="cursor-pointer border-t border-[var(--border-color)] hover:bg-[#f8fbfe]"
                     onClick={() => startEdit(client)}
                   >
-                    <td className="px-4 py-3.5">
-                      <div className="font-semibold text-[var(--text-primary)]">{client.companyName || client.name}</div>
+                    <td data-label="Client" className="finance-client-name px-4 py-3.5">
+                      <button type="button" className="font-semibold text-[var(--text-primary)]" onClick={(event) => { event.stopPropagation(); startEdit(client); }}>{client.companyName || client.name}</button>
                       <div className="text-[12px] text-[var(--text-muted)]">{client.name}</div>
                     </td>
-                    <td className="px-4 py-3.5 text-[var(--text-secondary)]">{client.email || '—'}</td>
-                    <td className="px-4 py-3.5 tabular-nums">{client.defaultHourlyRate ? money(client.defaultHourlyRate, client.currency) : '—'}</td>
-                    <td className="px-4 py-3.5">{client.paymentTermsDays} days</td>
-                    <td className="px-4 py-3.5">{client.projectCount || 0}</td>
+                    <td data-label="Email" className="px-4 py-3.5 text-[var(--text-secondary)]">{client.email || '—'}</td>
+                    <td data-label="Rate" className="px-4 py-3.5 tabular-nums">{client.defaultHourlyRate ? money(client.defaultHourlyRate, client.currency) : '—'}</td>
+                    <td data-label="Terms" className="px-4 py-3.5">{client.paymentTermsDays} days</td>
+                    <td data-label="Projects" className="px-4 py-3.5">{client.projectCount || 0}</td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
+          </section>
+          <FinanceNote title={editingId ? 'Client selected' : 'One place for every billing relationship'}>{editingId ? 'Save updates to this client, or cancel to leave its details unchanged.' : "Select a client to edit its billing details. Rates on tasks and projects take priority over the client's hourly rate."}</FinanceNote>
           </div>
-          <form onSubmit={saveClient} className="space-y-2 rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)] p-3">
-            <h2 className="text-sm font-bold text-[var(--text-primary)]">{editingId ? 'Edit client' : 'New client'}</h2>
-            <input className={`${controlClass} w-full font-normal`} placeholder="Client name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            <input className={`${controlClass} w-full font-normal`} placeholder="Company" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
-            <input className={`${controlClass} w-full font-normal`} placeholder="Billing email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            <input className={`${controlClass} w-full font-normal`} placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            <textarea className="min-h-[4.5rem] w-full rounded-[7px] border border-[var(--border-color)] px-4 py-3 text-xs" placeholder="Billing address" value={form.billingAddress} onChange={(e) => setForm({ ...form, billingAddress: e.target.value })} />
-            <input className={`${controlClass} w-full font-normal`} placeholder="GSTIN" value={form.gstin} onChange={(e) => setForm({ ...form, gstin: e.target.value })} />
-            <div className="grid grid-cols-2 gap-2">
-              <input className={`${controlClass} w-full font-normal`} placeholder="Terms (days)" value={form.paymentTermsDays} onChange={(e) => setForm({ ...form, paymentTermsDays: e.target.value })} />
-              <input className={`${controlClass} w-full font-normal`} placeholder="Hourly rate" value={form.defaultHourlyRate} onChange={(e) => setForm({ ...form, defaultHourlyRate: e.target.value })} />
-            </div>
-            <div className="flex gap-2 pt-1">
-              <button type="submit" disabled={saving} className={primaryBtn}>{editingId ? 'Save client' : 'Create client'}</button>
-              {editingId && (
-                <button type="button" className={secondaryBtn} onClick={() => { setEditingId(null); setForm(emptyClientForm()); }}>
-                  Cancel
-                </button>
-              )}
+          <form onSubmit={saveClient} className="finance-client-form">
+            <h2>{editingId ? 'Edit client' : 'New client'}</h2>
+            <label htmlFor="billing-client-name">Client name *<input id="billing-client-name" className={controlClass} required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+            <label htmlFor="billing-company">Company<input id="billing-company" className={controlClass} value={form.companyName} onChange={(event) => setForm({ ...form, companyName: event.target.value })} /></label>
+            <label htmlFor="billing-email">Billing email<input id="billing-email" type="email" className={controlClass} value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
+            <label htmlFor="billing-phone">Phone<input id="billing-phone" type="tel" className={controlClass} value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+            <label htmlFor="billing-address">Billing address<textarea id="billing-address" rows={3} value={form.billingAddress} onChange={(event) => setForm({ ...form, billingAddress: event.target.value })} /></label>
+            <label htmlFor="billing-gstin">GSTIN<input id="billing-gstin" className={controlClass} value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} /></label>
+            <label htmlFor="billing-terms">Terms (days)<input id="billing-terms" type="number" className={controlClass} value={form.paymentTermsDays} onChange={(event) => setForm({ ...form, paymentTermsDays: event.target.value })} /></label>
+            <label htmlFor="billing-rate">Hourly rate ({form.currency})<input id="billing-rate" type="number" step="0.01" className={controlClass} value={form.defaultHourlyRate} onChange={(event) => setForm({ ...form, defaultHourlyRate: event.target.value })} /></label>
+            <p className="finance-field-hint">Optional fallback rate for hourly work.</p>
+            <div className="finance-form-actions">
+              {editingId && <button type="button" className={secondaryBtn} onClick={() => { setEditingId(null); setForm(emptyClientForm()); }}>Cancel</button>}
+              <button type="submit" disabled={saving} className={primaryBtn}>{saving ? 'Saving...' : editingId ? 'Save client' : 'Create client'}</button>
             </div>
           </form>
         </div>
       )}
 
       {innerTab === 'unbilled' && (
-        <div className="flex min-h-0 flex-1 flex-col gap-5">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-1 flex-col gap-5">
+          <div className="finance-unbilled-filters">
+            <label>Client
             <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className={controlClass} aria-label="Client">
               <option value="">All clients</option>
               {clients.map((client) => (
                 <option key={client.id} value={client.id}>{client.companyName || client.name}</option>
               ))}
             </select>
+            </label>
+            <label>Project
             <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className={controlClass} aria-label="Project">
               <option value="">All projects</option>
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>{project.name}</option>
               ))}
             </select>
+            </label>
+            <label>Month
             <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className={controlClass} aria-label="Month">
               {Array.from({ length: 12 }, (_, i) => i + 1).map((value) => (
                 <option key={value} value={value}>{new Date(2026, value - 1, 1).toLocaleDateString('en-IN', { month: 'long' })}</option>
               ))}
             </select>
+            </label>
+            <label>Year
             <select value={year} onChange={(e) => setYear(Number(e.target.value))} className={controlClass} aria-label="Year">
               {years.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
+            </label>
+            <label>Invoice type
             <select value={invoiceKind} onChange={(e) => setInvoiceKind(e.target.value as 'monthly' | 'project')} className={controlClass} aria-label="Invoice type">
               <option value="monthly">Monthly invoice</option>
               <option value="project">Project invoice</option>
             </select>
+            </label>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)]">
-            <table className="w-full text-left text-xs">
+          <section className="finance-table-panel finance-unbilled-panel" aria-busy={loading}>
+            <header><h2>Unbilled work</h2><span>{loading ? 'Loading...' : `${lines.length} lines`}</span></header>
+            <div className="finance-table-scroll"><table className="finance-unbilled-table w-full text-left text-xs">
               <thead className="sticky top-0 bg-[#f8fbfe] text-[12px] font-bold uppercase tracking-wide text-[var(--text-muted)]">
                 <tr>
-                  <th className="px-4 py-3 w-8"></th>
+                  <th className="px-4 py-3 w-8"><input type="checkbox" aria-label="Select all unbilled work" checked={lines.length > 0 && lines.every((line) => line.included)} ref={(element) => { if (element) element.indeterminate = lines.some((line) => line.included) && !lines.every((line) => line.included); }} onChange={(event) => setLines((previous) => previous.map((line) => ({ ...line, included: event.target.checked })))} /></th>
                   <th className="px-4 py-3">Work</th>
                   <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Qty</th>
@@ -457,21 +473,23 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
+                        aria-label={`Include ${line.description}`}
                         checked={Boolean(line.included)}
                         onChange={(e) => setLines((prev) => prev.map((row, i) => (i === index ? { ...row, included: e.target.checked } : row)))}
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="Work" className="finance-unbilled-work px-4 py-3">
                       <div className="font-semibold text-[var(--text-primary)]">{line.description}</div>
                       <div className="text-[12px] text-[var(--text-muted)]">{line.clientName || 'No client'} · {line.date || ''}</div>
                     </td>
-                    <td className="px-4 py-3 capitalize">{line.kind}</td>
-                    <td className="px-4 py-3 tabular-nums">
+                    <td data-label="Type" className="px-4 py-3"><span className="finance-status" data-tone="info">{line.kind === 'hourly' ? 'Hourly' : 'Deliverable'}</span></td>
+                    <td data-label="Qty" className="px-4 py-3 tabular-nums">
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         className="h-8 w-20 rounded-[7px] border border-[var(--border-color)] px-2"
+                        aria-label={`Quantity for ${line.description}`}
                         value={line.quantity}
                         onChange={(e) => {
                           const quantity = Number(e.target.value) || 0;
@@ -479,12 +497,13 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
                         }}
                       />
                     </td>
-                    <td className="px-4 py-3 tabular-nums">
+                    <td data-label="Rate" className="px-4 py-3 tabular-nums">
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         className="h-8 w-24 rounded-[7px] border border-[var(--border-color)] px-2"
+                        aria-label={`Rate for ${line.description}`}
                         value={line.unitPrice}
                         onChange={(e) => {
                           const unitPrice = Number(e.target.value) || 0;
@@ -492,38 +511,38 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
                         }}
                       />
                     </td>
-                    <td className="px-4 py-3 tabular-nums font-semibold">{money(line.total)}</td>
+                    <td data-label="Amount" className="px-4 py-3 tabular-nums font-semibold">{money(line.total)}</td>
                     <td className="px-4 py-3 text-right">
                       {line.kind === 'deliverable' && line.sourceTaskId ? (
                         <button
                           type="button"
                           disabled={saving}
+                          aria-label={`Delete ${line.description}`}
                           onClick={() => void deleteUnbilledTask(line)}
                           className="text-[12px] font-semibold text-[#9b2c2c] hover:underline disabled:opacity-50"
                         >
-                          Delete
+                          <Trash2 size={15} />
                         </button>
                       ) : null}
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
+          </section>
+          <div className="finance-billing-total">
+            <div><strong>{selected.length} selected {selected.length === 1 ? 'line' : 'lines'}</strong><p>Unchecked work stays in Unbilled.</p></div>
+            <dl><div><dt>Subtotal</dt><dd>{money(selectedSubtotal)}</dd></div><div><dt>GST 18%</dt><dd>{money(selectedGst)}</dd></div><div><dt>Total</dt><dd>{money(selectedSubtotal + selectedGst)}</dd></div></dl>
+            <button type="button" disabled={saving || !selected.length} onClick={createInvoice} className={primaryBtn}>{saving ? 'Creating...' : 'Create draft invoice'}</button>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-3">
-            <p className="text-xs text-[var(--text-secondary)]">
-              {selected.length} lines · Subtotal {money(selectedSubtotal)} · GST 18% {money(selectedGst)} · Total {money(selectedSubtotal + selectedGst)}
-            </p>
-            <button type="button" disabled={saving || !selected.length} onClick={createInvoice} className={primaryBtn}>
-              Create draft invoice
-            </button>
-          </div>
+          <FinanceNote title="Ready to bill, not yet invoiced">Completed billable deliverables and approved timesheets appear here. Edit quantities and rates before creating a draft.</FinanceNote>
         </div>
       )}
 
       {innerTab === 'invoices' && !detail && (
-        <div className="min-h-0 flex-1 overflow-auto rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)]">
-          <table className="w-full text-left text-xs">
+        <section className="finance-table-panel finance-invoices-panel" aria-busy={loading}>
+          <header><h2>Invoices</h2><span>{loading ? 'Loading...' : `${invoices.length} saved invoices`}</span></header>
+          <div className="finance-table-scroll"><table className="finance-invoice-table w-full text-left text-xs">
             <thead className="sticky top-0 bg-[#f8fbfe] text-[12px] font-bold uppercase tracking-wide text-[var(--text-muted)]">
               <tr>
                 <th className="px-4 py-3">Invoice</th>
@@ -541,16 +560,16 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
               )}
               {invoices.map((inv) => (
                 <tr key={inv.id} className="cursor-pointer border-t border-[var(--border-color)] hover:bg-[#f8fbfe]" onClick={() => setTab('invoices', inv.id)}>
-                  <td className="px-4 py-3.5 font-semibold">{inv.invoice_number}</td>
-                  <td className="px-4 py-3.5">{inv.client_name || inv.customer_name || '—'}</td>
-                  <td className="px-4 py-3.5 capitalize">{inv.kind || 'project'}</td>
-                  <td className="px-4 py-3.5 tabular-nums">{money(Number(inv.total_amount) || 0)}</td>
-                  <td className="px-4 py-3.5 capitalize">{String(inv.status || 'draft').replace('_', ' ')}</td>
+                  <td data-label="Invoice" className="finance-invoice-number px-4 py-3.5"><button type="button" onClick={(event) => { event.stopPropagation(); setTab('invoices', inv.id); }}>{inv.invoice_number}</button>{inv.billing_period_start && <small>{new Date(`${String(inv.billing_period_start).slice(0,10)}T00:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</small>}</td>
+                  <td data-label="Client" className="px-4 py-3.5">{inv.client_name || inv.customer_name || '—'}</td>
+                  <td data-label="Kind" className="px-4 py-3.5 capitalize">{inv.kind || 'project'}</td>
+                  <td data-label="Total incl GST" className="px-4 py-3.5 tabular-nums">{money(Number(inv.total_amount) || 0)}</td>
+                  <td data-label="Status" className="px-4 py-3.5"><FinanceStatus status={String(inv.status || 'draft')} /></td>
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
+          </table></div>
+        </section>
       )}
 
       {innerTab === 'invoices' && detail && (
@@ -560,6 +579,19 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
           companyAddress={companyAddress}
           onBack={() => setTab('invoices')}
           onStatus={markStatus}
+          busy={saving}
+        />
+      )}
+
+      {pendingUnbilledDelete && (
+        <ConfirmDialog
+          title={`Delete “${pendingUnbilledDelete.description}”?`}
+          description="This unbilled task will be removed. This cannot be undone."
+          confirmLabel="Delete task"
+          busy={saving}
+          busyLabel="Deleting…"
+          onCancel={() => setPendingUnbilledDelete(null)}
+          onConfirm={() => void confirmDeleteUnbilledTask()}
         />
       )}
     </div>
@@ -721,7 +753,9 @@ function InvoiceDocument({
   companyAddress,
   onBack,
   onStatus,
+  busy = false,
 }: {
+  busy?: boolean;
   invoice: any;
   companyName: string;
   companyAddress: string;
@@ -733,12 +767,12 @@ function InvoiceDocument({
   const sellerName = String(invoice.seller_name || companyName).trim() || companyName;
   const sellerAddress = formatSellerAddress(invoice, companyAddress);
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-5">
+    <div className="finance-invoice-detail flex flex-1 flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
         <button type="button" className={secondaryBtn} onClick={onBack}>Back to invoices</button>
         <div className="flex flex-wrap gap-2">
-          {status === 'draft' && <button type="button" className={secondaryBtn} onClick={() => onStatus(invoice.id, 'sent')}>Mark sent</button>}
-          {status !== 'paid' && <button type="button" className={secondaryBtn} onClick={() => onStatus(invoice.id, 'paid')}>Mark paid</button>}
+          {status === 'draft' && <button type="button" disabled={busy} className={secondaryBtn} onClick={() => onStatus(invoice.id, 'sent')}>Mark sent</button>}
+          {status !== 'paid' && <button type="button" disabled={busy} className={secondaryBtn} onClick={() => onStatus(invoice.id, 'paid')}>Mark paid</button>}
           <button
             type="button"
             className={primaryBtn}
@@ -756,19 +790,21 @@ function InvoiceDocument({
           </button>
         </div>
       </div>
+      <div className="finance-invoice-layout">
       <article className="invoice-print mx-auto w-full max-w-[720px] rounded-[12px] border border-[var(--border-color)] bg-white p-8 text-[#172234]">
         <header className="flex items-start justify-between gap-4 border-b border-[#dde4e9] pb-4">
           <div>
-            <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#5e6c7b]">Tax invoice</p>
             <h2 className="mt-1 text-xl font-bold tracking-[-0.02em]">{sellerName}</h2>
             {sellerAddress ? (
               <p className="mt-1 whitespace-pre-line text-sm text-[#5e6c7b]">{sellerAddress}</p>
             ) : null}
           </div>
           <div className="text-right text-sm">
+            <h2 className="finance-invoice-document-title">Tax invoice</h2>
             <p className="font-bold">{invoice.invoice_number}</p>
             <p>Issued {String(invoice.issue_date || '').slice(0, 10)}</p>
             {invoice.due_date && <p>Due {String(invoice.due_date).slice(0, 10)}</p>}
+            <FinanceStatus status={status} />
           </div>
         </header>
         <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
@@ -819,6 +855,13 @@ function InvoiceDocument({
           Payment terms: {invoice.payment_terms_days || 15} days. Status: {status.replace('_', ' ')}.
         </p>
       </article>
+      <aside className="finance-invoice-sidebar">
+        <section><h2>{invoice.invoice_number}</h2><FinanceStatus status={status} /><strong className="finance-invoice-amount">{money(Number(invoice.total_amount) || 0)}</strong><p>{invoice.due_date ? `Due ${String(invoice.due_date).slice(0, 10)} · ` : ''}{invoice.payment_terms_days || 15} days terms</p></section>
+        <FinanceNote title="Saved invoice snapshot" tone="success">This invoice keeps its saved lines and totals when source work changes.</FinanceNote>
+        {status === 'draft' && <FinanceNote title="Mark sent updates the status">This action does not send an email. You can also mark the draft paid directly.</FinanceNote>}
+        <section><h2>Print-ready PDF</h2><p>Download PDF opens an A4 print window. Choose Save as PDF in your browser.</p></section>
+      </aside>
+      </div>
     </div>
   );
 }

@@ -7,17 +7,20 @@ export function SettingsToggle({
   onChange,
   id,
   labelledBy,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (val: boolean) => void;
   id?: string;
   labelledBy?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       id={id}
       role="switch"
+      disabled={disabled}
       aria-checked={checked}
       aria-labelledby={labelledBy}
       onClick={() => onChange(!checked)}

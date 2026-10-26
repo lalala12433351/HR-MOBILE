@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Laptop, Building2, Waypoints } from 'lucide-react';
 import { OfficeLocationPickerMap } from '@/components/common/OfficeLocationPickerMap';
 import { DEFAULT_OFFICE_RADIUS_METERS, MAX_GEOFENCE_LIMIT_METERS, MIN_GEOFENCE_LIMIT_METERS } from '@/config/constants';
 
@@ -9,12 +10,8 @@ type Office = { id?: string; name: string; address: string; latitude: number; lo
 type OfficeForm = { name: string; address: string; latitude: number | null; longitude: number | null; radius: number; timezone: string };
 
 function WorkModeIcon({ mode }: { mode: Mode }) {
-  const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
-  return <svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true" {...common}>
-    {mode === 'remote' && <><rect x="5" y="10" width="25" height="20" rx="2.5" /><path d="M11 36h25M17 30v6M36 14a7 7 0 0 1 0 14M38 18a3 3 0 0 1 0 6" /><circle cx="23" cy="20" r="3" fill="currentColor" stroke="none" /></>}
-    {mode === 'onsite' && <><path d="M9 37V15l15-7 15 7v22H9Z" /><path d="M17 37V25h14v12M16 18h3m10 0h3M16 22h3m10 0h3" /><circle cx="24" cy="31" r="1.5" fill="currentColor" stroke="none" /></>}
-    {mode === 'hybrid' && <><rect x="5" y="10" width="19" height="25" rx="2.5" /><path d="M11 17h7m-7 5h7M30 17l9-4v22H29V17h10M24 25h6M24 30h6" /><circle cx="35" cy="26" r="2" fill="currentColor" stroke="none" /></>}
-  </svg>;
+  const Icon = mode === 'remote' ? Laptop : mode === 'onsite' ? Building2 : Waypoints;
+  return <Icon size={20} strokeWidth={1.6} aria-hidden="true"/>;
 }
 
 export function SetupWorkplaceStep({
@@ -34,9 +31,10 @@ export function SetupWorkplaceStep({
   const physical = mode !== 'remote';
   return <div className="setup-workplace">
     <div className="setup-workplace__heading">
-      <h2>Where will your team work?</h2>
+      <h2>Where does your team work?</h2><p>Choose a working model and the places your team works from. You can change these later.</p>
     </div>
 
+    <p className="fs-group-label fs-working-model-label">Working model</p>
     <div className="setup-mode-list" role="radiogroup" aria-label="Work arrangement">
       {([
         { value: 'remote', title: 'Remote', detail: 'Your team works without a shared workplace.' },
@@ -58,14 +56,19 @@ export function SetupWorkplaceStep({
 
     {physical ? <section className="setup-location">
       <div className="setup-location__heading">
-        <div><h3>Add your first workplace</h3></div>
+        <div><h3>Office locations</h3><p className="fs-hint">Add an office for on-site days. Remote work remains available to your hybrid team.</p></div>
         <span>{offices.length} {offices.length === 1 ? 'location' : 'locations'} added</span>
       </div>
       <div className="setup-location__body">
         <div className="setup-location__fields">
+          <div className="setup-location__field-row">
           <label>Workplace name
             <input value={officeForm.name} onChange={(event) => setOfficeForm((previous) => ({ ...previous, name: event.target.value }))} placeholder="e.g. Main office" maxLength={128} />
           </label>
+            <label>Clock-in radius (metres)
+              <input type="number" min={MIN_GEOFENCE_LIMIT_METERS} max={MAX_GEOFENCE_LIMIT_METERS} step="1" value={officeForm.radius} onChange={(event) => setOfficeForm((previous) => ({ ...previous, radius: event.target.value === '' ? DEFAULT_OFFICE_RADIUS_METERS : Number(event.target.value) }))} />
+            </label>
+          </div>
           <label>Address
             <input
               value={officeForm.address}
@@ -82,16 +85,11 @@ export function SetupWorkplaceStep({
           <p id="setup-address-hint" className={`setup-location__hint ${officeForm.latitude === null ? '' : 'setup-location__hint--ready'}`}>
             {officeForm.latitude === null ? 'Search or click the map to set the address. This field cannot be typed in.' : 'Map location confirmed. You can add this workplace.'}
           </p>
-          <div className="setup-location__field-row">
             <label>Time zone
               <select value={officeForm.timezone} onChange={(event) => setOfficeForm((previous) => ({ ...previous, timezone: event.target.value }))}>
                 {timezones.map((zone) => <option key={zone} value={zone}>{zone.replaceAll('_', ' ')}</option>)}
               </select>
             </label>
-            <label>Future GPS radius
-              <input type="number" min={MIN_GEOFENCE_LIMIT_METERS} max={MAX_GEOFENCE_LIMIT_METERS} step="1" value={officeForm.radius} onChange={(event) => setOfficeForm((previous) => ({ ...previous, radius: event.target.value === '' ? DEFAULT_OFFICE_RADIUS_METERS : Number(event.target.value) }))} />
-            </label>
-          </div>
           <button type="button" className="setup-button setup-button--secondary" onClick={addOffice}>Add workplace <span aria-hidden="true">+</span></button>
         </div>
         <div className="setup-location__map">

@@ -19,10 +19,6 @@ const getInitials = (name?: string): string => {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
 
-const getAvatarTheme = (_name?: string) => {
-  return 'bg-slate-100 text-slate-600 border-slate-200';
-};
-
 export const UserAvatar: React.FC<UserAvatarProps> = ({
   src,
   name,
@@ -56,12 +52,11 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
   }
 
   const initials = getInitials(name || alt);
-  const themeClass = getAvatarTheme(name || alt);
 
   if (initials) {
     return (
       <div
-        className={`rounded-full border flex items-center justify-center shrink-0 select-none font-bold text-xs ${themeClass} ${className}`}
+        className={`person-avatar rounded-full flex items-center justify-center shrink-0 select-none font-semibold text-xs ${className}`}
         title={name || alt || 'User'}
       >
         <span>{initials}</span>
@@ -71,10 +66,10 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
 
   return (
     <div
-      className={`rounded-full bg-slate-100 text-slate-500 border border-slate-200/80 flex items-center justify-center shrink-0 select-none overflow-hidden ${className}`}
+      className={`person-avatar rounded-full flex items-center justify-center shrink-0 select-none overflow-hidden ${className}`}
       title={name || alt || 'User'}
     >
-      <User className={`text-slate-400 stroke-[2] ${iconClassName || 'h-[55%] w-[55%]'}`} />
+      <User className={`text-current stroke-[2] ${iconClassName || 'h-[55%] w-[55%]'}`} />
     </div>
   );
 };

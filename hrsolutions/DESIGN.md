@@ -48,10 +48,11 @@ typography:
     fontSize: "12px"
     fontWeight: 650
 rounded:
-  control: "7px"
+  control: "6px"
   list-item: "8px"
-  panel: "9px"
+  panel: "8px"
   card: "12px"
+  auth-segment: "4px"
 spacing:
   xs: "4px"
   sm: "8px"
@@ -65,21 +66,21 @@ components:
     backgroundColor: "{colors.navy}"
     textColor: "{colors.surface}"
     rounded: "{rounded.control}"
-    height: "36px"
-    padding: "8px 14px"
+    height: "40px"
+    padding: "8px 16px"
   button-primary-hover:
     backgroundColor: "{colors.navy-hover}"
   button-secondary:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.navy}"
     rounded: "{rounded.control}"
-    height: "36px"
-    padding: "8px 14px"
+    height: "40px"
+    padding: "8px 16px"
   input:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
     rounded: "{rounded.control}"
-    height: "36px"
+    height: "40px"
     padding: "0 12px"
   card:
     backgroundColor: "{colors.surface}"
@@ -115,7 +116,7 @@ The palette is cool-neutral first. Blue marks actions and selection, not every c
 - **Secondary:** Quiet Sage (`sage`, `sage-surface`) for success and confirmation. Precise Error (`error`, `error-surface`) for actionable failures.
 - **Neutral:** Quiet Mist (`paper`) for canvas, Clean Sheet (`surface`) for working surfaces, Tinted Panel (`surface-tinted`) for explanation, Structure (`border`, `field-border`) for boundaries, Supporting Ink (`text-secondary`, `text-muted`) for lower-emphasis text.
 
-**The One Accent Rule.** A screen may have semantic states, but only one color should read as its primary interaction accent. Avoid rainbow navigation, multi-colored cards, and decorative gradients.
+**The One Accent Rule.** A screen may have semantic states, but only one color should read as its primary interaction accent. Avoid rainbow navigation, multi-colored cards, and decorative gradients. Dashboard figures are the exception recorded in the file: attendance uses teal (`#0b6e64` / `#e5f5f0`), people violet (`#6946b8` / `#f1ecfc`), leave rose (`#ad425b` / `#fcecf1`), and projects indigo (`#4555ad` / `#eef0fd`). Those colors identify the figure. They are not navigation colors.
 
 **The Legibility Rule.** Never put muted blue-gray text on a dark fill. On dark surfaces use near-white text with tested contrast; never communicate state by color alone.
 
@@ -143,7 +144,8 @@ Type is readable first. Setup headings used to sit at 29–39px and drowned work
 - Tables stay a little tighter than forms, not cramped: 10px vertical and 14px horizontal cell padding, 13px body in cells. Do not use 6–8px cell padding as a default.
 - Place decisions before dependent fields, labels with controls, and feedback next to the action that caused it.
 - Use asymmetric grids when content demands it. Avoid equal columns just for symmetry.
-- Stack at phone widths; keep primary actions reachable above the mobile nav. Avoid horizontal page scrolling; **36px is the default control height**. Icon-only hits stay at least 36×36px.
+- The workspace rail is a fixed 232px column. It does not collapse on hover.
+- Stack at phone widths; keep primary actions reachable above the mobile nav. Avoid horizontal page scrolling; **40px is the default control height**. Icon-only hits stay at least 32×32px.
 
 **The Comfortable Work Rule.** Everyday operations screens must be easy to scan and interact with for hours. Hierarchy and alignment do the work — not packing more rows into the first viewport, and not padding every block like a marketing page.
 
@@ -166,14 +168,14 @@ Illustrations and choice icons use simplified architectural or operational linew
 
 ### Buttons
 
-- **Primary:** navy fill, white label, 7px radius, 36px height. Use one dominant next action per area.
+- **Primary:** navy fill, white label, 6px radius, 40px height. Use one dominant next action per area.
 - **Secondary:** white fill, navy border and label; use for additive actions such as “Add workplace.”
 - **Hover and focus:** subtle color shift or 1–2px movement; visible blue focus outline. A disabled appearance must reflect real validation.
 - **Copy:** action plus object where possible (“Add workplace,” “Continue to structure,” “Launch workspace”).
 
 ### Inputs and fields
 
-- White fill, field border, 7px radius, 36px height. Keep a visible label above the field; placeholders are examples, not labels.
+- White fill, field border, 6px radius, 40px height. Keep a visible label above the field; placeholders are examples, not labels.
 - Focus uses a blue border and soft ring. Errors appear near the field, explain the fix, and preserve typed values.
 - Use real controls for constrained values and validate again on the server.
 
@@ -196,6 +198,8 @@ Illustrations and choice icons use simplified architectural or operational linew
 - Destructive controls have explicit labels. Draft-only removal must not remove a persisted record.
 
 ### Images and icons
+
+Person avatar fallbacks share the chat palette across the app: `--avatar-3-surface` and `--avatar-3-foreground`, applied through `.person-avatar`. Use the same pair for initials and anonymous profile icons, including task assignees and activity feeds. Uploaded profile photos keep their original appearance. Department and group marks remain separate from person avatars.
 
 - Brand and domain artwork should be original, with precise linework and limited navy/blue/sage color. `public/pixbe-workspace-plan.png` is the first reference asset.
 - Lucide is acceptable for small utility actions (back, close, upload, delete), not as the visual identity and not on every heading or card.
@@ -221,3 +225,8 @@ Illustrations and choice icons use simplified architectural or operational linew
 - **Don't** specify or implement tightly packed UI: 6px gutters, 11px labels, 32px cramped controls, or 6px table cells as the product default.
 - **Don't** use warm paper, linen, taupe, or cream card fills. Those were tried and rejected.
 - **Don't** assume the dark theme already matches this guide; migrate and test it deliberately.
+
+
+## Mobile v2 reference
+
+For phone layouts at 767px and below, use the Mobile v2 section (323:12254) in the HR Solutions Figma file and the implementation map in design-system/mobile-v2.md. Its white canvas, flat rows, 64px header, 48px form controls, 8px control radius, and Home / Work / Time / Chat / More navigation supersede the earlier mobile interpretations. Preserve existing data, permissions, validations, and actions. The desktop rules above continue to apply at larger widths.

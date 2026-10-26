@@ -48,6 +48,7 @@ export function mapLeaveRow(l: any): LeaveRequest {
   const rawStatus = String(l.status || '').toLowerCase().trim();
   let status: LeaveRequest['status'] = 'Pending';
   if (rawStatus === 'approved') status = 'Approved';
+  else if (rawStatus === 'manager_approved') status = 'Manager approved';
   else if (rawStatus === 'rejected') status = 'Rejected';
   else if (rawStatus === 'cancelled') status = 'Cancelled';
 

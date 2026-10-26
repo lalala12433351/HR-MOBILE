@@ -39,9 +39,15 @@ function AttendanceContent() {
       : undefined;
 
   const combinedState = { ...uiState, ...businessData };
+  const combinedRef = React.useRef(combinedState);
+  combinedRef.current = combinedState;
 
   const handleUpdateState = (updater: (prev: any) => any) => {
-    const newState = updater(combinedState);
+    const previous = combinedRef.current;
+    const newState = updater(previous);
+    if (!newState.tasks) newState.tasks = previous.tasks;
+    if (!newState.timesheets) newState.timesheets = previous.timesheets;
+    combinedRef.current = newState;
 
     updateBusinessData({
       employees: newState.employees,
@@ -49,6 +55,8 @@ function AttendanceContent() {
       leaves: newState.leaves,
       regularizations: newState.regularizations,
       projects: newState.projects,
+      tasks: newState.tasks,
+      timesheets: newState.timesheets,
       students: newState.students,
       auditLogs: newState.auditLogs,
     });
@@ -59,6 +67,8 @@ function AttendanceContent() {
     delete newUiState.leaves;
     delete newUiState.regularizations;
     delete newUiState.projects;
+    delete newUiState.tasks;
+    delete newUiState.timesheets;
     delete newUiState.students;
     delete newUiState.auditLogs;
 

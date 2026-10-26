@@ -73,7 +73,7 @@ export function PayrollPageShell({ step }: { step: 'review' | 'adjustments' | 'e
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-1 flex-col">
       {step === 'billable' ? (
         <PayrollBillableModule state={combinedState} />
       ) : (

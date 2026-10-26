@@ -29,6 +29,62 @@ async function canManageEmployee(req: Request, employeeId: string | null | undef
   return ids.has(String(employeeId));
 }
 
+const generalSettingsCache = new WeakMap<Request, Promise<Record<string, unknown>>>();
+
+function loadGeneralSettings(req: Request): Promise<Record<string, unknown>> {
+  const cached = generalSettingsCache.get(req);
+  if (cached) return cached;
+  const pending = (async () => {
+    try {
+      const row = await req.tenantQuery!(
+        `SELECT value FROM tenant_settings WHERE key = 'general' LIMIT 1`
+      );
+      const raw = row.rows[0]?.value;
+      const settings = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return settings && typeof settings === 'object' ? (settings as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  })();
+  generalSettingsCache.set(req, pending);
+  return pending;
+}
+
+function profileFlag(
+  req: Request,
+  key: 'anyoneCanAssignTasks' | 'anyoneCanCreateProjects'
+): Promise<boolean> {
+  return loadGeneralSettings(req).then((settings) => {
+    const profile = settings.profileSelfServiceSettings;
+    if (!profile || typeof profile !== 'object') return false;
+    return (profile as Record<string, unknown>)[key] === true;
+  });
+}
+
+/** Workspace setting: any employee may assign any task to anyone in the tenant. */
+function openTaskAssignmentEnabled(req: Request): Promise<boolean> {
+  return profileFlag(req, 'anyoneCanAssignTasks');
+}
+
+/** Workspace setting: any employee may create a project. */
+function openProjectCreationEnabled(req: Request): Promise<boolean> {
+  return profileFlag(req, 'anyoneCanCreateProjects');
+}
+
+const PROJECT_CREATOR_ROLES = new Set(['super_admin', 'manager', 'hr_manager']);
+
+const ASSIGNEE_UPDATE_KEYS = new Set([
+  'assignedToEmployeeId',
+  'assignedToEmployeeIds',
+  'assigned_to_employee_id',
+  'assigned_to_employee_ids',
+]);
+
+function isAssigneeOnlyUpdate(body: Record<string, unknown>): boolean {
+  const keys = Object.keys(body || {}).filter((key) => body[key] !== undefined);
+  return keys.length > 0 && keys.every((key) => ASSIGNEE_UPDATE_KEYS.has(key));
+}
+
 function sendForbidden(res: Response, message: string): void {
   res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message } });
 }
@@ -147,6 +203,7 @@ async function ensureTaskExtraColumns(req: Request): Promise<void> {
   await req.tenantQuery!(`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS invoice_id UUID`);
   await req.tenantQuery!(`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS client_id UUID`);
   await req.tenantQuery!(`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS attached_docs JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  await req.tenantQuery!(`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS board_order INTEGER`);
   await req.tenantQuery!(`
     CREATE TABLE IF NOT EXISTS project_task_assignees (
       task_id UUID NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
@@ -229,15 +286,20 @@ async function attachAssignees(req: Request, rows: any[]): Promise<any[]> {
 }
 
 async function resolveAssigneeIds(req: Request, body: any): Promise<string[] | undefined> {
+  const openAssignment = await openTaskAssignmentEnabled(req);
+  const assertAssignable = async (id: string) => {
+    if (openAssignment) return;
+    if (!(await canManageEmployee(req, id))) {
+      throw Object.assign(new Error('You cannot assign tasks to someone above you or outside your team.'), { status: 403 });
+    }
+  };
   if (body?.assignedToEmployeeIds !== undefined) {
     const raw = Array.isArray(body.assignedToEmployeeIds) ? body.assignedToEmployeeIds : [];
     const ids: string[] = [];
     for (const value of raw) {
       const id = await resolveEmployeeId(req, value);
       if (id && isUuid(id)) {
-        if (!(await canManageEmployee(req, id))) {
-          throw Object.assign(new Error('You cannot assign tasks to someone above you or outside your team.'), { status: 403 });
-        }
+        await assertAssignable(id);
         ids.push(id);
       }
     }
@@ -247,9 +309,7 @@ async function resolveAssigneeIds(req: Request, body: any): Promise<string[] | u
     if (!body.assignedToEmployeeId) return [];
     const id = await resolveEmployeeId(req, body.assignedToEmployeeId);
     if (id && !isUuid(id)) return [];
-    if (id && !(await canManageEmployee(req, id))) {
-      throw Object.assign(new Error('You cannot assign tasks to someone above you or outside your team.'), { status: 403 });
-    }
+    if (id) await assertAssignable(id);
     return id ? [id] : [];
   }
   return undefined;
@@ -466,9 +526,37 @@ export async function getProjects(req: Request, res: Response): Promise<void> {
   }
 }
 
+function normalizeProjectStatus(raw: unknown): string {
+  const clean = String(raw ?? '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+  if (clean === 'planning' || clean === 'planned') return 'planning';
+  if (clean === 'onhold' || clean === 'paused') return 'on_hold';
+  if (clean === 'completed' || clean === 'done' || clean === 'finished') return 'completed';
+  return 'in_progress';
+}
+
+function normalizeProjectPriority(raw: unknown): string {
+  const clean = String(raw ?? '').toLowerCase().trim();
+  if (clean === 'low') return 'low';
+  if (clean === 'high') return 'high';
+  if (clean === 'urgent' || clean === 'critical') return 'urgent';
+  return 'medium';
+}
+
 export async function createProject(req: Request, res: Response): Promise<void> {
   try {
-    const { name, code, description, clientName, clientId, managerId, startDate, endDate } = req.body;
+    const role = String(req.user?.role || '');
+    if (!PROJECT_CREATOR_ROLES.has(role) && !(await openProjectCreationEnabled(req))) {
+      sendForbidden(res, 'Only admins and managers can create projects.');
+      return;
+    }
+
+    const { name, code, description, clientName, clientId, managerId, startDate, endDate, status, category, priority, totalWorkHours } = req.body;
+    const cleanName = String(name || '').trim();
+    const cleanCode = String(code || '').trim().toUpperCase();
+    if (!cleanName || !cleanCode) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_PAYLOAD', message: 'Project name and code are required.' } });
+      return;
+    }
 
     let validManagerId = await resolveEmployeeId(req, managerId);
     if (validManagerId && !isUuid(validManagerId)) {
@@ -477,7 +565,7 @@ export async function createProject(req: Request, res: Response): Promise<void> 
 
     await ensureProjectExtraColumns(req);
     let resolvedClientId = isUuid(String(clientId || '')) ? String(clientId) : null;
-    let resolvedClientName = clientName || null;
+    let resolvedClientName = String(clientName || '').trim() || null;
     if (resolvedClientId) {
       const client = await req.tenantQuery!(`SELECT id, name, company_name FROM billing_clients WHERE id = $1`, [resolvedClientId]);
       if (client.rows[0]) {
@@ -487,15 +575,39 @@ export async function createProject(req: Request, res: Response): Promise<void> 
       }
     }
 
+    const hours = totalWorkHours === undefined || totalWorkHours === null || totalWorkHours === ''
+      ? null
+      : Number(totalWorkHours);
+
     const result = await req.tenantQuery!(
-      `INSERT INTO projects (name, code, description, client_name, client_id, manager_id, start_date, end_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO projects (
+         name, code, description, client_name, client_id, manager_id, start_date, end_date,
+         status, category, priority, total_work_hours
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
-      [name, code, description || null, resolvedClientName, resolvedClientId, validManagerId || null, startDate || null, endDate || null]
+      [
+        cleanName,
+        cleanCode,
+        String(description || '').trim() || null,
+        resolvedClientName,
+        resolvedClientId,
+        validManagerId || null,
+        startDate || null,
+        endDate || null,
+        normalizeProjectStatus(status),
+        String(category || '').trim() || null,
+        normalizeProjectPriority(priority),
+        Number.isFinite(hours as number) ? hours : null,
+      ]
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err: any) {
+    if (err?.code === '23505') {
+      res.status(409).json({ success: false, error: { code: 'DUPLICATE_CODE', message: 'A project with this code already exists.' } });
+      return;
+    }
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
 }
@@ -524,10 +636,15 @@ export async function getTasks(req: Request, res: Response): Promise<void> {
         sql += ` AND p.code = $${params.length}`;
       }
     }
-    sql += ` ORDER BY t.created_at DESC`;
+    sql += ` ORDER BY
+      CASE WHEN t.board_order IS NULL THEN 1 ELSE 0 END,
+      t.board_order ASC,
+      CASE LOWER(t.priority) WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+      t.created_at DESC`;
 
     const result = await req.tenantQuery!(sql, params);
     const hydrated = await attachAssignees(req, result.rows);
+    // Assignment permission does not grant a view of other people's tasks.
     if (isOrgWideRole(req.user?.role)) {
       res.json({ success: true, data: hydrated });
       return;
@@ -725,6 +842,35 @@ export async function createTask(req: Request, res: Response): Promise<void> {
   }
 }
 
+export async function reorderTasks(req: Request, res: Response): Promise<void> {
+  try {
+    await ensureTaskExtraColumns(req);
+    const orders = Array.isArray(req.body?.orders) ? req.body.orders : [];
+    const updated: string[] = [];
+
+    for (const item of orders) {
+      const id = String(item?.id || '').trim();
+      if (!isUuid(id)) continue;
+      const boardOrder = Number(item?.boardOrder);
+      if (!Number.isFinite(boardOrder)) continue;
+
+      const beforeRes = await req.tenantQuery!(
+        `SELECT id, assigned_to_employee_id FROM project_tasks WHERE id = $1`,
+        [id]
+      );
+      if (!beforeRes.rows[0]) continue;
+      if (!(await canManageTaskRow(req, id, beforeRes.rows[0].assigned_to_employee_id))) continue;
+
+      await req.tenantQuery!(`UPDATE project_tasks SET board_order = $2 WHERE id = $1`, [id, Math.round(boardOrder)]);
+      updated.push(id);
+    }
+
+    res.json({ success: true, data: { updated } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
 export async function updateTask(req: Request, res: Response): Promise<void> {
   try {
     await ensureTaskExtraColumns(req);
@@ -743,9 +889,13 @@ export async function updateTask(req: Request, res: Response): Promise<void> {
       String(before.id),
       before.assigned_to_employee_id
     );
-    if (!(await canManageTaskRow(req, String(before.id), before.assigned_to_employee_id))) {
-      sendForbidden(res, 'You cannot modify tasks that belong to someone above you or outside your team.');
-      return;
+    const canManage = await canManageTaskRow(req, String(before.id), before.assigned_to_employee_id);
+    if (!canManage) {
+      const openAssignment = await openTaskAssignmentEnabled(req);
+      if (!(openAssignment && isAssigneeOnlyUpdate(body))) {
+        sendForbidden(res, 'You cannot modify tasks that belong to someone above you or outside your team.');
+        return;
+      }
     }
 
     let assigneeIds: string[] | undefined;
@@ -1039,6 +1189,7 @@ async function ensureTimesheetExtraColumns(req: Request): Promise<void> {
     DO $$
     DECLARE r record;
     BEGIN
+      LOCK TABLE timesheets IN ACCESS EXCLUSIVE MODE;
       FOR r IN
         SELECT con.conname
         FROM pg_constraint con
@@ -1051,17 +1202,52 @@ async function ensureTimesheetExtraColumns(req: Request): Promise<void> {
       LOOP
         EXECUTE format('ALTER TABLE timesheets DROP CONSTRAINT %I', r.conname);
       END LOOP;
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        WHERE rel.relname = 'timesheets'
+          AND con.conname = 'timesheets_hours_nonneg'
+          AND nsp.nspname = current_schema()
+      ) THEN
+        ALTER TABLE timesheets
+          ADD CONSTRAINT timesheets_hours_nonneg
+          CHECK (hours_spent >= 0 AND hours_spent <= 24);
+      END IF;
     END $$
   `);
-  await req.tenantQuery!(`ALTER TABLE timesheets DROP CONSTRAINT IF EXISTS timesheets_hours_nonneg`);
-  await req.tenantQuery!(
-    `ALTER TABLE timesheets ADD CONSTRAINT timesheets_hours_nonneg CHECK (hours_spent >= 0 AND hours_spent <= 24)`
-  );
+  await req.tenantQuery!(`
+    UPDATE timesheets ts
+    SET status = 'approved'
+    FROM employees e
+    WHERE ts.employee_id = e.id
+      AND LOWER(COALESCE(e.role, '')) = 'super_admin'
+      AND LOWER(COALESCE(ts.entry_type, 'task')) = 'task'
+      AND LOWER(COALESCE(ts.status, '')) NOT IN ('approved', 'rejected', 'draft')
+  `);
 }
 
 function normalizeEntryType(raw: unknown): 'task' | 'schedule' {
   const s = String(raw || '').toLowerCase().trim();
   return s === 'schedule' || s === 'meeting' ? 'schedule' : 'task';
+}
+
+function clockToMinutes(raw: unknown): number {
+  const value = String(raw || '').trim();
+  const match = value.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  if (!match) return Number.POSITIVE_INFINITY;
+  let hours = Number(match[1]) || 0;
+  const minutes = Number(match[2] || 0);
+  const meridiem = (match[3] || '').toLowerCase();
+  if (meridiem === 'pm' && hours < 12) hours += 12;
+  if (meridiem === 'am' && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+}
+
+async function isSuperAdminEmployee(req: Request, employeeId: string): Promise<boolean> {
+  const row = await req.tenantQuery!(`SELECT role FROM employees WHERE id = $1 LIMIT 1`, [employeeId]);
+  return String(row.rows[0]?.role || '').toLowerCase() === 'super_admin';
 }
 
 export async function logTimesheet(req: Request, res: Response): Promise<void> {
@@ -1161,10 +1347,75 @@ export async function logTimesheet(req: Request, res: Response): Promise<void> {
     const hoursNum = isOpenDraft
       ? 0
       : Math.min(24, Math.max(0.01, Number(hoursSpent) || 0.01));
-    const status = requestedStatus || (validEntryType === 'schedule' ? 'submitted' : 'approved');
+    const defaultStatus = requestedStatus || (validEntryType === 'schedule' ? 'submitted' : 'approved');
 
     const created: any[] = [];
     for (const validEmpId of targets) {
+      if (isOpenDraft && validTaskId) {
+        const prior = await req.tenantQuery!(
+          `SELECT id, work_date::text AS work_date, hours_spent, start_time, end_time, status, created_at
+             FROM timesheets
+            WHERE task_id = $1
+              AND employee_id = $2
+              AND COALESCE(entry_type, 'task') <> 'schedule'
+              AND LOWER(COALESCE(status, '')) IN ('draft', 'submitted')
+            ORDER BY created_at ASC`,
+          [validTaskId, validEmpId]
+        );
+        const today = String(validDate).slice(0, 10);
+        const todayRows: any[] = [];
+        for (const row of prior.rows) {
+          const date = String(row.work_date || '').slice(0, 10);
+          if (date === today) {
+            todayRows.push(row);
+            continue;
+          }
+          if (!row.end_time) {
+            await req.tenantQuery!(
+              `UPDATE timesheets
+                  SET end_time = COALESCE(NULLIF(end_time, ''), '11:59 PM'),
+                      status = CASE WHEN status = 'draft' THEN 'submitted' ELSE status END
+                WHERE id = $1`,
+              [row.id]
+            );
+          }
+        }
+        if (todayRows.length > 0) {
+          const ordered = [...todayRows].sort((a, b) => clockToMinutes(a.start_time) - clockToMinutes(b.start_time));
+          const keeper = todayRows.find((row) => !row.end_time) || ordered[0];
+          const hours = Math.min(
+            24,
+            todayRows.reduce((sum, row) => sum + (Number(row.hours_spent) || 0), 0)
+          );
+          const startTime = ordered[0].start_time || keeper.start_time || validStart;
+          for (const extra of todayRows) {
+            if (extra.id === keeper.id) continue;
+            await req.tenantQuery!(`DELETE FROM timesheets WHERE id = $1`, [extra.id]);
+          }
+          await req.tenantQuery!(
+            `UPDATE timesheets
+                SET end_time = NULL,
+                    status = 'draft',
+                    hours_spent = $2,
+                    start_time = COALESCE($3, start_time)
+              WHERE id = $1`,
+            [keeper.id, Number(hours.toFixed(2)), startTime]
+          );
+          const reused = await fetchTimesheetRow(req, keeper.id);
+          if (reused) created.push(reused);
+          continue;
+        }
+      }
+
+      let status = defaultStatus;
+      if (
+        !isOpenDraft &&
+        validEntryType === 'task' &&
+        status !== 'rejected' &&
+        (await isSuperAdminEmployee(req, validEmpId))
+      ) {
+        status = 'approved';
+      }
       const result = await req.tenantQuery!(
         `INSERT INTO timesheets (
            project_id, task_id, employee_id, work_date, hours_spent, description, status,
@@ -1261,6 +1512,8 @@ async function ensureProjectExtraColumns(req: Request): Promise<void> {
   await req.tenantQuery!(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS hourly_rate NUMERIC(12, 2)`);
   await req.tenantQuery!(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS currency VARCHAR(8) NOT NULL DEFAULT 'INR'`);
   await req.tenantQuery!(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS client_id UUID`);
+  await req.tenantQuery!(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS category VARCHAR(64)`);
+  await req.tenantQuery!(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS priority VARCHAR(16) NOT NULL DEFAULT 'medium'`);
 }
 
 async function ensureInvoiceTables(req: Request): Promise<void> {
@@ -1368,15 +1621,9 @@ export async function updateProject(req: Request, res: Response): Promise<void> 
       const mid = body.managerId ? await resolveEmployeeId(req, body.managerId) : null;
       push('manager_id', mid);
     }
-    if (body.status !== undefined) {
-      const clean = String(body.status).toLowerCase().trim().replace(/[\s_-]+/g, '');
-      let dbStatus = 'in_progress';
-      if (clean === 'planning' || clean === 'planned') dbStatus = 'planning';
-      else if (clean === 'onhold' || clean === 'paused') dbStatus = 'on_hold';
-      else if (clean === 'completed' || clean === 'done' || clean === 'finished') dbStatus = 'completed';
-      else if (clean === 'inprogress' || clean === 'active') dbStatus = 'in_progress';
-      push('status', dbStatus);
-    }
+    if (body.status !== undefined) push('status', normalizeProjectStatus(body.status));
+    if (body.category !== undefined) push('category', String(body.category || '').trim() || null);
+    if (body.priority !== undefined) push('priority', normalizeProjectPriority(body.priority));
     if (body.approvalStatus !== undefined) push('approval_status', String(body.approvalStatus));
     if (body.denialReason !== undefined) push('denial_reason', body.denialReason);
     if (body.totalWorkHours !== undefined) push('total_work_hours', Number(body.totalWorkHours) || 0);
@@ -1402,6 +1649,34 @@ export async function updateProject(req: Request, res: Response): Promise<void> 
       return;
     }
     res.json({ success: true, data: result.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
+export async function deleteProject(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    if (!isUuid(String(id || ''))) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_ID', message: 'Project id is invalid.' } });
+      return;
+    }
+    const existing = await req.tenantQuery!(`SELECT id FROM projects WHERE id = $1`, [id]);
+    if (existing.rows.length === 0) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+      return;
+    }
+    if (!(await ensureCanManageProject(req, res, id))) return;
+
+    try {
+      await req.tenantQuery!(`ALTER TABLE invoices ALTER COLUMN project_id DROP NOT NULL`);
+      await req.tenantQuery!(`UPDATE invoices SET project_id = NULL WHERE project_id = $1`, [id]);
+    } catch (err: any) {
+      if (err?.code !== '42P01') throw err;
+    }
+
+    await req.tenantQuery!(`DELETE FROM projects WHERE id = $1`, [id]);
+    res.json({ success: true, data: { id, message: 'Project deleted' } });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
@@ -1465,7 +1740,10 @@ export async function updateTimesheet(req: Request, res: Response): Promise<void
     };
 
     const existing = await req.tenantQuery!(
-      `SELECT employee_id, project_id FROM timesheets WHERE id = $1`,
+      `SELECT ts.employee_id, ts.project_id, ts.entry_type, LOWER(COALESCE(e.role, '')) AS employee_role
+       FROM timesheets ts
+       JOIN employees e ON e.id = ts.employee_id
+       WHERE ts.id = $1`,
       [id]
     );
     if (existing.rows.length === 0) {
@@ -1473,8 +1751,17 @@ export async function updateTimesheet(req: Request, res: Response): Promise<void
       return;
     }
 
-    const mappedStatus = body.status !== undefined ? normalizeTimesheetStatus(body.status) : null;
-    const deciding = isTimesheetDecision(mappedStatus);
+    let mappedStatus = body.status !== undefined ? normalizeTimesheetStatus(body.status) : null;
+    const entryType =
+      body.entryType !== undefined ? normalizeEntryType(body.entryType) : normalizeEntryType(existing.rows[0].entry_type);
+    const autoApprove =
+      existing.rows[0].employee_role === 'super_admin' &&
+      entryType === 'task' &&
+      mappedStatus !== null &&
+      mappedStatus !== 'draft' &&
+      mappedStatus !== 'rejected';
+    if (autoApprove) mappedStatus = 'approved';
+    const deciding = isTimesheetDecision(mappedStatus) && !autoApprove;
     if (deciding) {
       const decision = await canDecideTimesheet(req, existing.rows[0]);
       if (!decision.ok) {

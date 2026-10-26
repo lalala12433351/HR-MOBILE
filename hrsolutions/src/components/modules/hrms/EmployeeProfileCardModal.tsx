@@ -126,18 +126,20 @@ export const EmployeeProfileCardModal: React.FC<EmployeeProfileCardModalProps> =
         role="dialog"
         aria-modal="true"
         aria-label={displayEmployee.fullName || displayEmployee.name || 'Employee profile'}
-        className="relative flex w-full max-w-[560px] max-h-[92vh] flex-col overflow-hidden rounded-[12px] border border-[#dde4e9] bg-white shadow-[0_18px_44px_-14px_rgba(23,50,78,0.28)] animate-in zoom-in-95 duration-200 cursor-default sm:max-w-[640px]"
+        className="public-profile-dialog relative flex w-full max-w-[560px] max-h-[92vh] flex-col overflow-hidden rounded-[12px] border border-[#dde4e9] bg-white shadow-[0_18px_44px_-14px_rgba(23,50,78,0.28)] animate-in zoom-in-95 duration-200 cursor-default sm:max-w-[640px]"
         onClick={(e) => e.stopPropagation()}
       >
+        <header className="public-profile-dialog-head"><h2>{isSelf ? 'Your profile' : 'Coworker profile'}</h2>
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-[7px] text-[#5e6c7b] transition-colors hover:bg-[#e8eef2] hover:text-[#172234] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
+          className="public-profile-close flex h-8 w-8 items-center justify-center rounded-[7px] text-[#5e6c7b] transition-colors hover:bg-[#e8eef2] hover:text-[#172234] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
           title="Close"
           aria-label="Close"
         >
           <X className="h-4 w-4" strokeWidth={2} />
         </button>
+        </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
           <EmployeePublicProfilePanel

@@ -2,12 +2,12 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { Search, Sparkles } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { UserPersona } from '@/types';
 import { useApp } from '@/context/AppContext';
-import { OrgBrandMark } from '@/components/common/PixbeBrand';
+import { PixbePixelMark } from '@/components/common/PixbeBrand';
 import { PixbeIcon } from '@/components/common/PixbeIcon';
-import { HelpSupportWidget } from '@/components/support/HelpSupportWidget';
 import { isInstitutionMode } from '@/utils/organizationMode';
 import { getWorkspaceNavGroups } from '@/utils/workspaceNav';
 import { useChatUnread } from '@/hooks/useChat';
@@ -20,6 +20,21 @@ interface SidebarProps {
   onSelectModule?: (mod: string) => void;
 }
 
+// Original 16px assets from Figma's Workspace sidebar (193:56911).
+// Painted with the nav item color so navigation stays one ink, not a rainbow.
+const sidebarIcons: Record<string, string> = {
+  dashboard: 'layout-dashboard',
+  chat: 'inbox',
+  projects: 'folder-kanban',
+  attendance: 'file-clock',
+  timesheets: 'file-clock1',
+  'student-attendance': 'file-clock2',
+  hr: 'users',
+  announcements: 'inbox1',
+  payroll: 'file-clock3',
+  reports: 'file-clock1',
+  settings: 'settings2',
+};
 export const Sidebar: React.FC<SidebarProps> = ({
   currentPersona: propPersona,
   mobileOpen,
@@ -28,7 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectModule,
 }) => {
   const pathname = usePathname();
-  const { state, currentPersona: contextPersona } = useApp();
+  const { state, currentPersona: contextPersona, setCommandPaletteOpen, setAiAssistantOpen } = useApp();
   const currentPersona = propPersona || contextPersona || state.currentPersona;
 
   const isInstitution = isInstitutionMode(state.organization, currentPersona);
@@ -36,47 +51,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const chatUnread = useChatUnread();
   const navGroups = getWorkspaceNavGroups(state.organization, currentPersona);
 
+  const closeMobileRef = useRef(onCloseMobile);
+  closeMobileRef.current = onCloseMobile;
   const [drawerMounted, setDrawerMounted] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const collapseTimer = useRef<number | null>(null);
-  const desktopHelpRef = useRef<HTMLButtonElement>(null);
-  const mobileHelpRef = useRef<HTMLButtonElement>(null);
-  const helpAnchorRef = drawerOpen ? mobileHelpRef : desktopHelpRef;
-
-  const expandSidebar = () => {
-    if (collapseTimer.current) {
-      window.clearTimeout(collapseTimer.current);
-      collapseTimer.current = null;
-    }
-    setExpanded(true);
-  };
-
-  const collapseSidebar = () => {
-    if (helpOpen) return;
-    if (collapseTimer.current) window.clearTimeout(collapseTimer.current);
-    collapseTimer.current = window.setTimeout(() => {
-      setExpanded(false);
-      collapseTimer.current = null;
-    }, 120);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (collapseTimer.current) window.clearTimeout(collapseTimer.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (helpOpen) {
-      expandSidebar();
-      return;
-    }
-    const dock = document.getElementById('pixbe-sidebar');
-    if (dock?.matches(':hover')) return;
-    collapseSidebar();
-  }, [helpOpen]);
 
   useEffect(() => {
     document.documentElement.style.removeProperty('--sidebar-width');
@@ -95,6 +73,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const timeout = window.setTimeout(() => setDrawerMounted(false), 280);
     return () => window.clearTimeout(timeout);
   }, [mobileOpen]);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const panel = document.querySelector<HTMLElement>('.sidebar-drawer-panel');
+    const focusable = () => Array.from(panel?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),[tabindex="0"]') || []);
+    focusable()[0]?.focus({ preventScroll: true });
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); closeMobileRef.current(); }
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true }); };
+  }, [drawerOpen]);
 
   const isItemActive = (path: string, id: string): boolean => {
     if (activeModule) {
@@ -122,22 +118,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ? state.organization.name
       : isInstitution
         ? 'Institute workspace'
-        : 'Pixbe Workspace';
+        : 'Pixbe workspace';
+  const workspaceKind = isStudentRole
+    ? 'Student workspace'
+    : isInstitution
+      ? 'Institute workspace'
+      : 'Company workspace';
 
-  const renderRail = (showGroupLabels: boolean) => (
+  const renderRail = () => (
     <div className="sidebar-rail">
-      <Link
-        href={homeHref}
-        onClick={onCloseMobile}
-        className="sidebar-brand"
-        title={isStudentRole ? 'Student attendance portal' : 'Workspace home'}
-      >
-        <OrgBrandMark src={state.organization?.logo} className="sidebar-brand-mark" />
-        <span className="sidebar-brand-copy">
-          <strong>Pixbe</strong>
-          <small>{orgName}</small>
-        </span>
-      </Link>
+      <div className="sidebar-top">
+        <Link
+          href={homeHref}
+          onClick={onCloseMobile}
+          className="sidebar-wordmark"
+          title={isStudentRole ? 'Student attendance portal' : 'Workspace home'}
+        >
+          <PixbePixelMark />
+          <strong>pixbe</strong>
+        </Link>
+      </div>
+
+      <div className="sidebar-org">
+        <div>
+          <strong>{orgName}</strong>
+          <small>{workspaceKind}</small>
+        </div>
+      </div>
 
       <nav className="sidebar-nav custom-scrollbar" aria-label="Primary">
         {navGroups.map((group) => (
@@ -146,25 +153,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {group.items.map((item) => {
               const active = isItemActive(item.path, item.id);
               const badge = item.id === 'chat' && chatUnread > 0 ? chatUnread : 0;
+              const iconAsset = item.id === 'attendance' && isInstitution
+                ? 'file-clock2'
+                : sidebarIcons[item.id];
 
               return (
                 <Link
                   key={item.id}
                   href={item.path}
                   onClick={() => handleItemClick(item.path, item.id)}
-                  title={
-                    showGroupLabels || expanded
-                      ? undefined
-                      : badge
-                        ? `${item.label} (${badge} unread)`
-                        : item.label
-                  }
+                  title={item.label}
                   aria-label={badge ? `${item.label}, ${badge} unread` : item.label}
                   aria-current={active ? 'page' : undefined}
                   data-active={active ? 'true' : 'false'}
                   className="sidebar-nav-item"
                 >
-                  <PixbeIcon name={item.icon} className="sidebar-nav-icon" />
+                  {iconAsset ? (
+                    <span
+                      aria-hidden="true"
+                      className="sidebar-nav-icon sidebar-nav-glyph"
+                      style={{
+                        maskImage: `url(/sidebar/${iconAsset}.svg)`,
+                        WebkitMaskImage: `url(/sidebar/${iconAsset}.svg)`,
+                      }}
+                    />
+                  ) : (
+                    <PixbeIcon name={item.icon} size={16} className="sidebar-nav-icon" />
+                  )}
                   <span className="sidebar-nav-text">{item.label}</span>
                   {badge > 0 && (
                     <span aria-hidden className="sidebar-nav-badge">
@@ -177,25 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         ))}
       </nav>
-
-      <div className="sidebar-footer">
-        <button
-          ref={showGroupLabels ? mobileHelpRef : desktopHelpRef}
-          type="button"
-          onClick={() => {
-            setHelpOpen((value) => !value);
-            if (!showGroupLabels) expandSidebar();
-          }}
-          title={showGroupLabels || expanded || helpOpen ? undefined : 'Help & support'}
-          aria-label="Help & support"
-          aria-expanded={helpOpen}
-          data-active={helpOpen ? 'true' : 'false'}
-          className="sidebar-nav-item"
-        >
-          <PixbeIcon name="help" className="sidebar-nav-icon" />
-          <span className="sidebar-nav-text">Help & support</span>
-        </button>
-      </div>
+      <div className="sidebar-mobile-tools lg:hidden"><button type="button" onClick={() => { onCloseMobile(); setCommandPaletteOpen(true); }}><Search size={16} aria-hidden="true"/>Search workspace</button><button type="button" onClick={() => { onCloseMobile(); setAiAssistantOpen(true); }}><Sparkles size={16} aria-hidden="true"/>Ask assistant</button></div>
     </div>
   );
 
@@ -204,16 +201,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <aside
         id="pixbe-sidebar"
         className="sidebar-dock hidden lg:block fixed left-0 top-0 bottom-0 z-40"
-        data-expanded={expanded ? 'true' : 'false'}
-        onMouseEnter={expandSidebar}
-        onMouseLeave={collapseSidebar}
-        onFocusCapture={expandSidebar}
-        onBlurCapture={(event) => {
-          const next = event.relatedTarget as Node | null;
-          if (!event.currentTarget.contains(next)) collapseSidebar();
-        }}
+        data-collapsed="true"
       >
-        {renderRail(false)}
+        {renderRail()}
       </aside>
 
       {drawerMounted && (
@@ -231,20 +221,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             aria-modal="true"
             aria-label="Navigation"
           >
-            {renderRail(true)}
+            {renderRail()}
           </div>
         </div>
       )}
 
-      <HelpSupportWidget
-        open={helpOpen}
-        onOpenChange={(next) => {
-          setHelpOpen(next);
-          if (next) expandSidebar();
-        }}
-        showLauncher={false}
-        anchorRef={helpAnchorRef}
-      />
     </>
   );
 };

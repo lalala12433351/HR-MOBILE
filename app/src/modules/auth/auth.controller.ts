@@ -435,6 +435,7 @@ export async function register(req: Request, res: Response): Promise<void> {
             name: tenantRecord.name,
             schema: tenantRecord.schema_name,
             industry: tenantRecord.industry,
+            createdAt: tenantRecord.created_at ? new Date(tenantRecord.created_at).toISOString() : undefined,
             ...tenantAddressPayload(tenantRecord),
             license: await syncAndSummarizeLicense(pool, tenantRecord.id, resolvedEmail),
           },
@@ -576,7 +577,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     log.info(`Resolving tenant workspace for "${cleanEmail}" from Control Plane...`);
     let mappingRes = await pool.query(
       `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.name as tenant_name, t.schema_name, t.status as tenant_status, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
-              t.address, t.city, t.state_province, t.postal_code, t.country
+              t.created_at as tenant_created_at, t.address, t.city, t.state_province, t.postal_code, t.country
        FROM public.global_auth_mapping gam
        JOIN public.tenants t ON gam.tenant_id = t.id
        WHERE LOWER(gam.email) = $1
@@ -792,6 +793,7 @@ export async function login(req: Request, res: Response): Promise<void> {
           name: authRecord.tenant_name,
           schema: authRecord.schema_name,
           industry: authRecord.tenant_industry || 'Office',
+          createdAt: authRecord.tenant_created_at ? new Date(authRecord.tenant_created_at).toISOString() : undefined,
           ...tenantAddressPayload(authRecord),
           license: null,
         },

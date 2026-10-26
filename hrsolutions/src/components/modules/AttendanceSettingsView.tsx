@@ -1,6 +1,9 @@
 'use client';
+import { ResponsiveTable } from '@/components/common/ResponsiveTable';
+import { DateInput } from '@/components/common/DateInput';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import { SettingsPageHeader, SettingsButton, SettingsCard, SettingsDayPicker, SettingsField, SettingsSwitchRow } from './settings/SettingsPrimitives';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { DEFAULT_GEO_COORDINATES } from '@/config/constants';
 import { isInstitutionMode } from '@/utils/organizationMode';
 import { SettingsToggle } from './settings/SettingsToggle';
@@ -8,8 +11,10 @@ import { SettingsToast } from './settings/SettingsToast';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { AppState } from '../../services/store';
-import { WorkShift } from '../../types';
+import { Holiday, WorkShift } from '../../types';
+import { HolidayCalendarView } from './attendance/HolidayCalendarView';
 import { api } from '../../services/apiClient';
+import { repeatOnDay as repeatOnDayNumber, rotateRosterSchedule } from '@/utils/attendanceRules';
 import { AddOfficeModal, OfficeModalData } from '../common/AddOfficeModal';
 import {
   ATT_BTN_PRIMARY,
@@ -19,9 +24,14 @@ import {
   ATT_TABLE_SHELL,
 } from './attendance/attendanceUi';
 
+type AttendancePane = 'general' | 'students' | 'policy' | 'office_location' | 'leaves' | 'holidays';
+
 interface AttendanceSettingsViewProps {
   state: AppState;
   onUpdateState: (updater: (prev: AppState) => AppState) => void;
+  pane?: string;
+  paneLabel?: string;
+  onPaneChange?: (pane: string) => void;
 }
 
 interface OfficePolicyConfig {
@@ -92,6 +102,9 @@ const toWholeDays = (raw: string, max: number): number | null => {
 export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   state,
   onUpdateState,
+  pane,
+  paneLabel,
+  onPaneChange,
 }) => {
   const options = state.customOptions;
   const initialAtt = options.attendanceSettings;
@@ -101,10 +114,15 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
   const isInstitution = isInstitutionMode(state.organization, state.currentPersona);
 
-  // Sub-Navigation Tab State
-  const [subTab, setSubTab] = useState<'general' | 'students' | 'policy' | 'office_location' | 'leaves' | 'reports'>('general');
+  const [subTabState, setSubTabState] = useState<AttendancePane>('general');
+  const subTab: AttendancePane = (pane as AttendancePane) || subTabState;
+  const setSubTab = (next: AttendancePane) => {
+    if (onPaneChange) onPaneChange(next);
+    else setSubTabState(next);
+  };
 
   useEffect(() => {
+    if (pane) return;
     const tab = searchParams.get('tab');
     if (
       tab === 'general' ||
@@ -112,17 +130,68 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       tab === 'policy' ||
       tab === 'office_location' ||
       tab === 'leaves' ||
-      tab === 'reports'
+      tab === 'holidays'
     ) {
-      setSubTab(tab);
+      setSubTabState(tab);
     }
-  }, [searchParams]);
+  }, [searchParams, pane]);
 
   useEffect(() => {
     if (!isInstitution && subTab === 'students') {
       setSubTab('general');
     }
   }, [isInstitution, subTab]);
+
+  const holidaySaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const latestHolidayPayloadRef = useRef<Holiday[] | null>(null);
+
+  const persistHolidays = useCallback((holidays: Holiday[]) => {
+    onUpdateState((prev) => ({
+      ...prev,
+      customOptions: { ...prev.customOptions, holidays },
+    }));
+    latestHolidayPayloadRef.current = holidays;
+    const run = holidaySaveChainRef.current.catch(() => undefined).then(() => {
+      const payload = latestHolidayPayloadRef.current;
+      if (!payload) return;
+      latestHolidayPayloadRef.current = null;
+      return api.attendance.saveHolidays({
+        holidays: payload.map((h) => ({
+          id: h.id,
+          name: h.name,
+          date: h.date,
+          year: Number(h.year) || Number(String(h.date || '').slice(0, 4)),
+          dayOfWeek: h.dayOfWeek || '',
+          isApproved: h.isApproved !== false,
+        })),
+      }).then(() => undefined);
+    });
+    holidaySaveChainRef.current = run;
+    return run;
+  }, [onUpdateState]);
+
+  useEffect(() => {
+    if (subTab !== 'holidays') return;
+    let cancelled = false;
+    api.attendance.getHolidays().then((res) => {
+      if (cancelled || !Array.isArray(res.data)) return;
+      const holidays: Holiday[] = res.data.map((h: any) => ({
+        id: h.id,
+        name: h.name,
+        date: String(h.date || '').slice(0, 10),
+        year: Number(h.year) || Number(String(h.date || '').slice(0, 4)),
+        dayOfWeek: h.dayOfWeek || h.day_of_week || '',
+        isApproved: h.isApproved !== false && h.is_approved !== false,
+      }));
+      onUpdateState((prev) => ({
+        ...prev,
+        customOptions: { ...prev.customOptions, holidays },
+      }));
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [subTab, onUpdateState]);
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [leaveQuotaPeriod, setLeaveQuotaPeriod] = useState<'annual' | 'monthly'>(
@@ -164,89 +233,120 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       const attended = logs.filter((l) => l.status === 'Present' || l.status === 'Late').length;
       const rate = total > 0 ? Math.round((attended / total) * 100) : 0;
       const absentCount = logs.filter((l) => l.status === 'Absent' || l.status === 'On Leave').length;
-      const isDefaulter = total > 0 && rate < studentMinAttendanceThreshold;
+      const schoolDays = logs
+        .map((log) => ({ date: String(log.date || '').slice(0, 10), status: log.status }))
+        .filter((log) => /^\d{4}-\d{2}-\d{2}$/.test(log.date))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      let consecutiveAbsences = 0;
+      for (let index = schoolDays.length - 1; index >= 0; index -= 1) {
+        const day = new Date(`${schoolDays[index].date}T00:00:00`).getDay();
+        if (day === 0 || day === 6) continue;
+        if (schoolDays[index].status === 'Absent') consecutiveAbsences += 1;
+        else break;
+      }
+      const lowAttendance = total > 0 && rate < studentMinAttendanceThreshold;
+      const longAbsence = consecutiveAbsences >= consecutiveAbsenceAlertDays;
       return {
         student: stud,
         totalDays: total,
         attendedDays: attended,
         absentDays: absentCount,
         rate,
-        isDefaulter,
+        consecutiveAbsences,
+        isDefaulter: lowAttendance || longAbsence,
+        lowAttendance,
+        longAbsence,
       };
     });
-  }, [state.students, state.attendance, studentMinAttendanceThreshold]);
+  }, [state.students, state.attendance, studentMinAttendanceThreshold, consecutiveAbsenceAlertDays]);
 
   const activeDefaulters = useMemo(() => studentDefaulters.filter((d) => d.isDefaulter), [studentDefaulters]);
 
-  const handleAlertGuardian = (studentName: string, guardianName?: string, phone?: string) => {
-    onUpdateState((prev) => ({
-      ...prev,
-      notifications: [
-        {
-          id: `notif_${Date.now()}`,
-          title: `Guardian Alert Sent: ${studentName}`,
-          message: `Notice dispatched to ${guardianName || 'Parent'} (${phone || 'Contact'}) regarding attendance rate below ${studentMinAttendanceThreshold}%.`,
-          timestamp: 'Just now',
-          category: 'Attendance' as const,
-          priority: 'high' as const,
-          read: false,
-          linkModule: 'students',
-        },
-        ...prev.notifications,
-      ],
-      auditLogs: [
-        {
-          id: `log_${Date.now()}`,
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          user: prev.currentPersona.name,
-          action: 'DISPATCHED_GUARDIAN_ATTENDANCE_WARNING',
-          entity: 'StudentAttendancePolicy',
-          entityId: studentName,
-          ipAddress: '106.51.72.18',
-          details: `Sent low attendance alert (< ${studentMinAttendanceThreshold}%) to ${guardianName || 'Guardian'} for ${studentName}`,
-        },
-        ...prev.auditLogs,
-      ],
-    }));
-    showToast(`Alert dispatched to ${guardianName || 'Parent'} (${studentName})`);
+  const sendGuardianAlerts = async (
+    rows: { student: { id?: string; studentId?: string; name: string } }[],
+    reason: string
+  ) => {
+    const studentIds = rows.map((row) => row.student.id || row.student.studentId).filter(Boolean) as string[];
+    if (studentIds.length === 0) {
+      showToast('No students to alert.');
+      return;
+    }
+    const message = studentWarningMessage
+      .replace('{student_name}', rows.length === 1 ? rows[0].student.name : 'your child')
+      .replace('{attendance_pct}', reason)
+      .replace('{threshold}', String(studentMinAttendanceThreshold));
+    const result = await api.institute.alertGuardians({
+      studentIds,
+      subject: 'Attendance notice',
+      message,
+    });
+    if (!result.success) {
+      showToast(result.error?.message || 'Could not send the attendance notice.');
+      return;
+    }
+    const emailed = result.data?.emailed || [];
+    const hrNotices = result.data?.hrNotices || [];
+    if (hrNotices.length > 0) {
+      onUpdateState((prev) => ({
+        ...prev,
+        notifications: [
+          ...hrNotices.map((notice: { id: string; name: string; guardianName: string }) => ({
+            id: `notif_hr_${notice.id}_${Date.now()}`,
+            title: `HR notice: ${notice.name}`,
+            message: `${notice.guardianName} has no email on file. This attendance notice was left for HR instead of a text.`,
+            timestamp: 'Just now',
+            category: 'Attendance' as const,
+            priority: 'high' as const,
+            read: false,
+            linkModule: 'students',
+          })),
+          ...prev.notifications,
+        ],
+      }));
+    }
+    const emailedCount = emailed.length;
+    const noticeCount = hrNotices.length;
+    showToast(
+      emailedCount > 0
+        ? `Emailed ${emailedCount} guardian${emailedCount === 1 ? '' : 's'}${noticeCount ? ` and left ${noticeCount} notice${noticeCount === 1 ? '' : 's'} for HR` : ''}.`
+        : `Left ${noticeCount} notice${noticeCount === 1 ? '' : 's'} for HR. No guardian email is on file.`
+    );
+  };
+
+  const handleAlertGuardian = (studentId: string) => {
+    const row = activeDefaulters.find((item) => (item.student.id || item.student.studentId) === studentId) ||
+      studentDefaulters.find((item) => (item.student.id || item.student.studentId) === studentId);
+    if (!row) return;
+    const reason = row.longAbsence
+      ? `${row.consecutiveAbsences} school days absent`
+      : `${row.rate}%`;
+    void sendGuardianAlerts([row], reason);
   };
 
   const handleAlertAllDefaulters = () => {
     if (activeDefaulters.length === 0) {
-      showToast('No students currently below the minimum threshold.');
+      showToast('No students currently need a guardian notice.');
       return;
     }
-    onUpdateState((prev) => ({
-      ...prev,
-      notifications: [
-        {
-          id: `notif_${Date.now()}`,
-          title: `Bulk Guardian Alerts Sent (${activeDefaulters.length} Students)`,
-          message: `Automated attendance warning notifications dispatched to guardians of ${activeDefaulters.length} students below ${studentMinAttendanceThreshold}%.`,
-          timestamp: 'Just now',
-          category: 'Attendance' as const,
-          priority: 'high' as const,
-          read: false,
-          linkModule: 'students',
-        },
-        ...prev.notifications,
-      ],
-      auditLogs: [
-        {
-          id: `log_${Date.now()}`,
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          user: prev.currentPersona.name,
-          action: 'BULK_GUARDIAN_ATTENDANCE_ALERT',
-          entity: 'StudentAttendancePolicy',
-          entityId: 'BULK_DEFAULTERS',
-          ipAddress: '106.51.72.18',
-          details: `Sent bulk attendance warning notices to guardians of ${activeDefaulters.length} students below ${studentMinAttendanceThreshold}% threshold`,
-        },
-        ...prev.auditLogs,
-      ],
-    }));
-    showToast(`Dispatched alerts to all ${activeDefaulters.length} student guardians`);
+    void sendGuardianAlerts(activeDefaulters, `${studentMinAttendanceThreshold}%`);
   };
+
+  useEffect(() => {
+    if (!autoAlertGuardiansBelowThreshold || !enableLowAttendanceWarning) return;
+    if (typeof window === 'undefined' || activeDefaulters.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const due = activeDefaulters.filter((row) => {
+      const id = row.student.id || row.student.studentId;
+      if (!id) return false;
+      return !window.sessionStorage.getItem(`guardian-alert:${id}:${today}`);
+    });
+    if (due.length === 0) return;
+    due.forEach((row) => {
+      const id = row.student.id || row.student.studentId;
+      if (id) window.sessionStorage.setItem(`guardian-alert:${id}:${today}`, '1');
+    });
+    void sendGuardianAlerts(due, `${studentMinAttendanceThreshold}%`);
+  }, [autoAlertGuardiansBelowThreshold, enableLowAttendanceWarning, activeDefaulters, studentMinAttendanceThreshold]);
 
   // General Form States
   const [hoursCalcMethod, setHoursCalcMethod] = useState(
@@ -255,9 +355,6 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   const [startDate, setStartDate] = useState(() => initialAtt?.startDate || new Date().toISOString().substring(0, 10));
   const [approvalCycle, setApprovalCycle] = useState<'Monthly' | 'Bi-Weekly' | 'Weekly'>(
     initialAtt?.approvalCycle || 'Monthly'
-  );
-  const [repeatOn, setRepeatOn] = useState(
-    initialAtt?.repeatOn || 'Monthly on Day 11'
   );
   const [locationScope, setLocationScope] = useState(
     initialAtt?.locationScope || 'All Offices'
@@ -360,17 +457,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
     setEmployeeRosterMatrix((prev) => {
       const next: Record<string, Record<string, string>> = {};
       Object.entries(prev).forEach(([empId, schedule]) => {
-        const nextSchedule: Record<string, string> = {};
-        Object.entries(schedule).forEach(([day, shiftId]) => {
-          if (shiftId === 'OFF') {
-            nextSchedule[day] = 'OFF';
-          } else {
-            const curIdx = shiftIds.indexOf(shiftId);
-            const nextIdx = (curIdx + 1) % shiftIds.length;
-            nextSchedule[day] = shiftIds[nextIdx];
-          }
-        });
-        next[empId] = nextSchedule;
+        next[empId] = rotateRosterSchedule(schedule, shiftIds);
       });
       return next;
     });
@@ -398,19 +485,13 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
     initialAtt?.workDayEndTime || initialPolicies?.workDayEndTime || (isInstitution ? '03:30 PM' : '06:00 PM')
   );
   const [gracePeriod, setGracePeriod] = useState(
-    initialAtt?.gracePeriodMinutes || initialPolicies?.lateThresholdMinutes || 15
+    initialAtt?.gracePeriodMinutes ?? initialPolicies?.lateThresholdMinutes ?? 15
   );
   const [halfDayHours, setHalfDayHours] = useState(
     initialAtt?.halfDayThresholdHours || 4.5
   );
   const [fullDayHours, setFullDayHours] = useState(
     initialAtt?.fullDayMinimumHours || 8.0
-  );
-  const [autoClockOut, setAutoClockOut] = useState(
-    initialAtt?.autoClockOutEnabled ?? true
-  );
-  const [autoClockOutHours, setAutoClockOutHours] = useState(
-    Number(initialAtt?.autoClockOutHours) || 12
   );
 
   // Modals for creating new shift / batch
@@ -524,8 +605,13 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   const [qrRefreshIntervalSeconds, setQrRefreshIntervalSeconds] = useState(
     Number(initialAtt?.qrRefreshIntervalSeconds) || 30
   );
-  const [regularizationDaysWindow, setRegularizationDaysWindow] = useState(11);
-  const [requireManagerRegularizationApproval, setRequireManagerRegularizationApproval] = useState(true);
+  const [regularizationDaysWindow, setRegularizationDaysWindow] = useState(
+    Math.min(90, Math.max(1, Number(initialAtt?.regularizationWindowDays) || 11))
+  );
+  const [requireManagerRegularizationApproval, setRequireManagerRegularizationApproval] = useState(
+    initialAtt?.requireManagerRegularizationApproval !== false
+  );
+  const [repeatOnDay, setRepeatOnDay] = useState(repeatOnDayNumber(initialAtt?.repeatOn));
 
   // Leave Settings
   const [paidLeaveQuota, setPaidLeaveQuota] = useState(initialLeaves?.paidLeaveQuota || 18);
@@ -705,7 +791,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       name: newShiftName.trim(),
       startTime: newShiftStart || '09:00 AM',
       endTime: newShiftEnd || '06:00 PM',
-      gracePeriodMinutes: Number(newShiftGrace) || 15,
+      gracePeriodMinutes: Number.isFinite(Number(newShiftGrace)) ? Number(newShiftGrace) : 15,
       workingDays: newShiftDays,
     };
 
@@ -713,7 +799,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
     setSelectedShiftId(newS.id);
     setWorkStartTime(newS.startTime);
     setWorkEndTime(newS.endTime);
-    setGracePeriod(newS.gracePeriodMinutes || 15);
+    setGracePeriod(newS.gracePeriodMinutes ?? 15);
     setSelectedDays(newShiftDays);
     setShowAddShiftModal(false);
     setNewShiftName('');
@@ -750,7 +836,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
         section: newBatchSection.trim(),
         startTime: newBatchStart || '08:30',
         endTime: newBatchEnd || '15:30',
-        graceMinutes: Number(newBatchGrace) || 15,
+        graceMinutes: Number.isFinite(Number(newBatchGrace)) ? Number(newBatchGrace) : 15,
         workingDays: newBatchDays,
       };
 
@@ -761,14 +847,14 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
       const savedBatch = res.data || newB;
       const nextBatches = [...academicBatches, savedBatch];
-      
+
       await api.setup.saveAttendanceSettings({ academicBatches: nextBatches });
 
       setAcademicBatches(nextBatches);
       setSelectedBatchId(savedBatch.id);
       setWorkStartTime(to12HourTime(savedBatch.startTime || newB.startTime));
       setWorkEndTime(to12HourTime(savedBatch.endTime || newB.endTime));
-      setGracePeriod(savedBatch.graceMinutes || 15);
+      setGracePeriod(savedBatch.graceMinutes ?? 15);
       setSelectedDays(newBatchDays);
       setShowAddBatchModal(false);
       setNewBatchGrade('');
@@ -1068,13 +1154,15 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
   };
 
   const handleSaveAllSettings = async () => {
+    if (isSaving) return;
+    const savedGrace = Number.isFinite(Number(gracePeriod)) ? Math.max(0, Number(gracePeriod)) : 15;
     const updatedShifts = shifts.map((s) =>
       s.id === selectedShiftId
         ? {
             ...s,
             startTime: workStartTime || '09:00 AM',
             endTime: workEndTime || '06:00 PM',
-            gracePeriodMinutes: Number(gracePeriod) || 15,
+            gracePeriodMinutes: savedGrace,
             workingDays: selectedDays,
           }
         : s
@@ -1086,7 +1174,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
             ...b,
             startTime: to24HourTime(workStartTime),
             endTime: to24HourTime(workEndTime),
-            graceMinutes: Number(gracePeriod) || 15,
+            graceMinutes: savedGrace,
             workingDays: selectedDays,
           }
         : b
@@ -1153,7 +1241,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       attendancePolicies: {
         workDayStartTime: workStartTime,
         workDayEndTime: workEndTime,
-        lateThresholdMinutes: Number(gracePeriod) || 15,
+        lateThresholdMinutes: savedGrace,
         geofenceRadiusMeters: Math.min(MAX_GEOFENCE_LIMIT, Math.max(MIN_GEOFENCE_LIMIT, Number(geofenceRadius) || 150)),
       },
       attendanceSettings: {
@@ -1161,16 +1249,15 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
         hoursCalculationMethod: hoursCalcMethod,
         startDate,
         approvalCycle,
-        repeatOn,
         locationScope,
         attendanceCycle,
         workDayStartTime: workStartTime,
         workDayEndTime: workEndTime,
-        gracePeriodMinutes: Number(gracePeriod) || 15,
+        gracePeriodMinutes: savedGrace,
         halfDayThresholdHours: Number(halfDayHours) || 4.5,
         fullDayMinimumHours: Number(fullDayHours) || 8.0,
-        autoClockOutEnabled: autoClockOut,
-        autoClockOutHours: Math.min(24, Math.max(1, Number(autoClockOutHours) || 12)),
+        autoClockOutEnabled: true,
+        autoClockOutHours: 12,
         geofenceRadiusMeters: Math.min(MAX_GEOFENCE_LIMIT, Math.max(MIN_GEOFENCE_LIMIT, Number(geofenceRadius) || 150)),
         requireSelfieCheckIn,
         requireSelfieCheckOut,
@@ -1190,6 +1277,9 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
         enableRosterShifts,
         rosterRotationCycle,
         enableHourlyShiftPolicy,
+        regularizationWindowDays: Math.min(90, Math.max(1, Number(regularizationDaysWindow) || 11)),
+        requireManagerRegularizationApproval,
+        repeatOn: `Day ${repeatOnDay}`,
       },
       leaveSettings: {
         paidLeaveQuota: Number(paidLeaveQuota) || 15,
@@ -1225,12 +1315,15 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       reportSettings: options.reportSettings,
     };
 
+    setIsSaving(true);
     try {
       await api.setup.saveAttendanceSettings(attendancePayload);
     } catch (e: any) {
       console.error('Failed to persist attendance settings', e);
       showToast(e?.message || 'Failed to save attendance settings');
       return;
+    } finally {
+      setIsSaving(false);
     }
 
     onUpdateState((prev) => ({
@@ -1283,20 +1376,9 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
       <SettingsToast message={toastMessage} />
 
       <div className="settings-page__sticky">
-        <div className="settings-page__header">
-          <h2 className="settings-page__heading">
-            Attendance & Work Schedules
-          </h2>
+        <SettingsPageHeader title={paneLabel || 'Attendance and leave'} actions={subTab !== 'holidays' ? <SettingsButton loading={isSaving} onClick={handleSaveAllSettings}>{isSaving ? 'Saving…' : 'Save changes'}</SettingsButton> : undefined} />
 
-          <button
-            type="button"
-            onClick={handleSaveAllSettings}
-            className="settings-page__action shrink-0"
-          >
-            Save Changes
-          </button>
-        </div>
-
+        {!pane && (
         <div className="settings-page__tabs" role="tablist" aria-label="Attendance settings categories">
           {[
             { id: 'general', label: isInstitution ? 'Batches & Schedules' : 'Shifts & Schedules' },
@@ -1304,7 +1386,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
             { id: 'policy', label: 'Policy & GPS Geofencing' },
             { id: 'office_location', label: isInstitution ? 'Campus Locations' : 'Offices & Locations' },
             { id: 'leaves', label: 'Leave Policies & Quotas' },
-            { id: 'reports', label: 'Report Customization' },
+            { id: 'holidays', label: 'Holidays' },
           ].map((item) => {
             const isSelected = subTab === item.id;
             return (
@@ -1322,6 +1404,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
             );
           })}
         </div>
+        )}
       </div>
 
       {/* Main Content Area */}
@@ -1330,7 +1413,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
           {/* 1. GENERAL TAB (Shifts / Batches & Working Days)                          */}
           {/* ========================================================================= */}
           {subTab === 'general' && (
-            <div className={`${ATT_CARD} p-5 sm:p-7 space-y-6`}>
+            <>
+<SettingsCard className={` p-5 sm:p-7 space-y-6`}>
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className={ATT_SECTION_TITLE}>
@@ -1405,129 +1489,20 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                   </div>
                 </div>
               ) : (
-                /* Corporate Shifts Switcher */
-                <div className="space-y-3 p-4 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[var(--text-primary)]">
-                      Choose Work Shift
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddShiftModal(true)}
-                      className="settings-page__action"
-                    >
-                      New Shift
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {shifts.map((s) => {
-                      const isSelected = s.id === selectedShiftId;
-                      return (
-                        <div
-                          key={s.id}
-                          className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                            isSelected
-                              ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                              : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-color)] hover:border-[var(--border-strong)]'
-                          }`}
-                          onClick={() => handleSelectShift(s.id)}
-                        >
-                          <span>{s.name}</span>
-                          {s.isHourlyShift && (
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${isSelected ? 'bg-[var(--bg-surface)]/20 text-white' : 'bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)]'}`}>
-                              HOURLY
-                            </span>
-                          )}
-                          <span className={`text-[10px] font-mono ${isSelected ? 'text-blue-100' : 'text-[var(--text-muted)]'}`}>
-                            ({s.startTime} - {s.endTime})
-                          </span>
-                          {shifts.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteShift(s.id);
-                              }}
-                              className={`p-0.5 text-xs font-bold transition-colors cursor-pointer ${
-                                isSelected ? 'text-blue-200 hover:text-white' : 'text-[var(--text-muted)] hover:text-red-600'
-                              }`}
-                              title="Delete shift"
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
+                /* Work shift selection */
+                <div className="settings-shift-picker">
+                  <div className="settings-card__header"><h4>Work shifts</h4><SettingsButton variant="secondary" onClick={() => setShowAddShiftModal(true)}>New shift</SettingsButton></div>
+                  <div className="settings-shift-options" role="group" aria-label="Work shift">
+                    {shifts.map((shift) => <div key={shift.id} className={selectedShiftId === shift.id ? 'is-selected' : ''}>
+                      <button type="button" aria-pressed={selectedShiftId === shift.id} onClick={() => handleSelectShift(shift.id)}><span>{shift.name}</span><small>{shift.isHourlyShift ? 'Hourly / flexible' : `${shift.startTime} – ${shift.endTime}`}</small></button>
+                      {shifts.length > 1 && <button type="button" className="settings-shift-remove" aria-label={`Delete ${shift.name}`} onClick={() => handleDeleteShift(shift.id)}>×</button>}
+                    </div>)}
                   </div>
                 </div>
               )}
 
               {/* SECTION: TIMINGS & SCHEDULE RULES */}
               <div className="space-y-4 pt-1">
-                {/* Attendance Evaluation Cycle */}
-                <div className="p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)] pb-3">
-                    <div>
-                      <h4 className="text-xs font-bold text-[var(--text-primary)]">
-                        Attendance Evaluation & Reconciliation Cycle
-                      </h4>
-                      <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                        Configure monthly reconciliation vs annual cumulative hours tracking
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-blue-600 inline-block" />
-                      <span className="text-xs font-bold text-[var(--text-primary)] capitalize">
-                        {attendanceCycle} Tracking
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setAttendanceCycle('monthly')}
-                      className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
-                        attendanceCycle === 'monthly'
-                          ? 'border-blue-600 bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)]/50 text-blue-950 font-semibold ring-1 ring-blue-600/20'
-                          : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-xs">Monthly Attendance Cycle (Standard)</span>
-                        {attendanceCycle === 'monthly' && (
-                          <span className="h-2 w-2 rounded-full bg-blue-600 shrink-0" />
-                        )}
-                      </div>
-                      <p className="text-[11px] text-[var(--text-muted)]">
-                        Reviews punches, deductions, late arrivals, and hour targets on a 1st calendar month cycle.
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setAttendanceCycle('yearly')}
-                      className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
-                        attendanceCycle === 'yearly'
-                          ? 'border-blue-600 bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)]/50 text-blue-950 font-semibold ring-1 ring-blue-600/20'
-                          : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-xs">Yearly Attendance Cycle (Optional)</span>
-                        {attendanceCycle === 'yearly' && (
-                          <span className="h-2 w-2 rounded-full bg-blue-600 shrink-0" />
-                        )}
-                      </div>
-                      <p className="text-[11px] text-[var(--text-muted)]">
-                        Accumulates cumulative hours and attendance statistics continuously across the entire financial year.
-                      </p>
-                    </button>
-                  </div>
-                </div>
-
                 {/* Live Computed Schedule Target Banner */}
                 <div className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/60 text-xs">
                   <div>
@@ -1640,36 +1615,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* 7 Interactive Day Buttons */}
-                  <div className="grid grid-cols-7 gap-1.5 sm:gap-2 pt-1">
-                    {WEEK_DAYS.map((d) => {
-                      const isSelected = selectedDays.includes(d.key);
-                      const isAltSaturday = d.key === 'Saturday' && enableAlternateSaturdays;
-                      return (
-                        <button
-                          key={d.key}
-                          type="button"
-                          onClick={() => toggleDay(d.key)}
-                          className={`py-2.5 px-1 rounded-lg border text-center text-xs transition-all cursor-pointer active:scale-98 ${
-                            isSelected
-                              ? 'border-blue-600 bg-blue-600 text-white font-bold'
-                              : isAltSaturday
-                              ? 'border-blue-300 bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-900 font-semibold'
-                              : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border-strong)] font-medium'
-                          }`}
-                        >
-                          <span className="block text-xs sm:text-sm">{d.short}</span>
-                          <span
-                            className={`hidden sm:block text-[10px] mt-0.5 ${
-                              isSelected ? 'text-blue-100 font-normal' : isAltSaturday ? 'text-blue-700 font-bold' : 'text-[var(--text-muted)]'
-                            }`}
-                          >
-                            {isSelected ? 'Open' : isAltSaturday ? 'Alt. Open' : 'Off'}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <SettingsDayPicker value={selectedDays} onToggle={toggleDay} />
 
                   <div className="p-2.5 rounded-lg bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] text-xs text-[var(--text-secondary)] flex items-center justify-between">
                     <span>
@@ -1685,24 +1631,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                   {/* Alternate Saturdays Schedule Card */}
                   <div className="p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5 pr-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-[var(--text-primary)]">Alternate Saturdays Schedule</span>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            enableAlternateSaturdays
-                              ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                              : 'bg-slate-200 text-[var(--text-secondary)]'
-                          }`}>
-                            {enableAlternateSaturdays ? 'Active' : 'Disabled'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-[var(--text-muted)]">
-                          Allow Saturdays to alternate between active working shifts and scheduled weekly offs.
-                        </p>
-                      </div>
-                      <ToggleSwitch checked={enableAlternateSaturdays} onChange={setEnableAlternateSaturdays} />
-                    </div>
+                    <SettingsSwitchRow title={"Alternate Saturdays"} description={"Allow Saturdays to alternate between active working shifts and scheduled weekly offs."} checked={enableAlternateSaturdays} onChange={setEnableAlternateSaturdays} />
 
                     {enableAlternateSaturdays && (
                       <div className="pt-2.5 border-t border-[var(--border-color)] space-y-2.5 animate-in fade-in">
@@ -1757,24 +1686,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
 
                   {/* Working Hourly Shift & Hours Tracking Card */}
                   <div className="p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5 pr-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-[var(--text-primary)]">Working Hourly Shift & Hours Tracking</span>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            enableHourlyShiftPolicy
-                              ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                              : 'bg-slate-200 text-[var(--text-secondary)]'
-                          }`}>
-                            {enableHourlyShiftPolicy ? 'Active' : 'Disabled'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-[var(--text-muted)]">
-                          Automatically transition employees on hourly wages to the Hourly / Flexible Shift and track their exact hours worked.
-                        </p>
-                      </div>
-                      <ToggleSwitch checked={enableHourlyShiftPolicy} onChange={setEnableHourlyShiftPolicy} />
-                    </div>
+                    <SettingsSwitchRow title={"Hourly / flexible shifts"} description={"Automatically transition employees on hourly wages to the Hourly / Flexible Shift and track their exact hours worked."} checked={enableHourlyShiftPolicy} onChange={setEnableHourlyShiftPolicy} />
 
                     {enableHourlyShiftPolicy && (
                       <div className="pt-2.5 border-t border-[var(--border-color)] space-y-2 animate-in fade-in">
@@ -1823,275 +1735,22 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 {/* Auto Clock Out Row */}
                 <div className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50">
                   <div className="space-y-0.5 pr-4">
-                    <p className="text-xs font-bold text-[var(--text-primary)]">Auto Clock-Out at Midnight</p>
+                    <p className="text-xs font-bold text-[var(--text-primary)]">Forgotten punch-out</p>
                     <p className="text-[11px] text-[var(--text-muted)]">
-                      Closes unclosed shifts at 11:59 PM and after the max open duration below.
+                      After local midnight an open shift stops with a blank punch-out. The next visit asks what time they left. Leaving the office fence while the site is open signs them out after 5 minutes.
                     </p>
                   </div>
-                  <ToggleSwitch checked={autoClockOut} onChange={setAutoClockOut} />
                 </div>
-                {autoClockOut && (
-                  <div className="flex items-center justify-between px-3.5">
-                    <label className="text-xs font-semibold text-[var(--text-secondary)]">Max open shift (hours)</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={24}
-                      value={autoClockOutHours}
-                      onChange={(e) => setAutoClockOutHours(Math.min(24, Math.max(1, Number(e.target.value) || 12)))}
-                      className="w-16 rounded-lg border border-[var(--border-strong)] px-2 py-1 text-xs font-mono font-bold text-blue-600 text-right outline-none focus:border-blue-600"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* SECTION: SHIFT ASSIGNMENT & MEMBER ALLOCATION */}
-              <div className="pt-4 border-t border-[var(--border-color)] space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                      Employee Shift Assignment & Member Roster
-                    </h4>
-                    <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                      Assign specific employees and teams to work shifts. Currently configuring: <strong className="text-[var(--text-primary)] font-bold">{shifts.find((s) => s.id === selectedShiftId)?.name || 'Selected Shift'}</strong>
-                    </p>
-                  </div>
-
-                  {/* Quick Assign Department to this shift */}
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleAssignDepartmentToCurrentShift('All')}
-                      className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[11px] font-semibold text-[var(--text-secondary)] cursor-pointer transition-all shadow-xs"
-                    >
-                      Assign All to this Shift
-                    </button>
-                  </div>
-                </div>
-
-                {/* Assigned Members Summary & Filter Bar */}
-                <div className="p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 space-y-3.5">
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                      <div className="text-xs font-semibold text-[var(--text-secondary)]">
-                        {Object.values(employeeShifts).filter((sId) => sId === selectedShiftId).length} Employees on this Shift
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                      <input
-                        type="text"
-                        placeholder="Search employee..."
-                        value={shiftRosterSearch}
-                        onChange={(e) => setShiftRosterSearch(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-blue-600 w-full sm:w-44 font-medium shadow-xs"
-                      />
-                      <select
-                        value={shiftRosterDeptFilter}
-                        onChange={(e) => setShiftRosterDeptFilter(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs text-[var(--text-primary)] outline-none focus:border-blue-600 font-medium cursor-pointer shadow-xs"
-                      >
-                        <option value="All">All Departments</option>
-                        {(Array.from(new Set((state.employees || []).map((e: any) => e.department).filter(Boolean))) as string[]).map((dept) => (
-                          <option key={dept} value={dept}>{dept}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Interactive Employee Roster List */}
-                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
-                    {(state.employees || [])
-                      .filter((emp) => {
-                        const q = shiftRosterSearch.toLowerCase().trim();
-                        const matchesSearch = !q || emp.name.toLowerCase().includes(q) || (emp.employeeId && emp.employeeId.toLowerCase().includes(q));
-                        const matchesDept = shiftRosterDeptFilter === 'All' || emp.department === shiftRosterDeptFilter;
-                        return matchesSearch && matchesDept;
-                      })
-                      .map((emp) => {
-                        const currentAssignedShiftId = employeeShifts[emp.id] || emp.shiftTiming?.shiftId || shifts[0]?.id || 'sh-1';
-                        const isCurrentShift = currentAssignedShiftId === selectedShiftId;
-                        return (
-                          <div
-                            key={emp.id}
-                            className={`p-3 rounded-lg border transition-all flex items-center justify-between gap-3 text-xs ${
-                              isCurrentShift
-                                ? 'bg-[var(--bg-surface)] border-blue-200 shadow-xs'
-                                : 'bg-[var(--bg-surface)] border-[var(--border-color)] hover:border-[var(--border-strong)]'
-                            }`}
-                          >
-                            <div className="min-w-0">
-                              <div className="font-bold text-[var(--text-primary)] truncate">
-                                {emp.name}
-                              </div>
-                              <div className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
-                                {emp.designation || 'Staff'} • <span className="text-[var(--text-secondary)] font-medium">{emp.department}</span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2 shrink-0">
-                              <select
-                                value={currentAssignedShiftId}
-                                onChange={(e) => handleAssignEmployeeShift(emp.id, e.target.value)}
-                                className="px-2.5 py-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xs text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer "
-                              >
-                                {shifts.map((s) => (
-                                  <option key={s.id} value={s.id}>
-                                    {s.name} ({s.startTime} - {s.endTime})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-              </div>
-
-              {/* SECTION: ROSTER SHIFTS & ROTATIONAL SCHEDULING (OPTIONAL IN SETTINGS) */}
-              <div className="pt-4 border-t border-[var(--border-color)] space-y-4">
-                <div className="flex items-center justify-between p-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]/80">
-                  <div className="space-y-0.5 pr-4">
-                    <div className="flex items-center gap-2">
-                      
-                      <h4 className="text-sm font-bold text-[var(--text-primary)]">
-                        Roster Shifts & Rotational Scheduling
-                      </h4>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-[var(--text-secondary)]">
-                        Optional
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-[var(--text-muted)]">
-                      Enable dynamic rotational shift patterns (e.g., Morning, Evening, Night) and assign weekly staggered rosters.
-                    </p>
-                  </div>
-                  <ToggleSwitch checked={enableRosterShifts} onChange={setEnableRosterShifts} />
-                </div>
-
-                {enableRosterShifts && (
-                  <div className="p-4 rounded-lg border border-blue-200/80 bg-[var(--bg-surface)] space-y-4  animate-in fade-in">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border-color)]">
-                      <div>
-                        <span className="text-xs font-bold text-[var(--text-primary)] block">Weekly Employee Roster Allocation Matrix</span>
-                        <span className="text-[11px] text-[var(--text-muted)]">Assign individual daily shifts or au weekly shift cycles</span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <span className="text-[var(--text-muted)] text-[11px]">Rotation:</span>
-                          <select
-                            value={rosterRotationCycle}
-                            onChange={(e) => setRosterRotationCycle(e.target.value as any)}
-                            className="px-2.5 py-1 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] shadow-2xs font-semibold text-[var(--text-primary)] text-xs outline-none cursor-pointer"
-                          >
-                            <option value="weekly">Weekly Rotation (Mondays)</option>
-                            <option value="biweekly">Bi-Weekly Rotation (14 Days)</option>
-                            <option value="monthly">Monthly Rotation</option>
-                            <option value="custom">Custom Allocation</option>
-                          </select>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={handleAutoRotateRoster}
-                          className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer  transition-colors"
-                        >
-                          Auto-Rotate Roster
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Roster Shift Legend */}
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="text-[11px] font-bold text-[var(--text-muted)]">Available Shifts:</span>
-                      {shifts.map((s, idx) => {
-                        const code = idx === 0 ? 'GEN' : idx === 1 ? 'M1' : idx === 2 ? 'E1' : 'N1';
-                        return (
-                          <span key={s.id} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-secondary)] text-[11px] font-bold">
-                            <span className="text-[var(--text-primary)] font-extrabold">{code}</span> · {s.name} ({s.startTime} - {s.endTime})
-                          </span>
-                        );
-                      })}
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-muted)] text-[11px] font-bold">
-                        <span className="text-rose-600 font-extrabold">OFF</span> · Weekly Off Day
-                      </span>
-                    </div>
-
-                    {/* Weekly Matrix Table */}
-                    <div className="overflow-x-auto custom-scrollbar border border-[var(--border-color)] rounded-lg">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="border-b border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-secondary)] font-semibold text-[11px]">
-                            <th className="py-2.5 px-3 font-bold text-[var(--text-primary)]">Employee</th>
-                            <th className="py-2.5 px-3">Dept</th>
-                            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
-                              <th key={day} className="py-2.5 px-2 text-center">{day}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[var(--border-color)]">
-                          {(state.employees || []).slice(0, 10).map((emp) => {
-                            const empSchedule = employeeRosterMatrix[emp.id] || {};
-                            return (
-                              <tr key={emp.id} className="hover:bg-[var(--bg-surface)]/60">
-                                <td className="py-2 px-3 font-bold text-[var(--text-primary)] whitespace-nowrap">
-                                  {emp.name}
-                                </td>
-                                <td className="py-2 px-3 text-[var(--text-muted)] whitespace-nowrap">
-                                  {emp.department || 'General'}
-                                </td>
-                                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => {
-                                  const currentShiftId = empSchedule[day] || 'sh-1';
-                                  const isOff = currentShiftId === 'OFF';
-                                  const shiftObj = shifts.find((s) => s.id === currentShiftId);
-                                  const shiftCode = isOff ? 'OFF' : shiftObj ? (shiftObj.name.includes('Morning') ? 'M1' : shiftObj.name.includes('Evening') ? 'E1' : shiftObj.name.includes('Night') ? 'N1' : 'GEN') : 'GEN';
-
-                                  return (
-                                    <td key={day} className="py-1.5 px-1 text-center">
-                                      <select
-                                        value={currentShiftId}
-                                        onChange={(e) => handleUpdateRosterCell(emp.id, day, e.target.value)}
-                                        className={`px-1.5 py-1 rounded text-[11px] font-bold border outline-none cursor-pointer text-center ${
-                                          isOff
-                                            ? 'bg-[var(--bg-surface)] text-[var(--text-muted)] border-[var(--border-color)]'
-                                            : shiftCode === 'M1'
-                                            ? 'bg-[var(--bg-surface)] text-amber-800 border-amber-300'
-                                            : shiftCode === 'E1'
-                                            ? 'bg-[var(--bg-surface)] text-purple-800 border-purple-300'
-                                            : shiftCode === 'N1'
-                                            ? 'bg-[var(--bg-surface)] text-indigo-800 border-indigo-300'
-                                            : 'bg-[var(--bg-surface)] text-blue-800 border-blue-200'
-                                        }`}
-                                      >
-                                        {shifts.map((s, idx) => {
-                                          const code = idx === 0 ? 'GEN' : idx === 1 ? 'M1' : idx === 2 ? 'E1' : 'N1';
-                                          return (
-                                            <option key={s.id} value={s.id}>
-                                              {code} ({s.startTime.split(' ')[0]})
-                                            </option>
-                                          );
-                                        })}
-                                        <option value="OFF">OFF (Weekly Off)</option>
-                                      </select>
-                                    </td>
-                                  );
-                                })}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Attendance Calculation & General Scope */}
-              <div className="pt-4 border-t border-[var(--border-color)] space-y-3.5">
+              </SettingsCard>
+<SettingsCard>
+<div className="space-y-5">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
                   Calculation & Approvals
                 </h4>
+                <SettingsField label="Attendance cycle" hint="Choose monthly reconciliation or cumulative annual hours."><select value={attendanceCycle} onChange={(event) => setAttendanceCycle(event.target.value as 'monthly' | 'yearly')}><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></SettingsField>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div className="space-y-1.5">
@@ -2119,15 +1778,23 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       <option value="Weekly">Weekly Cycle</option>
                     </select>
                   </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">Cycle anchor day</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={28}
+                      value={repeatOnDay}
+                      onChange={(e) => setRepeatOnDay(Math.min(28, Math.max(1, Number(e.target.value) || 1)))}
+                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-bold text-[var(--text-primary)] outline-none focus:border-blue-600"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-[var(--text-secondary)]">Attendance Start Date</label>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
+                    <DateInput value={startDate} onChange={(e) => setStartDate(e.target.value)}
                       className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer "
                     />
                   </div>
@@ -2151,16 +1818,9 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
               </div>
 
               {/* Save General Button */}
-              <div className="flex items-center justify-end pt-5 border-t border-[var(--border-color)]">
-                <button
-                  type="button"
-                  onClick={handleSaveAllSettings}
-                  className={ATT_BTN_PRIMARY}
-                >
-                  Save Work Schedule Rules
-                </button>
-              </div>
-            </div>
+
+            </SettingsCard>
+</>
           )}
 
           {/* ========================================================================= */}
@@ -2169,84 +1829,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
           {subTab === 'students' && (
             <div className="space-y-6 text-[var(--text-primary)]">
               {/* Header Card */}
-              <div className={`${ATT_CARD} flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-5 sm:p-6`}>
-                <div>
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 text-[10px] font-bold uppercase tracking-wider mb-1 border border-blue-100">
-                    Academic Regulations
-                  </div>
-                  <h3 className={`${ATT_SECTION_TITLE} text-lg`}>
-                    Student Attendance Policy & Warning Thresholds
-                  </h3>
-                  <p className={ATT_SECTION_SUB}>
-                    Enforce minimum mandatory attendance standards, automated guardian dispatch alerts, and live defaulter tracking
-                  </p>
-                </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleAlertAllDefaulters}
-                    disabled={activeDefaulters.length === 0}
-                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
-                  >
-                    <span>Notify All Defaulters ({activeDefaulters.length})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleSaveAllSettings}
-                    className={ATT_BTN_PRIMARY}
-                  >
-                    Save Student Policy
-                  </button>
-                </div>
-              </div>
-
-              {/* 4 Summary Stat KPI Badges */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-                <div className={`${ATT_CARD} p-4`}>
-                  <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">Minimum Threshold</span>
-                  <div className="flex items-baseline gap-1 mt-1">
-                    <span className="text-2xl font-bold text-blue-600 font-mono">{studentMinAttendanceThreshold}%</span>
-                    <span className="text-xs text-[var(--text-muted)] font-medium">Mandatory</span>
-                  </div>
-                </div>
-
-                <div className={`${ATT_CARD} p-4`}>
-                  <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">Warning Flagging</span>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <span className={`h-2.5 w-2.5 rounded-full ${enableLowAttendanceWarning ? 'bg-amber-500' : 'bg-slate-300'}`} />
-                    <span className="text-xs font-bold text-[var(--text-primary)]">
-                      {enableLowAttendanceWarning ? 'Active on Rosters' : 'Disabled'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className={`${ATT_CARD} p-4`}>
-                  <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">Current Defaulters</span>
-                  <div className="flex items-baseline gap-1 mt-1">
-                    <span className={`text-2xl font-bold font-mono ${activeDefaulters.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                      {activeDefaulters.length}
-                    </span>
-                    <span className="text-xs text-[var(--text-muted)] font-medium">
-                      / {studentDefaulters.length} Students
-                    </span>
-                  </div>
-                </div>
-
-                <div className={`${ATT_CARD} p-4`}>
-                  <span className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">Guardian Alerts</span>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <span className={`h-2.5 w-2.5 rounded-full ${autoAlertGuardiansBelowThreshold ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                    <span className="text-xs font-bold text-[var(--text-primary)]">
-                      {autoAlertGuardiansBelowThreshold ? 'SMS & Email Auto' : 'Manual Outreach'}
-                    </span>
-                  </div>
-                </div>
-              </div>
 
               {/* CARD 1: Configurable Minimum Attendance Threshold */}
-              <div className={`${ATT_CARD} p-5 sm:p-6 space-y-4`}>
+              <SettingsCard className={` p-5 sm:p-6 space-y-4`}>
                 <div className="border-b border-[var(--border-color)] pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h4 className={ATT_SECTION_TITLE}>
@@ -2278,10 +1864,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     <option value={95}>95% - Mandatory Regularity</option>
                   </select>
                 </div>
-              </div>
+              </SettingsCard>
 
               {/* CARD 2: Automated Rules & Guardian Alerts */}
-              <div className={`${ATT_CARD} p-5 sm:p-6 space-y-4`}>
+              <SettingsCard className={` p-5 sm:p-6 space-y-4`}>
                 <div className="border-b border-[var(--border-color)] pb-3">
                   <h4 className={ATT_SECTION_TITLE}>
                     Warning Flags & Guardian Alert Automation
@@ -2322,7 +1908,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-[var(--text-muted)]">
-                        Dispatches SMS and Email notices directly to registered parent contacts when a student is recorded absent with attendance &lt; {studentMinAttendanceThreshold}%.
+                        Emails the guardian when an address is on file. With no email, HR gets an in-app notice. Phone numbers are not texted.
                       </p>
                     </div>
                     <ToggleSwitch checked={autoAlertGuardiansBelowThreshold} onChange={setAutoAlertGuardiansBelowThreshold} />
@@ -2360,7 +1946,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                   {/* Customizable Guardian Notification Template */}
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-[var(--text-primary)] flex items-center justify-between">
-                      <span>Guardian Alert SMS & Email Template</span>
+                      <span>Guardian alert email</span>
                       <span className="text-[10px] font-normal text-[var(--text-muted)]">Tokens: &#123;student_name&#125;, &#123;attendance_pct&#125;, &#123;threshold&#125;</span>
                     </label>
                     <textarea
@@ -2370,109 +1956,49 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 text-xs text-[var(--text-primary)] outline-none focus:border-blue-600 transition-colors"
                     />
                   </div>
-                </div>
-              </div>
 
-              {/* CARD 3: LIVE DEFAULTERS ROSTER PREVIEW */}
-              <div className={`${ATT_CARD} overflow-hidden`}>
-                <div className="p-5 border-b border-[var(--border-color)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[var(--bg-surface)]">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className={ATT_SECTION_TITLE}>
-                        Live Defaulters Roster Preview
-                      </h4>
-                      <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                        activeDefaulters.length > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
-                      }`}>
-                        {activeDefaulters.length} Below {studentMinAttendanceThreshold}%
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-[var(--text-primary)]">
+                        Students to notify ({activeDefaulters.length})
                       </span>
+                      <button
+                        type="button"
+                        onClick={handleAlertAllDefaulters}
+                        className="text-xs font-semibold text-[#17324e] hover:underline"
+                      >
+                        Email all
+                      </button>
                     </div>
-                    <p className={ATT_SECTION_SUB}>
-                      Real-time calculation from active attendance logs against the configured {studentMinAttendanceThreshold}% threshold.
-                    </p>
-                  </div>
-
-                  {activeDefaulters.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleAlertAllDefaulters}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
-                    >
-                      <span>Dispatch Alert to All {activeDefaulters.length}</span>
-                    </button>
-                  )}
-                </div>
-
-                {activeDefaulters.length === 0 ? (
-                  <div className="p-8 text-center space-y-2 bg-[var(--bg-surface-subtle)]/50">
-                    <h5 className="text-sm font-bold text-[var(--text-primary)]">Zero Attendance Defaulters</h5>
-                    <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
-                      All enrolled students currently meet or exceed the mandatory {studentMinAttendanceThreshold}% attendance requirement.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] uppercase font-semibold text-[10px] border-b border-[var(--border-color)] select-none">
-                        <tr>
-                          <th className="p-3.5 pl-5">Student</th>
-                          <th className="p-3.5">Batch / Section</th>
-                          <th className="p-3.5">Attendance Rate</th>
-                          <th className="p-3.5">Attended / Total</th>
-                          <th className="p-3.5">Absences</th>
-                          <th className="p-3.5">Guardian Contact</th>
-                          <th className="p-3.5 pr-5 text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[var(--border-color)] font-medium text-[var(--text-secondary)]">
-                        {activeDefaulters.map(({ student, rate, totalDays, attendedDays, absentDays }) => (
-                          <tr key={student.id} className="hover:bg-amber-50/30 transition-colors">
-                            <td className="p-3.5 pl-5 whitespace-nowrap">
-                              <div>
-                                <div className="font-bold text-[var(--text-primary)]">{student.name}</div>
-                                <div className="text-[10px] font-mono text-[var(--text-muted)]">Roll #{student.rollNumber} • {student.studentId}</div>
-                              </div>
-                            </td>
-
-                            <td className="p-3.5 whitespace-nowrap">
-                              <span className="font-semibold text-[var(--text-primary)]">{student.grade}</span>
-                            </td>
-
-                            <td className="p-3.5 whitespace-nowrap">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono">
-                                <span>{rate}%</span>
+                    {activeDefaulters.length === 0 ? (
+                      <p className="text-[11px] text-[var(--text-muted)]">No student is below the threshold or absent for the set number of school days.</p>
+                    ) : (
+                      <ul className="divide-y divide-[var(--border-color)] rounded-xl border border-[var(--border-color)]">
+                        {activeDefaulters.map((row) => {
+                          const id = row.student.id || row.student.studentId || row.student.name;
+                          return (
+                            <li key={id} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
+                              <span>
+                                <span className="font-semibold text-[var(--text-primary)]">{row.student.name}</span>
+                                <span className="ml-2 text-[var(--text-muted)]">
+                                  {row.rate}% · {row.consecutiveAbsences} school days absent
+                                </span>
                               </span>
-                            </td>
-
-                            <td className="p-3.5 font-mono text-[var(--text-primary)] whitespace-nowrap">
-                              {attendedDays} / {totalDays} Days
-                            </td>
-
-                            <td className="p-3.5 font-mono text-rose-600 font-bold whitespace-nowrap">
-                              {absentDays} Absences
-                            </td>
-
-                            <td className="p-3.5 whitespace-nowrap">
-                              <div className="text-[var(--text-primary)] font-medium">{student.guardianName || '—'}</div>
-                              <div className="text-[10px] text-[var(--text-muted)] font-mono">{student.guardianPhone || student.phone || '—'}</div>
-                            </td>
-
-                            <td className="p-3.5 pr-5 text-right whitespace-nowrap">
                               <button
                                 type="button"
-                                onClick={() => handleAlertGuardian(student.name, student.guardianName, student.guardianPhone || student.phone)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)] text-xs font-semibold transition-all cursor-pointer shadow-xs"
+                                onClick={() => handleAlertGuardian(String(row.student.id || row.student.studentId || ''))}
+                                className="font-semibold text-[#17324e] hover:underline"
                               >
-                                <span>Send Alert</span>
+                                Send
                               </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                   </div>
-                )}
-              </div>
+                </div>
+              </SettingsCard>
             </div>
           )}
 
@@ -2481,26 +2007,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
           {/* ========================================================================= */}
           {subTab === 'policy' && (
             <div className="space-y-6">
-              <div className={`${ATT_CARD} p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
-                <div>
-                  <h3 className={ATT_SECTION_TITLE}>
-                    Attendance Policy & GPS Geofencing
-                  </h3>
-                  <p className={ATT_SECTION_SUB}>
-                    Configure GPS geofence radius, punch verification rules, and attendance regularization limits
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSaveAllSettings}
-                  className={`${ATT_BTN_PRIMARY} shrink-0`}
-                >
-                  Save Policy
-                </button>
-              </div>
+
 
               {/* CARD 1: GPS Geofencing Perimeter Controls */}
-              <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5`}>
+              <SettingsCard className={` p-5 sm:p-6 space-y-5`}>
                 <div className="border-b border-[var(--border-color)] pb-3">
                   <h4 className={ATT_SECTION_TITLE}>
                     GPS Geofencing Boundary
@@ -2591,10 +2101,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </select>
                   </div>
                 </div>
-              </div>
+              </SettingsCard>
 
               {/* CARD 2: Punch Verification Enforcements */}
-              <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
+              <SettingsCard className={` p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
                 <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3.5">
                   <h4 className={ATT_SECTION_TITLE}>
                     Punch Verification & Identity Rules
@@ -2605,25 +2115,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-y-4 text-xs items-center">
-                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
-                    Check-In Selfie Photo
-                  </div>
-                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-[var(--text-secondary)] font-medium">
-                      Captures front camera photo verification upon morning check-in
-                    </span>
-                    <ToggleSwitch checked={requireSelfieCheckIn} onChange={setRequireSelfieCheckIn} />
-                  </div>
 
-                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
-                    Check-Out Selfie Photo
-                  </div>
-                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-[var(--text-secondary)] font-medium">
-                      Captures front camera photo verification upon evening departure
-                    </span>
-                    <ToggleSwitch checked={requireSelfieCheckOut} onChange={setRequireSelfieCheckOut} />
-                  </div>
+                  <SettingsSwitchRow className="md:col-span-12" title={"Check-in selfie"} checked={requireSelfieCheckIn} onChange={setRequireSelfieCheckIn} />
+
+
+                  <SettingsSwitchRow className="md:col-span-12" title={"Check-out selfie"} checked={requireSelfieCheckOut} onChange={setRequireSelfieCheckOut} />
 
                   <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                     Office Wi-Fi IP Allowlist
@@ -2638,15 +2134,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     />
                   </div>
 
-                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
-                    QR Code Attendance
-                  </div>
-                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-[var(--text-secondary)] font-medium">
-                      Let employees punch by scanning a rotating office QR code
-                    </span>
-                    <ToggleSwitch checked={allowQrCodeAttendance} onChange={setAllowQrCodeAttendance} />
-                  </div>
+
+                  <SettingsSwitchRow className="md:col-span-12" title={"QR attendance"} checked={allowQrCodeAttendance} onChange={setAllowQrCodeAttendance} />
                   {allowQrCodeAttendance && (
                     <>
                       <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
@@ -2668,10 +2157,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </>
                   )}
                 </div>
-              </div>
+              </SettingsCard>
 
               {/* CARD 3: Attendance Regularization Rules */}
-              <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
+              <SettingsCard className={` p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
                 <div className="border-b border-[var(--border-color)] pb-3.5">
                   <h4 className={ATT_SECTION_TITLE}>
                     Attendance Regularization & Disputes
@@ -2699,20 +2188,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </span>
                   </div>
 
-                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
-                    Manager Sign-off Required
-                  </div>
-                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-[var(--text-secondary)] font-medium">
-                      Direct reporting manager approval is mandatory before punch adjustments are posted
-                    </span>
-                    <ToggleSwitch
-                      checked={requireManagerRegularizationApproval}
-                      onChange={setRequireManagerRegularizationApproval}
-                    />
-                  </div>
+
+                  <SettingsSwitchRow className="md:col-span-12" title={"Manager approval for regularizations"} checked={requireManagerRegularizationApproval} onChange={setRequireManagerRegularizationApproval} />
                 </div>
-              </div>
+              </SettingsCard>
             </div>
           )}
 
@@ -2721,7 +2200,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
           {/* ========================================================================= */}
           {subTab === 'office_location' && (
             <div className="space-y-6">
-              <div className={`${ATT_CARD} p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
+              <SettingsCard className={` p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
                 <div>
                   <h3 className={ATT_SECTION_TITLE}>
                     {isInstitution ? 'Campus Locations' : 'Office Locations & Geofences'}
@@ -2740,11 +2219,11 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 >
                   Add Location
                 </button>
-              </div>
+              </SettingsCard>
 
               {/* Office Cards List */}
               {offices.length === 0 ? (
-                <div className={`${ATT_CARD} border-dashed p-10 flex flex-col items-center justify-center text-center space-y-3`}>
+                <SettingsCard className={` border-dashed p-10 flex flex-col items-center justify-center text-center space-y-3`}>
                   <div>
                     <h4 className="text-sm font-semibold text-[var(--text-primary)]">No Locations Configured</h4>
                     <p className="text-xs text-[var(--text-muted)] max-w-sm mt-0.5">
@@ -2761,13 +2240,13 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                   >
                     Add First Location
                   </button>
-                </div>
+                </SettingsCard>
               ) : (
                 <div className="space-y-4">
                   {offices.map((office) => (
-                    <div
+                    <SettingsCard
                       key={office.id}
-                      className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}
+                      className={` p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}
                     >
                       {/* Office Title + Action Buttons */}
                       <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3.5">
@@ -2819,7 +2298,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                         <div className="md:col-span-4 text-[var(--text-muted)] font-medium">Policy</div>
                         <div className="md:col-span-8 text-[var(--text-primary)] font-semibold">{office.policyDescription}</div>
                       </div>
-                    </div>
+                    </SettingsCard>
                   ))}
                 </div>
               )}
@@ -2831,25 +2310,9 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
           {/* ========================================================================= */}
           {subTab === 'leaves' && (
             <div className="space-y-6">
-              <div className={`${ATT_CARD} p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
-                <div>
-                  <h3 className={ATT_SECTION_TITLE}>
-                    Leave Policies & Quotas
-                  </h3>
-                  <p className={ATT_SECTION_SUB}>
-                    Choose yearly or monthly grants, unused-leave rollover, approval routing, and probation rules
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSaveAllSettings}
-                  className={`${ATT_BTN_PRIMARY} shrink-0`}
-                >
-                  Save Leave Policies
-                </button>
-              </div>
 
-              <div className={`${ATT_CARD} p-5 sm:p-7 space-y-6`}>
+
+              <SettingsCard className={` p-5 sm:p-7 space-y-6`}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border-color)] pb-5">
                   <div>
                     <h4 className={ATT_SECTION_TITLE}>How leaves are granted</h4>
@@ -2900,26 +2363,9 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 {leavePoliciesEnabled && (
                   <div className="space-y-4 rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface-subtle)]/50 p-4">
                     {leaveQuotaPeriod === 'monthly' && (
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <div className="text-xs font-semibold text-[var(--text-primary)]">Roll unused leave to next month</div>
-                          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                            If a month&apos;s grant is not used, it is added to next month (capped at the annual quota).
-                            Turn off to expire unused days at month-end.
-                          </p>
-                        </div>
-                        <ToggleSwitch checked={enableMonthlyRollover} onChange={setEnableMonthlyRollover} />
-                      </div>
+                      <SettingsSwitchRow title={"Monthly leave rollover"} description={"If a month's grant is not used, it is added to next month (capped at the annual quota). Turn off to expire unused days at month-end."} checked={enableMonthlyRollover} onChange={setEnableMonthlyRollover} />
                     )}
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <div className="text-xs font-semibold text-[var(--text-primary)]">Carry unused leave to next year</div>
-                        <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                          At year-end, leftover days move into the next calendar year up to the cap.
-                        </p>
-                      </div>
-                      <ToggleSwitch checked={enableCarryOver} onChange={setEnableCarryOver} />
-                    </div>
+                    <SettingsSwitchRow title={"Carry unused leave forward"} description={"At year-end, leftover days move into the next calendar year up to the cap."} checked={enableCarryOver} onChange={setEnableCarryOver} />
                     {enableCarryOver && (
                       <div className="flex items-center gap-3">
                         <span className="text-xs font-medium text-[var(--text-secondary)]">Max carry to next year</span>
@@ -2943,10 +2389,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     )}
                   </div>
                 )}
-              </div>
+              </SettingsCard>
 
               {/* CARD 1: Annual Paid Leave Entitlements */}
-              <div className={`${ATT_CARD} p-5 sm:p-7 space-y-6`}>
+              <SettingsCard className={` p-5 sm:p-7 space-y-6`}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--border-color)] pb-5">
                   <div>
                     <h4 className={ATT_SECTION_TITLE}>Annual paid leave quotas (per employee)</h4>
@@ -3132,10 +2578,10 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </div>
                   </div>
                 </div>
-              </div>
+              </SettingsCard>
 
               {/* CARD 2: Approval Hierarchy & Carry Forward Rules */}
-              <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
+              <SettingsCard className={` p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
                 <div className="border-b border-[var(--border-color)] pb-3.5">
                   <h4 className={ATT_SECTION_TITLE}>
                     Leave Approval Workflow & Balance Rules
@@ -3161,40 +2607,19 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                     </select>
                   </div>
 
-                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
-                    Compensatory Off (Comp-Off)
-                  </div>
-                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-[var(--text-secondary)] font-medium">
-                      Allows employees working on weekends or holidays to claim leave credits
-                    </span>
-                    <ToggleSwitch checked={enableCompOff} onChange={setEnableCompOff} />
-                  </div>
 
-                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
-                    Allow Negative Leave Balance
-                  </div>
-                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-[var(--text-secondary)] font-medium">
-                      Allows advance leave requests when employee balance is zero
-                    </span>
-                    <ToggleSwitch checked={allowNegativeBalance} onChange={setAllowNegativeBalance} />
-                  </div>
+                  <SettingsSwitchRow className="md:col-span-12" title={"Compensatory time off"} checked={enableCompOff} onChange={setEnableCompOff} />
 
-                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
-                    Restrict Leaves During Notice Period
-                  </div>
-                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-[var(--text-secondary)] font-medium">
-                      Blocks planned casual leaves when serving resignation notice
-                    </span>
-                    <ToggleSwitch checked={restrictDuringNotice} onChange={setRestrictDuringNotice} />
-                  </div>
+
+                  <SettingsSwitchRow className="md:col-span-12" title={"Allow negative leave balance"} checked={allowNegativeBalance} onChange={setAllowNegativeBalance} />
+
+
+                  <SettingsSwitchRow className="md:col-span-12" title={"Restrict leave during notice"} checked={restrictDuringNotice} onChange={setRestrictDuringNotice} />
                 </div>
-              </div>
+              </SettingsCard>
 
               {/* CARD 3: Probation Period & Intern Restrictions */}
-              <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
+              <SettingsCard className={` p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
                 <div className="border-b border-[var(--border-color)] pb-3.5">
                   <h4 className={ATT_SECTION_TITLE}>
                     Probation Period Settings & Paid Leave Lock
@@ -3205,15 +2630,8 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-y-4 text-xs items-center">
-                  <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
-                    Enable Probation Tracking
-                  </div>
-                  <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                    <span className="text-[var(--text-secondary)] font-medium">
-                      Enforce probation status and review period for newly onboarded staff
-                    </span>
-                    <ToggleSwitch checked={enableProbation} onChange={setEnableProbation} />
-                  </div>
+
+                  <SettingsSwitchRow className="md:col-span-12" title={"Employee probation"} checked={enableProbation} onChange={setEnableProbation} />
 
                   {enableProbation && (
                     <>
@@ -3246,19 +2664,14 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                       <div className="md:col-span-4 text-[var(--text-muted)] font-medium">
                         Auto-Confirm Probation
                       </div>
-                      <div className="md:col-span-8 flex items-center justify-between max-w-md">
-                        <span className="text-[var(--text-secondary)] font-medium">
-                          Auto update employee status and unlock full paid leave quotas upon completion
-                        </span>
-                        <ToggleSwitch checked={autoConfirmProbation} onChange={setAutoConfirmProbation} />
-                      </div>
+                      <SettingsSwitchRow title={"Automatically confirm probation"} checked={autoConfirmProbation} onChange={setAutoConfirmProbation} />
                     </>
                   )}
                 </div>
-              </div>
+              </SettingsCard>
 
               {/* CARD 4: Role-Based Leave Quotas */}
-              <div className={`${ATT_CARD} p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
+              <SettingsCard className={` p-5 sm:p-6 space-y-5 transition-all hover:border-slate-300/90`}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[var(--border-color)] pb-3.5">
                   <h4 className={ATT_SECTION_TITLE}>Role-based annual leave quotas</h4>
                   <span className="text-[11px] text-[var(--text-muted)]">
@@ -3267,7 +2680,7 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                 </div>
 
                 <div className={ATT_TABLE_SHELL}>
-                  <table className="w-full text-left text-xs border-collapse">
+                  <ResponsiveTable className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-[var(--text-secondary)]">
                         <th className="py-3 px-4 font-bold text-[var(--text-secondary)]">Role</th>
@@ -3353,35 +2766,20 @@ export const AttendanceSettingsView: React.FC<AttendanceSettingsViewProps> = ({
                         );
                       })}
                     </tbody>
-                  </table>
+                  </ResponsiveTable>
                 </div>
-              </div>
+              </SettingsCard>
             </div>
           )}
 
-          {/* ========================================================================= */}
-          {/* 6. REPORTS CUSTOMIZATION TAB                                              */}
-          {/* ========================================================================= */}
-          {subTab === 'reports' && (
-            <div className="space-y-6">
-              <div className={`${ATT_CARD} p-5 sm:p-7 space-y-5`}>
-                <div>
-                  <h3 className={ATT_SECTION_TITLE}>Report Customization</h3>
-                  <p className={ATT_SECTION_SUB}>
-                    Overview widgets, attendance report categories, filters, columns and CSV export are managed on the dedicated Reports Settings page.
-                  </p>
-                </div>
-                <div className="flex flex-col gap-4 rounded-[var(--panel-radius)] border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] p-5 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="settings-page__hint max-w-[70ch]">
-                    Changes on Reports Settings apply to Reports & Analytics after you save.
-                  </p>
-                  <Link href="/reports/settings" className="settings-page__action self-start sm:self-auto">
-                    Open Reports Settings
-                  </Link>
-                </div>
-              </div>
-            </div>
+          {subTab === 'holidays' && (
+            <HolidayCalendarView
+              holidays={state.customOptions?.holidays}
+              isHR
+              onUpdateHolidays={persistHolidays}
+            />
           )}
+
       </div>
 
       {/* CREATE WORK SHIFT MODAL */}

@@ -1,6 +1,12 @@
 'use client';
+import { ResponsiveFilters } from '@/components/common/ResponsiveFilters';
+import './workspaces.css';
+import { TaskPanel, TaskPeopleField } from './TaskPanels';
+import { DateInput } from '@/components/common/DateInput';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileHeaderAction } from '@/components/mobile/MobileHeaderAction';
 import Link from 'next/link';
 import {
   CheckCircle2,
@@ -37,9 +43,10 @@ import {
 import { AppState, isTestEntity, normalizeTaskStatus, normalizeTaskPriority } from '../../services/store';
 import { Task, TaskAttachment, Project, TimesheetEntry, AttendanceRecord, Invoice, DriveItem } from '../../types';
 import { api } from '../../services/apiClient';
-import { mapApiTask } from '../../services/backendSync';
-import { closeTaskTimesheet, isTaskOverdue, openTaskTimesheet, recurrenceLabel } from '../../utils/taskBoard';
-import { canManageProject, canManageTask, getManageableEmployees, taskAssigneeIds, taskAssigneeNames } from '../../utils/teamAccess';
+import { encodeTaskBody, mapApiTask } from '../../services/backendSync';
+import { adoptOpenedTimesheet, closeTaskTimesheet, boardInsertionIndex, compareTaskPriority, isTaskOverdue, mergeTimesheet, mergeVisibleColumnOrder, openTaskTimesheet, priorityTone, recurrenceLabel, sortColumnTasks } from '../../utils/taskBoard';
+import { canManageProject, canManageTask, getManageableEmployees, isTaskAssignee, taskAssigneeIds, taskAssigneeNames } from '../../utils/teamAccess';
+import { hasOpenAttendanceSession, isAttendanceToday } from '../../utils/attendancePunches';
 import { TimesheetsModule } from './TimesheetsModule';
 import {
   SlideOverDrawer,
@@ -48,6 +55,8 @@ import {
   slideOverFooterClass,
   slideOverPrimaryClass,
 } from '@/components/common/SlideOverDrawer';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { localDateKey } from '@/utils/dashboardPeople';
 
 interface ProjectsModuleProps {
   state: AppState;
@@ -81,12 +90,47 @@ const driveItemToAttachment = (item: DriveItem): TaskAttachment => ({
 
 
 const AVATAR_COLORS = [
-  'bg-[var(--bg-surface-subtle)] text-[var(--studio-navy)] border-[var(--border-color)]',
+  'person-avatar',
 ];
 
-export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateState }) => {
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+const PROJECT_CATEGORY_OPTIONS: Array<[string, string]> = [
+  ['General', 'General'],
+  ['Development', 'Development'],
+  ['Design', 'Design & UI/UX'],
+  ['DevOps', 'DevOps & Cloud'],
+  ['Security', 'Security & Audit'],
+  ['Marketing', 'Marketing'],
+];
+const PROJECT_STATUSES: Project['status'][] = ['Planning', 'In Progress', 'On Hold', 'Completed'];
+const PROJECT_PRIORITIES: Project['priority'][] = ['Low', 'Medium', 'High', 'Urgent'];
 
+type ProjectEditDraft = {
+  name: string;
+  code: string;
+  status: Project['status'];
+  priority: Project['priority'];
+  description: string;
+  clientId: string;
+  category: string;
+  managerId: string;
+  startDate: string;
+  endDate: string;
+  totalWorkHours: string;
+};
+
+const projectFieldClass =
+  'w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-slate-400';
+
+export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateState }) => {
+  const todayStr = useMemo(() => localDateKey(), []);
+  const openTaskAssignment =
+    state.customOptions?.profileSelfServiceSettings?.anyoneCanAssignTasks === true;
+  const openProjectCreation =
+    state.customOptions?.profileSelfServiceSettings?.anyoneCanCreateProjects === true;
+
+  const mobileViewport = useMobileViewport();
+  useEffect(() => { if (mobileViewport) setActiveTab('backlog'); }, [mobileViewport]);
+  const [mobileBoardStatus, setMobileBoardStatus] = useState<Task['status']>('To Do');
   const [activeTab, setActiveTab] = useState<'kanban' | 'backlog' | 'timesheets' | 'projects'>('kanban');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('All');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('All');
@@ -101,36 +145,39 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     task: Task;
     targetStatus: 'In Progress';
     source: 'drag' | 'stepper' | 'button';
+    columnOrder?: string[];
   } | null>(null);
 
   // Kanban Drag States
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [dropSlot, setDropSlot] = useState<{ column: Task['status']; index: number } | null>(null);
+  const suppressCardClick = useRef(false);
+  const draggedTaskIdRef = useRef<string | null>(null);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
 
   const handleAddSubtask = async (taskId: string) => {
     if (!newSubtaskTitle.trim()) return;
     if (!ensureCanManageTask(taskId)) return;
+    const current = state.tasks.find((t) => t.id === taskId);
+    const description = (selectedTask?.id === taskId ? selectedTask.description : current?.description) || '';
+    const subtasks = [...(current?.subtasks || []), {
+      id: `sub_${Date.now()}`,
+      title: newSubtaskTitle.trim(),
+      completed: false,
+    }];
     setIsSaving(true);
     try {
-      const newSubtask = {
-        id: `sub_${Date.now()}`,
-        title: newSubtaskTitle.trim(),
-        completed: false
-      };
-      
-      // Update state immediately without API for subtasks since no endpoint exists yet
+      await api.projects.updateTask(taskId, { description: encodeTaskBody(description, subtasks) });
       onUpdateState((prev) => ({
         ...prev,
-        tasks: prev.tasks.map(t => 
-          t.id === taskId 
-            ? { ...t, subtasks: [...(t.subtasks || []), newSubtask] }
-            : t
-        )
+        tasks: prev.tasks.map((t) => t.id === taskId ? { ...t, description, subtasks } : t),
       }));
+      setSelectedTask((prev) => prev && prev.id === taskId ? { ...prev, description, subtasks } : prev);
       setNewSubtaskTitle('');
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setPermissionNotice(err?.message || 'Failed to save the subtask.');
+      setTimeout(() => setPermissionNotice(null), 4500);
     } finally {
       setIsSaving(false);
     }
@@ -234,23 +281,57 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     return secs;
   };
 
-  // Check if an employee or current persona is currently clocked in today
-  // Attendance rows may be keyed by local date (backend punches) or UTC date (local clock-in writes)
-  const isTodayAttendanceDate = (date: string) => {
-    const d = new Date();
-    const localToday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    return date === localToday || date === d.toISOString().split('T')[0];
+  // Check if an employee or current persona is currently clocked in today.
+  // An open session later in the day still counts when an earlier row has a checkout,
+  // and a shift-end written for later today is not a clock-out yet.
+  const normalizePersonName = (value?: string | null) =>
+    String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  const samePersonId = (a?: string | null, b?: string | null) => {
+    const left = String(a || '').trim().toLowerCase();
+    const right = String(b || '').trim().toLowerCase();
+    return !!left && left === right;
+  };
+
+  const idsForPerson = (empId?: string, empName?: string) => {
+    const ids = new Set<string>();
+    const add = (value?: string | null) => {
+      const id = String(value || '').trim().toLowerCase();
+      if (id) ids.add(id);
+    };
+    add(empId);
+    const name = normalizePersonName(empName);
+    for (const emp of state.employees || []) {
+      if (
+        samePersonId(emp.id, empId) ||
+        samePersonId(emp.employeeId, empId) ||
+        (name && normalizePersonName(emp.name) === name)
+      ) {
+        add(emp.id);
+        add(emp.employeeId);
+      }
+    }
+    if (name && normalizePersonName(state.currentPersona?.name) === name) add(state.currentPersona?.id);
+    if (samePersonId(state.currentPersona?.id, empId)) add(state.currentPersona?.id);
+    return ids;
+  };
+
+  const attendanceMatchesPerson = (record: AttendanceRecord, empId?: string, empName?: string) => {
+    const ids = idsForPerson(empId, empName);
+    if (ids.has(String(record.employeeId || '').trim().toLowerCase())) return true;
+    const name = normalizePersonName(empName);
+    return !!name && normalizePersonName(record.employeeName) === name;
   };
 
   const isEmployeeClockedIn = (empId?: string, empName?: string) => {
-    const targetId = empId || state.currentPersona?.id;
-    const targetName = empName || state.currentPersona?.name;
+    const explicit = empId != null || empName != null;
+    const targetId = empId || (explicit ? undefined : state.currentPersona?.id);
+    const targetName = empName || (explicit ? undefined : state.currentPersona?.name);
     return state.attendance.some(
-      (a) =>
-        (a.employeeId === targetId || (targetName && (a.employeeName || '').toLowerCase() === targetName.toLowerCase())) &&
-        isTodayAttendanceDate(a.date) &&
-        !!a.checkIn &&
-        !a.checkOut
+      (record) =>
+        attendanceMatchesPerson(record, targetId, targetName) &&
+        isAttendanceToday(record.date) &&
+        hasOpenAttendanceSession(record)
     );
   };
 
@@ -259,7 +340,43 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     const ids = taskAssigneeIds(task);
     const names = taskAssigneeNames(task);
     if (!ids.length && !names.length) return isEmployeeClockedIn(task.assigneeId, task.assigneeName);
-    return ids.some((id, index) => isEmployeeClockedIn(id, names[index] || names[0]));
+    const count = Math.max(ids.length, names.length);
+    for (let index = 0; index < count; index += 1) {
+      if (isEmployeeClockedIn(ids[index], names[index])) return true;
+    }
+    return false;
+  };
+
+  // Time belongs to the person assigned to the task. A manager moving someone
+  // else's card must not land on the manager's own timesheet.
+  const timesheetOwner = (task: Task): { id: string; name: string } => {
+    const selfId = state.currentPersona?.id || '';
+    const selfName = state.currentPersona?.name || '';
+    const resolved = (id?: string, name?: string) => {
+      const match = (state.employees || []).find(
+        (emp) =>
+          samePersonId(emp.id, id) ||
+          samePersonId(emp.employeeId, id) ||
+          (!!name && normalizePersonName(emp.name) === normalizePersonName(name))
+      );
+      return {
+        id: String(match?.id || id || '').trim(),
+        name: String(match?.name || name || '').trim(),
+      };
+    };
+
+    if (isTaskAssignee(task, selfId, selfName)) return { id: selfId, name: selfName };
+
+    const ids = taskAssigneeIds(task);
+    const names = taskAssigneeNames(task);
+    const count = Math.max(ids.length, names.length);
+    for (let index = 0; index < count; index += 1) {
+      const owner = resolved(ids[index], names[index] || names[0]);
+      if (owner.id && isEmployeeClockedIn(ids[index], names[index] || names[0])) return owner;
+    }
+    const primary = resolved(ids[0] || task.assigneeId, names[0] || task.assigneeName);
+    if (primary.id) return primary;
+    return { id: selfId, name: selfName };
   };
 
   // Project & Task Hours / Rejection States
@@ -267,7 +384,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   const [denyReasonText, setDenyReasonText] = useState('');
   const [isEditingWorkHours, setIsEditingWorkHours] = useState(false);
   const [editWorkHoursValue, setEditWorkHoursValue] = useState('250');
+  const [projectEditDraft, setProjectEditDraft] = useState<ProjectEditDraft | null>(null);
   const [confirmRejectTaskId, setConfirmRejectTaskId] = useState<string | null>(null);
+  const [pendingDeleteProject, setPendingDeleteProject] = useState<Project | null>(null);
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
 
   // New Task Form State
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -295,6 +415,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     sourceTimesheetId?: string;
     included: boolean;
   }>>([]);
+  const [pendingUnbilledDelete, setPendingUnbilledDelete] = useState<(typeof billLines)[number] | null>(null);
   const [projectInvoices, setProjectInvoices] = useState<any[]>([]);
   const [billingModeDraft, setBillingModeDraft] = useState<'deliverable' | 'hourly'>('deliverable');
   const [hourlyRateDraft, setHourlyRateDraft] = useState('');
@@ -306,6 +427,8 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       if (cancelled || !res.success || !Array.isArray(res.data)) return;
       setBillingClients(res.data);
       if (!res.data.length) setNewTaskBillable(false);
+    }).catch(() => {
+      if (!cancelled) setBillingClients([]);
     });
     return () => {
       cancelled = true;
@@ -378,6 +501,27 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectForDetails?.id]);
 
+  useEffect(() => {
+    setProjectEditDraft(null);
+    setIsEditingWorkHours(false);
+  }, [selectedProjectForDetails?.id]);
+
+  const saveTaskDescription = async (task: Task, value: string) => {
+    const previous = state.tasks.find((item) => item.id === task.id)?.description ?? '';
+    if (value === previous) return;
+    if (!ensureCanManageTask(task.id)) return;
+    try {
+      await api.projects.updateTask(task.id, { description: encodeTaskBody(value, task.subtasks || []) });
+      onUpdateState((prev) => ({
+        ...prev,
+        tasks: prev.tasks.map((item) => item.id === task.id ? { ...item, description: value } : item),
+      }));
+      setSelectedTask((prev) => prev && prev.id === task.id ? { ...prev, description: value } : prev);
+    } catch (err: any) {
+      notifyApiError(err?.message || 'Failed to save the description.');
+    }
+  };
+
   const saveTaskDueDate = async (task: Task, value: string) => {
     if (!ensureCanManageTask(task.id)) return;
     const dueDate = value || null;
@@ -428,7 +572,6 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       notifyApiError(err?.message || 'Failed to save the priority.');
     }
   };
-
   const saveTaskAssignees = async (task: Task, ids: string[]) => {
     const unique = Array.from(new Set(ids.filter(Boolean)));
     if (
@@ -437,7 +580,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     ) {
       return;
     }
-    if (!ensureCanManageTask(task.id)) return;
+    if (!openTaskAssignment && !ensureCanManageTask(task.id)) return;
     const people = unique
       .map((id) => state.employees.find((emp) => emp.id === id))
       .filter(Boolean) as typeof state.employees;
@@ -549,12 +692,21 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
   };
 
-  const deleteUnbilledProjectTask = async (line: (typeof billLines)[number]) => {
+  const deleteUnbilledProjectTask = (line: (typeof billLines)[number]) => {
     const project = selectedProjectForDetails;
     const taskId = String(line.sourceTaskId || '').trim();
     if (!project || !taskId) return;
     if (!ensureCanManageProject(project.id)) return;
-    if (!window.confirm(`Delete unbilled task “${line.description}”? This cannot be undone.`)) return;
+    setPendingUnbilledDelete(line);
+  };
+
+  const confirmDeleteUnbilledProjectTask = async () => {
+    const line = pendingUnbilledDelete;
+    const project = selectedProjectForDetails;
+    const taskId = String(line?.sourceTaskId || '').trim();
+    if (!project || !line || !taskId) return;
+    if (!ensureCanManageProject(project.id)) return;
+    setIsSaving(true);
     try {
       await api.projects.deleteTask(taskId);
       setBillLines((prev) => prev.filter((row) => row.sourceTaskId !== taskId));
@@ -563,8 +715,11 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         tasks: prev.tasks.filter((t) => t.id !== taskId),
       }));
       await loadProjectBilling(project);
+      setPendingUnbilledDelete(null);
     } catch (err: any) {
       notifyApiError(err?.message || 'Could not delete the task.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -595,16 +750,23 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     userRole === 'finance_manager';
   // Managers must be able to view/assign team tasks (setup assigns leads as "manager")
   const isAdmin = isSuperAdmin || isHR || isManagerRole;
+  const canCreateProjects = isAdmin || openProjectCreation;
 
-  const assignableEmployees = useMemo(
+  const visiblePeople = useMemo(
     () => getManageableEmployees(state.currentPersona, state.employees || []),
     [state.currentPersona, state.employees]
   );
+  const assignableEmployees = useMemo(
+    () => (openTaskAssignment ? state.employees || [] : visiblePeople),
+    [openTaskAssignment, state.employees, visiblePeople]
+  );
+  const canFilterByPerson = visiblePeople.length > 1;
   const priorityOptions = useMemo(() => {
     const custom = (state.customOptions?.taskPriorities || []).map((p) => p.name).filter(Boolean);
     return custom.length ? custom : ['Low', 'Medium', 'High', 'Urgent'];
   }, [state.customOptions?.taskPriorities]);
 
+  const canPickAssignees = isAdmin || openTaskAssignment;
   const canManageThisTask = (task?: Task | null) => canManageTask(state.currentPersona, task, state.employees || []);
   const canManageThisProject = (project?: Project | null) =>
     canManageProject(state.currentPersona, project, state.employees || []);
@@ -645,19 +807,25 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     return parts[0].substring(0, 2).toUpperCase();
   };
 
-  const renderAssigneeStack = (task: Task, size = 'h-6 w-6 text-[10px]') => {
+  const renderAssigneeStack = (task: Task, size = 24) => {
     const names = taskAssigneeNames(task);
     const label = names.length ? names : ['Unassigned'];
     const shown = label.slice(0, 3);
     return (
-      <div className="flex items-center min-w-0">
-        <div className="flex -space-x-1.5">
+      <div className="work-assignees flex items-center min-w-0">
+        <div className={`flex ${shown.length > 1 ? '-space-x-1.5' : ''}`}>
           {shown.map((name, index) => (
             <div
               key={`${name}-${index}`}
               title={name}
-              className={`${size} rounded-full border-2 border-white flex items-center justify-center font-bold shrink-0 ${getAssigneeAvatarStyle(name)}`}
-              style={{ zIndex: shown.length - index }}
+              className={`work-assignee-mark rounded-full flex items-center justify-center shrink-0 ${shown.length > 1 ? 'ring-2 ring-white' : ''} ${getAssigneeAvatarStyle(name)}`}
+              style={{
+                width: size,
+                height: size,
+                minWidth: size,
+                fontSize: Math.round(size * 0.4),
+                zIndex: shown.length - index,
+              }}
             >
               {getInitials(name)}
             </div>
@@ -827,6 +995,25 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     (p) => !isTestEntity(p.name) && !isTestEntity(p.code) && !isTestEntity(p.clientName)
   );
 
+  const projectStatusChip = (status?: string) => {
+    if (status === 'Completed') return 'work-chip work-chip-sage';
+    if (status === 'On Hold' || status === 'Denied') return 'work-chip work-chip-error';
+    if (status === 'Planning' || status === 'Pending Approval') return 'work-chip work-chip-muted';
+    return 'work-chip work-chip-navy';
+  };
+
+  const projectDateLabel = (project: Project) => {
+    const start = project.startDate ? String(project.startDate).slice(0, 10) : '';
+    const end = project.endDate ? String(project.endDate).slice(0, 10) : '';
+    if (start && end) return `${start} – ${end}`;
+    return start || end || '—';
+  };
+
+  const projectHourBudget = (project: Project) => {
+    const budget = Number(project.totalWorkHours);
+    return Number.isFinite(budget) && budget > 0 ? budget : 0;
+  };
+
   // Jira Issue Type Badge Helper
   const getIssueTypeBadge = (type?: Task['issueType']) => {
     const label = type === 'Bug' ? 'Bug' : type === 'Story' ? 'Story' : type === 'Improvement' ? 'Improvement' : 'Task';
@@ -841,13 +1028,8 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   const getPriorityBadge = (priority: Task['priority']) => {
-    const Icon = priority === 'Urgent' ? ChevronsUp : priority === 'Low' ? ChevronDown : ChevronUp;
-    const tone =
-      priority === 'Urgent' || priority === 'High'
-        ? 'work-prio work-prio-urgent'
-        : priority === 'Medium'
-          ? 'work-prio work-prio-medium'
-          : 'work-prio';
+    const Icon = priority === 'Urgent' || priority === 'High' ? ChevronsUp : priority === 'Low' ? ChevronDown : ChevronUp;
+    const tone = `work-prio work-prio-${priorityTone(priority)}`;
     return (
       <span className={tone} title={`${priority} priority`} aria-label={`${priority} priority`}>
         <Icon className="h-4 w-4" strokeWidth={2.6} />
@@ -913,35 +1095,98 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
     e.dataTransfer.setData('text/plain', taskId);
     e.dataTransfer.effectAllowed = 'move';
-    setDraggedTaskId(taskId);
+    suppressCardClick.current = true;
+    draggedTaskIdRef.current = taskId;
+    // A state update inside dragstart re-renders the card before Chrome commits the gesture and cancels it.
+    window.setTimeout(() => {
+      if (draggedTaskIdRef.current === taskId) setDraggedTaskId(taskId);
+    }, 0);
+  };
+
+  const rememberDropSlot = (column: Task['status'], index: number) => {
+    setDragOverColumn((current) => (current === column ? current : column));
+    setDropSlot((current) => (current?.column === column && current.index === index ? current : { column, index }));
   };
 
   const handleDragOver = (e: React.DragEvent, colStatus: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (dragOverColumn !== colStatus) {
-      setDragOverColumn(colStatus);
-    }
+    setDragOverColumn((current) => (current === colStatus ? current : colStatus));
   };
 
   const handleDragLeave = (e: React.DragEvent, colStatus: string) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
     if (dragOverColumn === colStatus) {
       setDragOverColumn(null);
     }
+    setDropSlot((prev) => (prev?.column === colStatus ? null : prev));
   };
 
-  const handleDrop = async (e: React.DragEvent, targetStatus: Task['status']) => {
-    e.preventDefault();
+  const handleDragEnd = () => {
+    draggedTaskIdRef.current = null;
+    setDraggedTaskId(null);
     setDragOverColumn(null);
-    const taskId = e.dataTransfer.getData('text/plain') || draggedTaskId;
+    setDropSlot(null);
+  };
+
+  const tasksInStatus = (status: Task['status'], tasks: Task[] = state.tasks) =>
+    tasks.filter((task) => !task.isRecurrenceTemplate && normalizeTaskStatus(task.status) === status);
+
+  const withColumnOrder = (tasks: Task[], orderedIds: string[]) =>
+    tasks.map((task) => {
+      const boardOrder = orderedIds.indexOf(task.id);
+      return boardOrder >= 0 ? { ...task, boardOrder } : task;
+    });
+
+  const persistColumnOrder = (orderedIds: string[]) => {
+    if (!orderedIds.length) return;
+    api.projects.reorderTasks(orderedIds.map((id, boardOrder) => ({ id, boardOrder }))).catch((err: any) => {
+      notifyApiError(err?.message || 'Failed to save the board order.');
+    });
+  };
+
+  const saveColumnOrder = (orderedIds: string[]) => {
+    if (!orderedIds.length) return;
+    onUpdateState((prev) => ({
+      ...prev,
+      tasks: withColumnOrder(prev.tasks, orderedIds),
+    }));
+    persistColumnOrder(orderedIds);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetStatus: Task['status'], rawIndex?: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverColumn(null);
+    setDropSlot(null);
+    const taskId = e.dataTransfer.getData('text/plain') || draggedTaskIdRef.current || draggedTaskId;
+    draggedTaskIdRef.current = null;
     setDraggedTaskId(null);
 
     if (!taskId) return;
 
     const task = state.tasks.find((t) => t.id === taskId);
-    if (!task || normalizeTaskStatus(task.status) === targetStatus) return;
-
+    if (!task) return;
     if (!ensureCanManageTask(task)) return;
+
+    const sameColumn = normalizeTaskStatus(task.status) === targetStatus;
+    const visibleWithout = sortColumnTasks(
+      filteredTasks.filter((item) => normalizeTaskStatus(item.status) === targetStatus && item.id !== task.id)
+    );
+    const insertAt = Math.max(0, Math.min(rawIndex ?? visibleWithout.length, visibleWithout.length));
+    const nextVisible = [...visibleWithout];
+    nextVisible.splice(insertAt, 0, { ...task, status: targetStatus });
+    const orderedIds = mergeVisibleColumnOrder(
+      [...tasksInStatus(targetStatus).filter((item) => item.id !== task.id), { ...task, status: targetStatus }],
+      nextVisible
+    );
+    const currentIds = sortColumnTasks(tasksInStatus(targetStatus)).map((item) => item.id);
+
+    if (sameColumn) {
+      if (orderedIds.join('|') !== currentIds.join('|')) saveColumnOrder(orderedIds);
+      return;
+    }
 
     // Only Super Admin can drag a task in Review to Completed
     if (normalizeTaskStatus(task.status) === 'Review' && targetStatus === 'Completed') {
@@ -968,7 +1213,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         return;
       }
 
-      setPendingTransitionTask({ task, targetStatus: 'In Progress', source: 'drag' });
+      setPendingTransitionTask({ task, targetStatus: 'In Progress', source: 'drag', columnOrder: orderedIds });
       return;
     }
 
@@ -977,7 +1222,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     let closedSeconds: number | undefined;
     if (normalizeTaskStatus(task.status) === 'In Progress') {
       try {
-        const closed = await closeTaskTimesheet(task, state.timesheets, nowTime);
+        const closed = await closeTaskTimesheet(task, state.timesheets, nowTime, {
+          employeeId: timesheetOwner(task).id,
+        });
         closedTimesheet = closed.timesheet;
         closedSeconds = closed.timeSpentSeconds;
       } catch (err: any) {
@@ -987,7 +1234,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
 
     onUpdateState((prev) => {
-      let updatedTimesheets = prev.timesheets;
+      let updatedTimesheets = mergeTimesheet(prev.timesheets, closedTimesheet, false);
       const updatedTasks = prev.tasks.map((t) => {
         if (t.id !== taskId) return t;
 
@@ -1002,17 +1249,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
         const actualHours = Number((timeSpentSeconds / 3600).toFixed(2));
 
-        if (closedTimesheet) {
-          const idx = updatedTimesheets.findIndex(
-            (ts) => ts.id === closedTimesheet!.id || (ts.taskId === taskId && !ts.endTime)
-          );
-          if (idx >= 0) updatedTimesheets[idx] = { ...updatedTimesheets[idx], ...closedTimesheet };
-          else updatedTimesheets = [closedTimesheet, ...updatedTimesheets];
-        }
-
         return {
           ...t,
           status: targetStatus,
+          openTimesheetId: undefined,
           timeSpentSeconds,
           timerStartedAt,
           isTimerRunning,
@@ -1030,7 +1270,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
       return {
         ...prev,
-        tasks: updatedTasks,
+        tasks: withColumnOrder(updatedTasks, orderedIds),
         timesheets: updatedTimesheets,
         auditLogs: [
           {
@@ -1054,6 +1294,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       task.status,
       closedSeconds != null ? { timeSpentSeconds: closedSeconds, timerStartedAt: null } : undefined
     );
+    persistColumnOrder(orderedIds);
     if (targetStatus !== 'In Progress') {
       setVerifiedTrackingTaskIds((prev) => {
         const next = new Set(prev);
@@ -1132,7 +1373,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     let closedSeconds: number | undefined;
     if (normalizeTaskStatus(task.status) === 'In Progress') {
       try {
-        const closed = await closeTaskTimesheet(task, state.timesheets, nowTime);
+        const closed = await closeTaskTimesheet(task, state.timesheets, nowTime, {
+          employeeId: timesheetOwner(task).id,
+        });
         closedTimesheet = closed.timesheet;
         closedSeconds = closed.timeSpentSeconds;
       } catch (err: any) {
@@ -1159,7 +1402,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
 
     onUpdateState((prev) => {
-      let updatedTimesheets = prev.timesheets;
+      const updatedTimesheets = mergeTimesheet(prev.timesheets, closedTimesheet, false);
       const updatedTasks = prev.tasks.map((t) => {
         if (t.id !== taskId) return t;
 
@@ -1174,17 +1417,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
         const actualHours = Number((timeSpentSeconds / 3600).toFixed(2));
 
-        if (closedTimesheet) {
-          const idx = updatedTimesheets.findIndex(
-            (ts) => ts.id === closedTimesheet!.id || (ts.taskId === taskId && !ts.endTime)
-          );
-          if (idx >= 0) updatedTimesheets[idx] = { ...updatedTimesheets[idx], ...closedTimesheet };
-          else updatedTimesheets = [closedTimesheet, ...updatedTimesheets];
-        }
-
         return {
           ...t,
           status: newStatus,
+          openTimesheetId: undefined,
           timeSpentSeconds,
           timerStartedAt,
           isTimerRunning,
@@ -1245,6 +1481,24 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     const targetTask = state.tasks.find((t) => t.id === taskId);
     if (!targetTask) return;
 
+    const hasConfiguredOffice =
+      (Array.isArray(state.customOptions?.offices) && state.customOptions.offices.length > 0) ||
+      !!(state.organization?.officeLocation?.address && state.organization.officeLocation.address.trim() !== '');
+    if (autoCheckIn && !hasConfiguredOffice) {
+      setPermissionNotice('Office Setup Required: Attendance is disabled because no office location has been configured in Settings.');
+      setTimeout(() => setPermissionNotice(null), 5000);
+      return;
+    }
+    if (targetStatus === 'In Progress' && !autoCheckIn) {
+      const isAssigneeClockedIn = isAnyAssigneeClockedIn(targetTask);
+      const isCurrentPersonaClockedIn = isEmployeeClockedIn(state.currentPersona?.id, state.currentPersona?.name);
+      if (!isAssigneeClockedIn && !isCurrentPersonaClockedIn) {
+        setPermissionNotice('You must clock in / check in attendance before moving tasks to In Progress.');
+        setTimeout(() => setPermissionNotice(null), 5000);
+        return;
+      }
+    }
+
     const pausedSessions: Array<{ id: string; timesheet: TimesheetEntry | null; timeSpentSeconds: number }> = [];
     if (startTimer) {
       const others = state.tasks.filter(
@@ -1256,7 +1510,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       );
       for (const other of others) {
         try {
-          const closed = await closeTaskTimesheet(other, state.timesheets, nowTime);
+          const closed = await closeTaskTimesheet(other, state.timesheets, nowTime, {
+            keepOpen: true,
+            employeeId: timesheetOwner(other).id,
+          });
           await api.projects.updateTask(other.id, {
             timeSpentSeconds: closed.timeSpentSeconds,
             timerStartedAt: null,
@@ -1271,11 +1528,8 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
     let openedTimesheet: TimesheetEntry | null = null;
     try {
-      openedTimesheet = await openTaskTimesheet(
-        targetTask,
-        state.currentPersona.id,
-        state.currentPersona.name
-      );
+      const owner = timesheetOwner(targetTask);
+      openedTimesheet = await openTaskTimesheet(targetTask, owner.id, owner.name);
     } catch (err: any) {
       notifyApiError(err?.message || 'Failed to log this task on the timesheet.');
       return;
@@ -1316,28 +1570,14 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
             (a) => !(a.employeeId === prev.currentPersona.id && a.date === todayStr)
           ),
         ];
-      } else if (autoCheckIn && !hasConfiguredOffice) {
-        setPermissionNotice('Office Setup Required: Attendance is disabled because no office location has been configured in Settings.');
-        setTimeout(() => setPermissionNotice(null), 5000);
-        return prev;
       }
 
       const targetTask = prev.tasks.find((t) => t.id === taskId);
-
-      // Enforce clock-in requirement for In Progress tasks
-      if (targetStatus === 'In Progress' && !autoCheckIn) {
-        const isAssigneeClockedIn = isAnyAssigneeClockedIn(targetTask);
-        const isCurrentPersonaClockedIn = isEmployeeClockedIn(prev.currentPersona?.id, prev.currentPersona?.name);
-        if (!isAssigneeClockedIn && !isCurrentPersonaClockedIn) {
-          setPermissionNotice('You must clock in / check in attendance before moving tasks to In Progress.');
-          setTimeout(() => setPermissionNotice(null), 5000);
-          return prev;
-        }
-      }
       const assigneeId = targetTask?.assigneeId;
       const assigneeName = targetTask?.assigneeName;
 
       let updatedTimesheets = [...prev.timesheets];
+      const columnOrder = pendingTransitionTask?.task.id === taskId ? pendingTransitionTask.columnOrder : undefined;
 
       const updatedTasks = prev.tasks.map((t) => {
         let timeSpentSeconds = t.timeSpentSeconds || (t.actualHours ? Math.round(t.actualHours * 3600) : 0);
@@ -1372,50 +1612,27 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           normalizeTaskStatus(t.status) === 'In Progress' &&
           t.isTimerRunning
         ) {
-          let elapsed = 0;
-          if (timerStartedAt) {
-            elapsed = Math.max(0, Math.floor((nowTime - timerStartedAt) / 1000));
-            timeSpentSeconds += elapsed;
-          }
-          const pausedActualHours = Number((timeSpentSeconds / 3600).toFixed(2));
-          const elapsedHours = Number((elapsed / 3600).toFixed(2));
-
-          // Sync paused task to timesheets
-          if (elapsed > 0) {
-            updatedTimesheets = updatedTimesheets.map((ts) => {
-              if (ts.taskId === t.id && ts.date === todayStr && !ts.endTime) {
-                return {
-                  ...ts,
-                  hours: Number((ts.hours + elapsedHours).toFixed(2)),
-                  endTime: nowStr,
-                };
-              }
-              return ts;
-            });
-          }
-
+          const paused = pausedSessions.find((session) => session.id === t.id);
+          const pausedSeconds = paused?.timeSpentSeconds ?? timeSpentSeconds;
           return {
             ...t,
             isTimerRunning: false,
             timerStartedAt: undefined,
-            timeSpentSeconds,
-            actualHours: pausedActualHours,
+            timeSpentSeconds: pausedSeconds,
+            actualHours: Number((pausedSeconds / 3600).toFixed(2)),
           };
         }
 
         return t;
+      }).map((t) => {
+        if (!columnOrder) return t;
+        const boardOrder = columnOrder.indexOf(t.id);
+        return boardOrder >= 0 ? { ...t, boardOrder } : t;
       });
 
-      if (openedTimesheet) {
-        updatedTimesheets = [openedTimesheet, ...updatedTimesheets.filter((ts) => ts.id !== openedTimesheet!.id)];
-      }
+      updatedTimesheets = adoptOpenedTimesheet(updatedTimesheets, openedTimesheet);
       for (const paused of pausedSessions) {
-        if (!paused.timesheet) continue;
-        const idx = updatedTimesheets.findIndex(
-          (ts) => ts.id === paused.timesheet!.id || (ts.taskId === paused.id && !ts.endTime)
-        );
-        if (idx >= 0) updatedTimesheets[idx] = { ...updatedTimesheets[idx], ...paused.timesheet };
-        else updatedTimesheets = [paused.timesheet, ...updatedTimesheets];
+        updatedTimesheets = mergeTimesheet(updatedTimesheets, paused.timesheet, true);
       }
 
       return {
@@ -1443,6 +1660,12 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       timerStartedAt: startTimer ? nowTime : null,
       timeSpentSeconds: targetTask.timeSpentSeconds || 0,
     });
+    const columnOrder = pendingTransitionTask?.task.id === taskId ? pendingTransitionTask.columnOrder : undefined;
+    if (columnOrder?.length) {
+      api.projects.reorderTasks(columnOrder.map((id, boardOrder) => ({ id, boardOrder }))).catch((err: any) => {
+        notifyApiError(err?.message || 'Failed to save the board order.');
+      });
+    }
 
     if (startTimer) {
       api.projects
@@ -1494,20 +1717,23 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
 
     const nowTime = Date.now();
-    const nowStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
     const starting = !task.isTimerRunning;
     let sessionSheet: TimesheetEntry | null = null;
     let persistedSeconds = task.timeSpentSeconds || (task.actualHours ? Math.round(task.actualHours * 3600) : 0);
     try {
+      const owner = timesheetOwner(task);
       if (starting) {
-        sessionSheet = await openTaskTimesheet(task, state.currentPersona.id, state.currentPersona.name);
+        sessionSheet = await openTaskTimesheet(task, owner.id, owner.name);
         await api.projects.updateTask(taskId, {
           status: 'In Progress',
           timerStartedAt: nowTime,
           timeSpentSeconds: persistedSeconds,
         });
       } else {
-        const closed = await closeTaskTimesheet(task, state.timesheets, nowTime);
+        const closed = await closeTaskTimesheet(task, state.timesheets, nowTime, {
+          keepOpen: true,
+          employeeId: owner.id,
+        });
         sessionSheet = closed.timesheet;
         persistedSeconds = closed.timeSpentSeconds;
         await api.projects.updateTask(taskId, {
@@ -1521,90 +1747,42 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
 
     onUpdateState((prev) => {
-      let updatedTimesheets = [...prev.timesheets];
-
       const updatedTasks = prev.tasks.map((t) => {
         if (t.id !== taskId) return t;
-
-        let timeSpentSeconds = t.timeSpentSeconds || (t.actualHours ? Math.round(t.actualHours * 3600) : 0);
-        let isTimerRunning = !t.isTimerRunning;
-        let timerStartedAt = t.timerStartedAt;
-        let elapsed = 0;
-
-        if (isTimerRunning) {
-          timerStartedAt = nowTime;
-        } else {
-          if (t.timerStartedAt) {
-            elapsed = Math.max(0, Math.floor((nowTime - t.timerStartedAt) / 1000));
-            timeSpentSeconds += elapsed;
-          }
-          timerStartedAt = undefined;
-        }
-
-        const actualHours = Number((timeSpentSeconds / 3600).toFixed(2));
-        const elapsedHours = Number((elapsed / 3600).toFixed(2));
-
-        // When paused, sync to timesheets
-        if (!isTimerRunning && elapsed > 0) {
-          const existingTsIndex = updatedTimesheets.findIndex(
-            (ts) => ts.taskId === taskId && ts.date === todayStr && !ts.endTime
-          );
-          if (existingTsIndex >= 0) {
-            updatedTimesheets[existingTsIndex] = {
-              ...updatedTimesheets[existingTsIndex],
-              hours: Number((updatedTimesheets[existingTsIndex].hours + elapsedHours).toFixed(2)),
-              endTime: nowStr,
-            };
-          }
-        }
-
+        const timeSpentSeconds = starting
+          ? t.timeSpentSeconds || (t.actualHours ? Math.round(t.actualHours * 3600) : 0)
+          : persistedSeconds;
         return {
           ...t,
           timeSpentSeconds,
-          timerStartedAt,
-          isTimerRunning,
-          actualHours,
-          openTimesheetId: starting ? sessionSheet?.id : undefined,
+          timerStartedAt: starting ? nowTime : undefined,
+          isTimerRunning: starting,
+          actualHours: Number((timeSpentSeconds / 3600).toFixed(2)),
+          openTimesheetId: sessionSheet?.id || t.openTimesheetId,
         };
       });
-
-      if (sessionSheet) {
-        const idx = updatedTimesheets.findIndex(
-          (ts) => ts.id === sessionSheet!.id || (ts.taskId === taskId && !ts.endTime)
-        );
-        if (idx >= 0) updatedTimesheets[idx] = { ...updatedTimesheets[idx], ...sessionSheet };
-        else updatedTimesheets = [sessionSheet, ...updatedTimesheets];
-      }
 
       return {
         ...prev,
         tasks: updatedTasks,
-        timesheets: updatedTimesheets,
+        timesheets: starting
+          ? adoptOpenedTimesheet(prev.timesheets, sessionSheet)
+          : mergeTimesheet(prev.timesheets, sessionSheet, true),
       };
     });
 
     setSelectedTask((prev) => {
       if (!prev || prev.id !== taskId) return prev;
-      let timeSpentSeconds = prev.timeSpentSeconds || (prev.actualHours ? Math.round(prev.actualHours * 3600) : 0);
-      let isTimerRunning = !prev.isTimerRunning;
-      let timerStartedAt = prev.timerStartedAt;
-
-      if (isTimerRunning) {
-        timerStartedAt = nowTime;
-      } else {
-        if (prev.timerStartedAt) {
-          const elapsed = Math.max(0, Math.floor((nowTime - prev.timerStartedAt) / 1000));
-          timeSpentSeconds += elapsed;
-        }
-        timerStartedAt = undefined;
-      }
-
+      const timeSpentSeconds = starting
+        ? prev.timeSpentSeconds || (prev.actualHours ? Math.round(prev.actualHours * 3600) : 0)
+        : persistedSeconds;
       return {
         ...prev,
         timeSpentSeconds,
-        timerStartedAt,
-        isTimerRunning,
+        timerStartedAt: starting ? nowTime : undefined,
+        isTimerRunning: starting,
         actualHours: Number((timeSpentSeconds / 3600).toFixed(2)),
+        openTimesheetId: sessionSheet?.id || prev.openTimesheetId,
       };
     });
 
@@ -1634,21 +1812,17 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   // Subtask Management in Drawer
   const handleToggleSubtask = (taskId: string, subtaskId: string) => {
     if (!ensureCanManageTask(taskId)) return;
+    const current = state.tasks.find((t) => t.id === taskId);
+    if (!current) return;
+    const description = (selectedTask?.id === taskId ? selectedTask.description : current.description) || '';
+    const subtasks = (current.subtasks || []).map((st) => (st.id === subtaskId ? { ...st, completed: !st.completed } : st));
     onUpdateState((prev) => ({
       ...prev,
-      tasks: prev.tasks.map((t) => {
-        if (t.id !== taskId) return t;
-        const currentSubtasks = t.subtasks || [];
-        const updated = currentSubtasks.map((st) => (st.id === subtaskId ? { ...st, completed: !st.completed } : st));
-        return { ...t, subtasks: updated };
-      }),
+      tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, description, subtasks } : t)),
     }));
-
-    setSelectedTask((prev) => {
-      if (!prev || prev.id !== taskId) return prev;
-      const currentSubtasks = prev.subtasks || [];
-      const updated = currentSubtasks.map((st) => (st.id === subtaskId ? { ...st, completed: !st.completed } : st));
-      return { ...prev, subtasks: updated };
+    setSelectedTask((prev) => (prev && prev.id === taskId ? { ...prev, description, subtasks } : prev));
+    api.projects.updateTask(taskId, { description: encodeTaskBody(description, subtasks) }).catch((err: any) => {
+      notifyApiError(err?.message || 'Failed to update the subtask.');
     });
   };
 
@@ -1667,7 +1841,8 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       const targetTask = state.tasks.find((t) => t.id === taskId);
       if (targetTask) {
         const subtasks = [...(targetTask.subtasks || []), newSt];
-        await api.projects.updateTask(taskId, { description: JSON.stringify(subtasks) });
+        const description = (selectedTask?.id === taskId ? selectedTask.description : targetTask.description) || '';
+        await api.projects.updateTask(taskId, { description: encodeTaskBody(description, subtasks) });
       }
 
       onUpdateState((prev) => ({
@@ -1698,7 +1873,8 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       const targetTask = state.tasks.find((t) => t.id === taskId);
       if (targetTask) {
         const subtasks = (targetTask.subtasks || []).filter((st) => st.id !== subtaskId);
-        await api.projects.updateTask(taskId, { description: JSON.stringify(subtasks) });
+        const description = (selectedTask?.id === taskId ? selectedTask.description : targetTask.description) || '';
+        await api.projects.updateTask(taskId, { description: encodeTaskBody(description, subtasks) });
       }
 
       onUpdateState((prev) => ({
@@ -1721,14 +1897,14 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
   };
 
-  // Filtered Tasks
-  const filteredTasks = state.tasks.filter((t) => {
+  // Filtered Tasks. Priority is the default order; the board can override it per column.
+  const filteredTasks: Task[] = state.tasks.filter((t) => {
     if (t.isRecurrenceTemplate) return false;
     if (isTestEntity(t.title) || isTestEntity(t.description) || isTestEntity(t.projectName || '')) {
       return false;
     }
 
-    // Only show tasks the user can act on: their own, plus their team's for managers
+    // Own tasks, plus a manager's team. Assigning a task to someone does not reveal their other work.
     if (!canManageThisTask(t)) return false;
 
     const matchesProj =
@@ -1745,20 +1921,40 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       taskAssigneeNames(t).some((name) => name.toLowerCase().includes(searchQuery.toLowerCase()));
 
     const matchesEmployee =
-      !isAdmin
+      !canFilterByPerson
         ? true
         : selectedEmployeeId === 'All' ||
         taskAssigneeIds(t).includes(selectedEmployeeId) ||
         taskAssigneeNames(t).some(
           (name) =>
             name.toLowerCase() ===
-            (state.employees.find((e) => e.id === selectedEmployeeId)?.name || '').toLowerCase()
+            (visiblePeople.find((e) => e.id === selectedEmployeeId)?.name || '').toLowerCase()
         );
 
     return matchesProj && matchesSearch && matchesEmployee;
   });
+  filteredTasks.sort((a, b) => compareTaskPriority(a, b));
+
+  const filteredProjects = activeProjects.filter((project) => {
+    const query = searchQuery.trim().toLowerCase();
+    const matchesSearch = !query || `${project.name} ${project.code} ${project.clientName || ''}`.toLowerCase().includes(query);
+    const matchesProject = selectedProjectId === 'All' || project.id === selectedProjectId;
+    const matchesPerson = selectedEmployeeId === 'All' || project.managerId === selectedEmployeeId || project.teamMembers?.includes(selectedEmployeeId);
+    return matchesSearch && matchesProject && (!canFilterByPerson || matchesPerson);
+  });
 
   const columns: Task['status'][] = ['To Do', 'In Progress', 'Review', 'Completed'];
+
+  useEffect(() => {
+    if (!selectedTask && !selectedProjectForDetails && !showCreateTaskModal && !showCreateProjectModal) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
+      if (dialogs[dialogs.length - 1]?.getAttribute('aria-label') === 'Project details') setSelectedProjectForDetails(null);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [selectedTask, selectedProjectForDetails, showCreateTaskModal, showCreateProjectModal]);
 
   const handleOpenCreateTaskModal = (projId?: string) => {
     const targetProj =
@@ -1798,10 +1994,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     const today = new Date().toISOString().split('T')[0];
     const isStandalone = !newTaskProj || newTaskProj === 'standalone';
     const proj = !isStandalone ? state.projects.find((p) => p.id === newTaskProj) : undefined;
-    const targetAssigneeIds = isAdmin
+    const targetAssigneeIds = canPickAssignees
       ? (newTaskAssignees.length ? newTaskAssignees : newTaskAssignee ? [newTaskAssignee] : [])
       : [state.currentPersona?.id || state.employees[0]?.id || ''].filter(Boolean);
-    if (targetAssigneeIds.some((id) => id !== state.currentPersona?.id && !assignableEmployees.some((e) => e.id === id))) {
+    if (!openTaskAssignment && targetAssigneeIds.some((id) => id !== state.currentPersona?.id && !assignableEmployees.some((e) => e.id === id))) {
       flashPermissionNotice("You can't assign tasks to someone above you or outside your team.");
       return;
     }
@@ -1944,14 +2140,18 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
   };
 
-  const handleDeleteTask = async (taskId: string, e?: React.MouseEvent) => {
+  const handleDeleteTask = (taskId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const taskToDelete = state.tasks.find((t) => t.id === taskId);
     if (!taskToDelete) return;
     if (!ensureCanManageTask(taskToDelete)) return;
+    setPendingDeleteTask(taskToDelete);
+  };
 
-    const confirmDelete = window.confirm(`Are you sure you want to delete task "${taskToDelete.title}"?`);
-    if (!confirmDelete) return;
+  const confirmDeleteTask = async () => {
+    const taskToDelete = pendingDeleteTask;
+    if (!taskToDelete) return;
+    const taskId = taskToDelete.id;
 
     setIsSaving(true);
     try {
@@ -1991,6 +2191,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           ...prev.auditLogs,
         ],
       }));
+      setPendingDeleteTask(null);
     } catch (err) {
       console.warn('Backend task delete note:', err);
       alert('Failed to delete task.');
@@ -2381,6 +2582,102 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
   };
 
+  const openProjectEditor = (project: Project) => {
+    const hours = projectHourBudget(project);
+    const status = PROJECT_STATUSES.includes(project.status) ? project.status : 'In Progress';
+    const priority = PROJECT_PRIORITIES.includes(project.priority) ? project.priority : 'Medium';
+    setIsEditingWorkHours(false);
+    setProjectEditDraft({
+      name: project.name || '',
+      code: project.code || '',
+      status,
+      priority,
+      description: project.description || '',
+      clientId: project.clientId || '',
+      category: project.category || 'General',
+      managerId: project.managerId || '',
+      startDate: project.startDate ? String(project.startDate).slice(0, 10) : '',
+      endDate: project.endDate ? String(project.endDate).slice(0, 10) : '',
+      totalWorkHours: hours > 0 ? String(hours) : '',
+    });
+  };
+
+  const saveProjectDetails = async () => {
+    const project = selectedProjectForDetails;
+    const draft = projectEditDraft;
+    if (!project || !draft) return;
+    if (!ensureCanManageProject(project.id)) return;
+
+    const name = draft.name.trim();
+    const code = draft.code.trim().toUpperCase();
+    if (!name || !code) {
+      notifyApiError('Project name and code are required.');
+      return;
+    }
+    if (draft.startDate && draft.endDate && draft.endDate < draft.startDate) {
+      notifyApiError('End date must be on or after the start date.');
+      return;
+    }
+    const hours = draft.totalWorkHours.trim() === '' ? 0 : Number(draft.totalWorkHours);
+    if (!Number.isFinite(hours) || hours < 0) {
+      notifyApiError('Work hours must be zero or more.');
+      return;
+    }
+
+    const selectedClient = billingClients.find((client) => client.id === draft.clientId);
+    const clientName = draft.clientId
+      ? selectedClient?.company_name || selectedClient?.companyName || selectedClient?.name || project.clientName || ''
+      : '';
+    const manager = state.employees.find((emp) => emp.id === draft.managerId);
+
+    setIsSaving(true);
+    try {
+      await api.projects.updateProject(project.id, {
+        name,
+        code,
+        description: draft.description.trim(),
+        clientId: draft.clientId || null,
+        clientName,
+        managerId: draft.managerId || null,
+        startDate: draft.startDate || null,
+        endDate: draft.endDate || null,
+        status: draft.status,
+        category: draft.category || 'General',
+        priority: draft.priority,
+        totalWorkHours: hours,
+      });
+      const next: Project = {
+        ...project,
+        name,
+        code,
+        description: draft.description.trim(),
+        clientId: draft.clientId || undefined,
+        clientName,
+        managerId: draft.managerId,
+        managerName: manager?.name || (draft.managerId ? project.managerName : ''),
+        startDate: draft.startDate,
+        endDate: draft.endDate,
+        dueDate: draft.endDate,
+        status: draft.status,
+        category: draft.category || 'General',
+        priority: draft.priority,
+        totalWorkHours: hours,
+      };
+      setSelectedProjectForDetails(next);
+      onUpdateState((prev) => ({
+        ...prev,
+        projects: prev.projects.map((item) => (item.id === next.id ? { ...item, ...next } : item)),
+        tasks: prev.tasks.map((task) => (task.projectId === next.id ? { ...task, projectName: next.name } : task)),
+      }));
+      setProjectEditDraft(null);
+    } catch (err) {
+      console.error('Failed to update project', err);
+      notifyApiError(err instanceof Error ? err.message : 'Could not save this project.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleApproveTask = async (taskId: string) => {
     if (!ensureCanManageTask(taskId)) return;
     setIsSaving(true);
@@ -2481,23 +2778,31 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   const handleOpenCreateProjectModal = () => {
-    if (!isAdmin) {
-      setPermissionNotice('Only Admins can create new projects.');
+    if (!canCreateProjects) {
+      setPermissionNotice('Only admins and managers can create projects.');
       setTimeout(() => setPermissionNotice(null), 4000);
       return;
     }
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateKey(new Date());
     const defaultEnd = new Date();
     defaultEnd.setMonth(defaultEnd.getMonth() + 3);
-    const defaultEndStr = defaultEnd.toISOString().split('T')[0];
+    const defaultEndStr = localDateKey(defaultEnd);
 
     setNewProjName('');
     setNewProjCode(`PRJ-${String(state.projects.length + 1).padStart(3, '0')}`);
     setNewProjClient('');
+    setNewProjClientId('');
     setNewProjDescription('');
     setNewProjTotalHours('250');
-    setNewProjManagerId(state.employees[0]?.id || '');
-    setNewProjTeamMembers([state.employees[0]?.id || '']);
+    setNewProjStatus('Planning');
+    const currentLead =
+      state.employees.find(
+        (emp) =>
+          emp.id === state.currentPersona?.id ||
+          (emp.email && emp.email.toLowerCase() === state.currentPersona?.email?.toLowerCase())
+      ) || state.employees[0];
+    setNewProjManagerId(currentLead?.id || '');
+    setNewProjTeamMembers(currentLead?.id ? [currentLead.id] : []);
     setNewProjStartDate(today);
     setNewProjEndDate(defaultEndStr);
     setNewProjCategory('General');
@@ -2509,9 +2814,12 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     e.preventDefault();
     if (!newProjName.trim()) return;
 
-    const today = new Date().toISOString().split('T')[0];
-    const finalStartDate = newProjStartDate && newProjStartDate >= today ? newProjStartDate : today;
-    const finalEndDate = newProjEndDate && newProjEndDate >= finalStartDate ? newProjEndDate : finalStartDate;
+    const finalStartDate = newProjStartDate || '';
+    const finalEndDate = newProjEndDate || '';
+    if (finalStartDate && finalEndDate && finalEndDate < finalStartDate) {
+      alert('End date must be on or after the start date.');
+      return;
+    }
 
     const manager =
       state.employees.find((e) => e.id === newProjManagerId) ||
@@ -2527,19 +2835,26 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
     setIsSaving(true);
     try {
+      const selectedClient = billingClients.find((c) => c.id === newProjClientId);
+      const clientName =
+        selectedClient?.company_name ||
+        selectedClient?.companyName ||
+        selectedClient?.name ||
+        newProjClient.trim() ||
+        '';
       const projRes = await api.projects.createProject({
         name: newProjName.trim(),
         code: code.toUpperCase(),
-        description: newProjDescription.trim() || 'Enterprise project deliverable',
-        clientName: billingClients.find((c) => c.id === newProjClientId)?.company_name
-          || billingClients.find((c) => c.id === newProjClientId)?.companyName
-          || billingClients.find((c) => c.id === newProjClientId)?.name
-          || newProjClient.trim()
-          || 'Internal Core Deliverable',
+        description: newProjDescription.trim(),
+        clientName,
         clientId: newProjClientId || undefined,
         managerId: managerId,
-        startDate: finalStartDate,
-        endDate: finalEndDate,
+        startDate: finalStartDate || undefined,
+        endDate: finalEndDate || undefined,
+        status: newProjStatus || 'In Progress',
+        category: newProjCategory || 'General',
+        priority: newProjPriority || 'Medium',
+        totalWorkHours: parseFloat(newProjTotalHours) || 0,
       });
 
       if (!projRes.success) {
@@ -2550,13 +2865,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         id: projRes.data?.id || `proj_${Date.now()}`,
         name: newProjName.trim(),
         code: code.toUpperCase(),
-        clientName: billingClients.find((c) => c.id === newProjClientId)?.company_name
-          || billingClients.find((c) => c.id === newProjClientId)?.companyName
-          || billingClients.find((c) => c.id === newProjClientId)?.name
-          || newProjClient.trim()
-          || 'Internal Core Deliverable',
+        clientName,
         clientId: newProjClientId || undefined,
-        description: newProjDescription.trim() || 'Enterprise project deliverable',
+        description: newProjDescription.trim(),
         managerId: managerId,
         managerName: managerName,
         teamMembers: newProjTeamMembers.length > 0 ? newProjTeamMembers : [managerId],
@@ -2564,7 +2875,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         endDate: finalEndDate,
         dueDate: finalEndDate,
         budget: 0,
-        totalWorkHours: parseFloat(newProjTotalHours) || 250,
+        totalWorkHours: parseFloat(newProjTotalHours) || 0,
         loggedWorkHours: 0,
         approvalStatus: 'Approved',
         approvedBy: state.currentPersona?.name || 'Admin',
@@ -2611,12 +2922,36 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     }
   };
 
+  const handleDeleteProject = async (project: Project) => {
+    if (!ensureCanManageProject(project)) return;
+    setIsSaving(true);
+    try {
+      await api.projects.deleteProject(project.id);
+      onUpdateState((prev) => ({
+        ...prev,
+        projects: prev.projects.filter((item) => item.id !== project.id),
+        tasks: prev.tasks.filter((task) => task.projectId !== project.id),
+        timesheets: prev.timesheets.filter((entry) => entry.projectId !== project.id),
+      }));
+      if (selectedProjectId === project.id) setSelectedProjectId('All');
+      if (newTaskProj === project.id) setNewTaskProj('');
+      setSelectedProjectForDetails((current) => (current?.id === project.id ? null : current));
+      setPendingDeleteProject(null);
+    } catch (err) {
+      console.error('Failed to delete project', err);
+      alert(err instanceof Error ? err.message : 'Could not delete this project.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
-    <div className="work-page">
+    <div className="work-page projects-page">
+      {mobileViewport && <MobileHeaderAction><button type="button" className="m2-icon-button m2-add" aria-label="Add task" onClick={() => handleOpenCreateTaskModal()}>＋</button></MobileHeaderAction>}
       <div className="work-head">
-        <h1 className="work-title">Plan project work</h1>
+        <h1 className="work-title"><span className="work-desktop-label">Plan project work</span><span className="work-mobile-label">Projects</span></h1>
         <div className="work-actions">
-          {isAdmin && (
+          {canCreateProjects && (
             <button type="button" onClick={handleOpenCreateProjectModal} className="work-btn-secondary">
               Add project
             </button>
@@ -2627,17 +2962,6 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         </div>
       </div>
 
-      <div role="tablist" aria-label="Project views" className="work-tabs">
-        <button type="button" role="tab" aria-selected={activeTab === 'kanban'} onClick={() => setActiveTab('kanban')} className="work-tab">
-          Board
-        </button>
-        <button type="button" role="tab" aria-selected={activeTab === 'backlog'} onClick={() => setActiveTab('backlog')} className="work-tab">
-          List
-        </button>
-        <button type="button" role="tab" aria-selected={activeTab === 'projects'} onClick={() => setActiveTab('projects')} className="work-tab">
-          Projects
-        </button>
-      </div>
 
       {permissionNotice && (
         <div className="fixed top-6 right-6 z-60 flex items-center gap-3 rounded-[9px] border border-[var(--studio-error)]/30 bg-[var(--studio-error-surface)] px-4 py-3 text-[var(--studio-error)]">
@@ -2654,12 +2978,14 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             type="text"
-            placeholder="Find a task"
+            aria-label={activeTab === 'projects' ? 'Search projects' : 'Search tasks'}
+            placeholder={activeTab === 'projects' ? 'Search projects' : 'Search tasks and projects'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="work-field w-full pl-10"
           />
         </div>
+        <ResponsiveFilters active={selectedProjectId !== 'All' || selectedEmployeeId !== 'All'}>
         <select
           value={selectedProjectId}
           onChange={(e) => setSelectedProjectId(e.target.value)}
@@ -2672,7 +2998,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
             <option key={p.id} value={p.id}>{p.code} — {p.name}</option>
           ))}
         </select>
-        {isAdmin && (
+        {canFilterByPerson && (
           <select
             value={selectedEmployeeId}
             onChange={(e) => setSelectedEmployeeId(e.target.value)}
@@ -2680,29 +3006,65 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
             aria-label="Filter by person"
           >
             <option value="All">Everyone</option>
-            {assignableEmployees.map((emp) => (
+            {visiblePeople.map((emp) => (
               <option key={emp.id} value={emp.id}>{emp.name}</option>
             ))}
           </select>
         )}
-        <span className="text-[11px] font-semibold text-[var(--text-muted)]">
-          {filteredTasks.length} {filteredTasks.length === 1 ? 'task' : 'tasks'}
+        </ResponsiveFilters>
+        <span className="work-filter-count text-[12px] text-[var(--text-muted)]">
+          {activeTab === 'projects'
+            ? `${filteredProjects.length} ${filteredProjects.length === 1 ? 'project' : 'projects'}`
+            : `${filteredTasks.length} ${filteredTasks.length === 1 ? 'task' : 'tasks'}`}
         </span>
+      </div>
+
+      <div role="tablist" aria-label="Project views" className="work-tabs">
+        <button type="button" role="tab" aria-selected={activeTab === 'kanban'} onClick={() => setActiveTab('kanban')} className="work-tab">
+          Board
+        </button>
+        <button type="button" role="tab" aria-selected={activeTab === 'backlog'} onClick={() => setActiveTab('backlog')} className="work-tab"><span className="m2-desktop-label">List</span><span className="m2-mobile-label">My tasks</span></button>
+        <button type="button" role="tab" aria-selected={activeTab === 'projects'} onClick={() => setActiveTab('projects')} className="work-tab">
+          Projects
+        </button>
       </div>
 
       {/* TAB 1: KANBAN BOARD WITH DRAG & DROP */}
       {activeTab === 'kanban' && (
+        <>
+        <div className="work-board-status" role="group" aria-label="Board status">
+          {columns.map((status) => (
+            <button key={status} type="button" aria-pressed={mobileBoardStatus === status} onClick={() => setMobileBoardStatus(status)}>
+              <span>{status === 'To Do' ? 'To do' : status === 'In Progress' ? 'In progress' : status}</span>
+              <strong>{filteredTasks.filter((task) => normalizeTaskStatus(task.status) === status).length}</strong>
+            </button>
+          ))}
+        </div>
         <div className="work-kanban">
           {columns.map((col) => {
-            const colTasks = filteredTasks.filter((t) => normalizeTaskStatus(t.status) === col);
+            const colTasks = sortColumnTasks(filteredTasks.filter((t) => normalizeTaskStatus(t.status) === col));
+            let slot = 0;
+            const dropEndIndex = colTasks.filter((task) => task.id !== draggedTaskId).length;
+            const showEndLine =
+              Boolean(draggedTaskId) &&
+              dropSlot?.column === col &&
+              (colTasks.length === 0 || dropSlot.index === dropEndIndex);
 
             return (
               <section
                 key={col}
                 aria-label={col}
+                data-mobile-active={mobileBoardStatus === col}
+                data-status={col}
                 onDragOver={(e) => handleDragOver(e, col)}
                 onDragLeave={(e) => handleDragLeave(e, col)}
-                onDrop={(e) => handleDrop(e, col)}
+                onDrop={(e) => {
+                  const activeId = draggedTaskIdRef.current;
+                  const index = dropSlot?.column === col
+                    ? dropSlot.index
+                    : colTasks.filter((task) => task.id !== activeId).length;
+                  handleDrop(e, col, index);
+                }}
                 className={`work-col ${dragOverColumn === col ? 'is-drop' : ''}`}
               >
                 <div className="work-col-head">
@@ -2710,11 +3072,20 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   <span className="work-count">{colTasks.length}</span>
                 </div>
 
-                <div className="work-col-body custom-scrollbar">
+                <div
+                  className={`work-col-body custom-scrollbar${showEndLine ? ' is-drop-end' : ''}`}
+                  onDragOver={(e) => {
+                    const target = e.target as HTMLElement;
+                    if (target === e.currentTarget || target.classList.contains('work-col-empty')) {
+                      const activeId = draggedTaskIdRef.current;
+                      rememberDropSlot(col, colTasks.filter((task) => task.id !== activeId).length);
+                    }
+                  }}
+                >
                   {colTasks.length === 0 ? (
                     <p className="work-col-empty">No tasks</p>
                   ) : (
-                    colTasks.map((task) => {
+                    colTasks.map((task, index) => {
                       const isFeatured = task.id === selectedTask?.id;
                       const canDrag = canManageThisTask(task);
                       const isBeingTracked =
@@ -2722,46 +3093,56 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                         (Boolean(task.isTimerRunning) || verifiedTrackingTaskIds.has(task.id) || Boolean(task.isTrackingVerified));
                       const overdue = isTaskOverdue(task);
                       const repeatText = recurrenceLabel(task.recurrenceRule);
+                      const isDragged = task.id === draggedTaskId;
+                      const showDropBefore = !isDragged && dropSlot?.column === col && dropSlot.index === slot;
+                      if (!isDragged) slot += 1;
 
                       return (
                         <div
                           key={task.id}
                           draggable={canDrag}
                           onDragStart={(e) => handleDragStart(e, task.id)}
-                          onClick={() => setSelectedTask(task)}
-                          className={`work-card group space-y-3 ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.dataTransfer.dropEffect = 'move';
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const after = e.clientY > rect.top + rect.height / 2;
+                            const activeId = draggedTaskIdRef.current;
+                            rememberDropSlot(col, boardInsertionIndex(colTasks, activeId, index, after));
+                          }}
+                          onDrop={(e) => {
+                            e.stopPropagation();
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const after = e.clientY > rect.top + rect.height / 2;
+                            handleDrop(e, col, boardInsertionIndex(colTasks, draggedTaskIdRef.current, index, after));
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Open task: ${task.title}`}
+                          onKeyDown={(event) => {
+                            if (event.target !== event.currentTarget) return;
+                            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedTask(task); }
+                          }}
+                          onClick={() => {
+                            if (suppressCardClick.current) {
+                              suppressCardClick.current = false;
+                              return;
+                            }
+                            setSelectedTask(task);
+                          }}
+                          className={`work-card work-task-card group space-y-3 is-prio-${priorityTone(task.priority)} ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
+                            isDragged ? 'is-dragging' : ''
+                          } ${showDropBefore ? 'is-drop-before' : ''} ${
                             overdue ? 'is-overdue' : isBeingTracked ? 'is-tracking' : isFeatured ? 'is-selected' : ''
                           }`}
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="flex max-w-[170px] items-center gap-1.5 truncate text-[11px] font-semibold text-[var(--text-secondary)]">
-                              <Layers className="h-3.5 w-3.5 shrink-0" />
-                              <span className="truncate">{task.projectName || 'General'}</span>
-                            </span>
-                            <div className="flex shrink-0 items-center gap-1.5">
-                              {overdue && <span className="work-chip work-chip-error">Overdue</span>}
-                              <span
-                                className={`work-chip shrink-0 ${
-                                  task.priority === 'Urgent'
-                                    ? 'work-chip-error'
-                                    : task.priority === 'High'
-                                      ? 'work-chip-navy'
-                                      : 'work-chip-muted'
-                                }`}
-                              >
-                                {task.priority}
-                              </span>
-                              {canDrag && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleDeleteTask(task.id, e)}
-                                  title="Delete Task"
-                                  className="rounded p-0.5 text-[var(--text-muted)] opacity-0 hover:text-[var(--studio-error)] group-hover:opacity-100"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </div>
+                          <div className="work-task-project">
+                            <span>{state.projects.find((project) => project.id === task.projectId)?.code ? `${state.projects.find((project) => project.id === task.projectId)?.code} · ` : ''}{task.projectName || 'General'}</span>
+                            <button type="button" aria-label={`Details for ${task.title}`} onClick={(event) => { event.stopPropagation(); setSelectedTask(task); }}>
+                              <MoreVertical size={16} aria-hidden="true" />
+                            </button>
                           </div>
 
                           <div>
@@ -2769,20 +3150,19 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                             {task.description && (
                               <p className="mt-1 line-clamp-2 text-[12px] text-[var(--text-secondary)]">{task.description}</p>
                             )}
-                            {(task.dueDate || repeatText) && (
-                              <div className="mt-2 flex flex-wrap items-center gap-2">
-                                {task.dueDate && (
-                                  <span className={`inline-flex items-center gap-1 text-[11px] font-semibold ${overdue ? 'text-[var(--studio-error)]' : 'text-[var(--text-muted)]'}`}>
-                                    <Calendar className="h-3 w-3" />
-                                    {task.dueDate.slice(0, 10)}
-                                  </span>
-                                )}
-                                {repeatText && <span className="text-[11px] font-semibold text-[var(--text-muted)]">{repeatText}</span>}
-                              </div>
+                          </div>
+                          <div className="work-task-meta">
+                            <span className={`work-chip work-chip-${priorityTone(task.priority)}`}>{task.priority}</span>
+                            {task.dueDate && (
+                              <span className={`work-task-due ${overdue ? 'is-overdue' : ''}`}>
+                                <Calendar size={14} aria-hidden="true" />
+                                {overdue ? 'Overdue · ' : ''}{new Date(`${task.dueDate.slice(0, 10)}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              </span>
                             )}
+                            {repeatText && <span className="work-task-repeat">{repeatText}</span>}
                           </div>
 
-                          <div className="flex items-center justify-between border-t border-[var(--border-color)] pt-2.5">
+                          <div className="work-task-footer flex items-center justify-between border-t border-[var(--border-color)] pt-2.5">
                             {renderAssigneeStack(task)}
                             <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
                               <span className="inline-flex items-center gap-1">
@@ -2806,89 +3186,23 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
             );
           })}
         </div>
+        </>
       )}
 
       {/* TAB 2: BACKLOG / LIST VIEW */}
       {activeTab === 'backlog' && (
         <div className="space-y-4">
           {/* Mobile Tasks Cards */}
-          <div className="block md:hidden space-y-3">
-            {filteredTasks.length === 0 ? (
-              <div className="work-empty">
-                No tasks match these filters. Add a task to start the board.
-              </div>
-            ) : (
-              filteredTasks.map((task) => {
-                const isTaskTracking =
-                  normalizeTaskStatus(task.status) === 'In Progress' &&
-                  (Boolean(task.isTimerRunning) || verifiedTrackingTaskIds.has(task.id) || Boolean(task.isTrackingVerified));
-                const overdue = isTaskOverdue(task);
-                return (
-                  <div
-                    key={task.id}
-                    className={`p-4 rounded-2xl bg-white shadow-2xs space-y-3 transition-all ${
-                      overdue
-                        ? 'border-2 border-rose-500 ring-2 ring-rose-500/20'
-                        : isTaskTracking
-                        ? 'border-2 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
-                        : 'border border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-bold text-slate-900">{task.title}</h4>
-                        <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{task.description}</p>
-                        {(task.dueDate || recurrenceLabel(task.recurrenceRule)) && (
-                          <p className={`text-[10px] font-semibold mt-1 ${overdue ? 'text-rose-600' : 'text-slate-500'}`}>
-                            {task.dueDate ? task.dueDate.slice(0, 10) : ''}
-                            {overdue ? ' · Overdue' : ''}
-                            {recurrenceLabel(task.recurrenceRule) ? ` · ${recurrenceLabel(task.recurrenceRule)}` : ''}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className={`${taskStatusChip(task.status)} shrink-0`}>
-                          {normalizeTaskStatus(task.status)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteTask(task.id, e)}
-                          title="Delete Task"
-                          className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 inline-flex items-center gap-1">
-                        <Layers className="h-3 w-3 text-slate-400 shrink-0 stroke-[1.8]" />
-                        <span>{task.projectName || 'General'}</span>
-                      </span>
-                      {getPriorityBadge(task.priority)}
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                      {renderAssigneeStack(task, 'h-5 w-5 text-[9px]')}
-                      <span className={`text-[11px] font-mono font-bold flex items-center gap-1.5 ${isTaskTracking ? 'text-emerald-600' : 'text-slate-500'}`}>
-                        {isTaskTracking && (
-                          <span className="relative flex h-2 w-2 mr-0.5" title="Actively tracking (Verified with backend)">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                          </span>
-                        )}
-                        <Clock className={`h-3 w-3 ${isTaskTracking ? 'text-emerald-600 stroke-[2.2]' : 'text-slate-400'}`} />
-                        {formatHM(getTaskTotalSeconds(task))}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* Desktop Backlog Table */}
+          <div className="m2-task-list md:hidden">
+  <div className="m2-section-heading"><h2>Today</h2><span>{filteredTasks.length} tasks</span></div>
+  {filteredTasks.length === 0 ? <div className="m2-empty">No tasks match these filters. Add a task to start the list.</div> : filteredTasks.map(task => (
+    <button type="button" key={task.id} className="m2-task-row" onClick={() => setSelectedTask(task)}>
+      <strong>{task.title}</strong><span>{[task.projectName, task.dueDate ? 'Due ' + task.dueDate.slice(0, 10) : null].filter(Boolean).join(' · ')}</span>
+      <small className={isTaskOverdue(task) ? 'is-overdue' : normalizeTaskStatus(task.status) === 'Completed' ? 'is-complete' : 'is-progress'}>{isTaskOverdue(task) ? 'Overdue' : normalizeTaskStatus(task.status)}</small>
+    </button>
+  ))}
+</div>
+{/* Desktop Backlog Table */}
           <div className="work-table hidden md:block overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
@@ -2929,7 +3243,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                         </td>
 
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          {renderAssigneeStack(task, 'h-5 w-5 text-[9px]')}
+                          {renderAssigneeStack(task, 28)}
                         </td>
 
                         <td className="px-4 py-3.5 whitespace-nowrap">
@@ -2992,87 +3306,64 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
       {/* TAB 4: PROJECTS LIST OVERVIEW */}
       {activeTab === 'projects' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="work-project-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Add Project Card (Admin Only) */}
-          {isAdmin && (
+          {canCreateProjects && (
             <button
               type="button"
               onClick={handleOpenCreateProjectModal}
-              className="flex min-h-[180px] flex-col items-center justify-center rounded-[12px] border border-dashed border-[var(--border-strong)] bg-[var(--bg-app)] px-6 py-8 text-center text-[13px] font-semibold text-[var(--studio-navy)] hover:bg-[var(--studio-selected)]"
+              className="work-add-project flex min-h-[180px] flex-col items-center justify-center rounded-[12px] border border-dashed border-[var(--border-strong)] bg-[var(--bg-app)] px-6 py-8 text-center text-[13px] font-semibold text-[var(--studio-navy)] hover:bg-[var(--studio-selected)]"
             >
+              <Plus size={24} aria-hidden="true" />
               Add a project
             </button>
           )}
 
-          {activeProjects.map((proj) => {
+          {filteredProjects.map((proj) => {
             const projApprovedHours = state.timesheets
               .filter((ts) => ts.projectId === proj.id && ts.status === 'Approved')
               .reduce((sum, ts) => sum + ts.hours, 0);
-            const totalHoursAllocated = proj.totalWorkHours || 250;
-            const hoursPercent = Math.min(100, Math.round((projApprovedHours / totalHoursAllocated) * 100));
+            const totalHoursAllocated = projectHourBudget(proj);
+            const hoursPercent = totalHoursAllocated > 0
+              ? Math.min(100, Math.round((projApprovedHours / totalHoursAllocated) * 100))
+              : 0;
 
             return (
               <div
                 key={proj.id}
                 onClick={() => setSelectedProjectForDetails(proj)}
-                className="work-card flex cursor-pointer flex-col justify-between space-y-4 p-5"
+                role="button"
+                tabIndex={0}
+                aria-label={`Open project: ${proj.name}`}
+                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedProjectForDetails(proj); } }}
+                className="work-card work-project-card flex cursor-pointer flex-col gap-3 p-5"
               >
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-[var(--studio-navy)] dark:group-hover:text-blue-400 transition-colors">
-                        {proj.name}
-                      </h3>
-                      <span className="text-xs font-mono font-medium text-slate-400 dark:text-slate-500 shrink-0">
-                        {proj.code}
-                      </span>
-                    </div>
-                    {proj.description && (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1">
-                        {proj.description}
-                      </p>
-                    )}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-[var(--text-muted)]">{proj.code}</p>
+                    <h3 className="truncate text-[15px] font-bold text-[var(--text-primary)]">{proj.name}</h3>
                   </div>
-
-                  {/* Work Hours Budget & Timesheet Progress (Clean Inline, No Box) */}
-                  <div className="space-y-1.5 pt-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-600 dark:text-slate-400 font-medium flex items-center gap-1.5">
-                        <Clock className="h-3.5 w-3.5 text-[var(--studio-navy)] dark:text-blue-400" /> Work Hours
-                      </span>
-                      <div className="text-right font-mono text-xs">
-                        <span className="font-bold text-[var(--studio-navy)] dark:text-blue-400">{projApprovedHours}h</span>
-                        <span className="text-slate-400 dark:text-slate-500 text-[11px]"> / {totalHoursAllocated}h</span>
-                      </div>
-                    </div>
-                    <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-300 rounded-full ${hoursPercent > 90 ? 'bg-amber-500' : 'bg-[var(--studio-navy)] dark:bg-blue-500'
-                          }`}
-                        style={{ width: `${hoursPercent}%` }}
-                      />
-                    </div>
-                  </div>
+                  <span className={projectStatusChip(proj.status)}>{proj.status || 'In Progress'}</span>
                 </div>
-
-                <div className="pt-3.5 border-t border-slate-100 dark:border-[#282830] space-y-3">
-                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-medium">
-                    <span>Lead: <strong className="text-slate-900 dark:text-white font-semibold">{proj.managerName}</strong></span>
-                    <span>Category: <strong className="text-slate-900 dark:text-white font-semibold">{proj.category || 'General'}</strong></span>
+                <p className="line-clamp-2 text-[12px] text-[var(--text-secondary)]">
+                  {proj.description || 'No description'}
+                </p>
+                <dl className="work-project-people">
+                  <div><dt>Client</dt><dd>{proj.clientName || 'Internal'}</dd></div>
+                  <div><dt>Project lead</dt><dd>{proj.managerName || '—'}</dd></div>
+                </dl>
+                <div className="space-y-1.5 border-t border-[var(--border-color)] pt-3">
+                  <div className="flex items-center justify-between text-[12px]">
+                    <span className="font-medium text-[var(--text-secondary)]">{projectDateLabel(proj)}</span>
+                    <span className="font-mono text-[12px] font-semibold text-[var(--text-primary)]">
+                      {projApprovedHours}h / {totalHoursAllocated > 0 ? `${totalHoursAllocated}h` : '—'}
+                    </span>
                   </div>
-
-                  {/* Action Bar: View Details */}
-                  <div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedProjectForDetails(proj);
-                      }}
-                      className="w-full py-2 rounded-xl border border-slate-200 dark:border-[#282830] bg-slate-50 hover:bg-slate-100 dark:bg-[#18181d] dark:hover:bg-[#222228] text-slate-700 dark:text-slate-200 font-semibold text-xs transition-all cursor-pointer text-center shadow-2xs"
-                    >
-                      View Details
-                    </button>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-surface-subtle)]">
+                    <div
+                      className={`h-full rounded-full ${hoursPercent > 90 ? 'bg-amber-500' : 'bg-[var(--studio-navy)]'}`}
+                      style={{ width: `${hoursPercent}%` }}
+                    />
                   </div>
                 </div>
               </div>
@@ -3083,470 +3374,41 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
       {/* Task Detail Slide-over Drawer */}
       {selectedTask && (() => {
-        const isTaskApproved = normalizeTaskStatus(selectedTask.status) === 'In Progress' || normalizeTaskStatus(selectedTask.status) === 'Completed';
-        const canLogTime = isTaskApproved;
-        const taskKey = getTaskKey(selectedTask);
-        const isStandalone = !selectedTask.projectId || selectedTask.projectId === 'standalone' || selectedTask.projectId === 'general' || selectedTask.projectId === '';
-
-        const taskTimesheets = state.timesheets.filter(
-          (ts) => ts.taskId === selectedTask.id && !isTestEntity(ts.description) && !isTestEntity(ts.taskTitle)
-        );
-        const taskApprovedHours = taskTimesheets
-          .filter((ts) => ts.status === 'Approved')
-          .reduce((sum, ts) => sum + ts.hours, 0);
-        const taskPendingHours = taskTimesheets
-          .filter((ts) => ts.status === 'Submitted' || ts.status === 'Draft')
-          .reduce((sum, ts) => sum + ts.hours, 0);
-        const pendingLogs = taskTimesheets.filter((ts) => ts.status === 'Submitted' || ts.status === 'Draft');
-
         const taskSubtasks = selectedTask.subtasks || [];
         const completedSubtaskCount = taskSubtasks.filter((st) => st.completed).length;
         const canEditSelectedTask = canManageThisTask(selectedTask);
+        const canAssignSelectedTask = canEditSelectedTask || openTaskAssignment;
 
-        return (
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-            <div className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900">
-              {/* Drawer Header */}
-              <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-start justify-between bg-white shrink-0 gap-3">
-                <div className="space-y-1.5 min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 truncate max-w-[220px]">
-                      <Layers className="h-3.5 w-3.5 text-slate-400 shrink-0 stroke-[1.8]" />
-                      <span className="truncate">{selectedTask.projectName || 'General'}</span>
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 shrink-0">
-                      {normalizeTaskStatus(selectedTask.status)}
-                    </span>
-                  </div>
-                  <h3 className="text-lg sm:text-xl font-bold text-slate-900 leading-snug break-words">
-                    {selectedTask.title}
-                  </h3>
-                </div>
-                <div className="flex items-center gap-1 shrink-0 mt-0.5">
-                  {canEditSelectedTask && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteTask(selectedTask.id, e)}
-                      title="Delete Task"
-                      className="text-slate-400 hover:text-rose-600 p-2 cursor-pointer rounded-xl hover:bg-rose-50 transition-colors"
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setSelectedTask(null)}
-                    className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
+        const openTimeLog = () => { setTaskLogHours('1.0'); setTaskLogDate(new Date().toISOString().split('T')[0]); setTaskLogDescription(''); setShowTaskLogTimeModal(true); };
+        return <TaskPanel details title={selectedTask.title} description={selectedTask.projectName || 'General'} onClose={() => setSelectedTask(null)}>
+          <div className="task-panel-body task-detail-body">
+            <section className="task-workflow" aria-label="Workflow"><div className="task-mobile-workflow"><span className="task-current-status">{normalizeTaskStatus(selectedTask.status)}</span><details><summary>Change status</summary><div>{(['To Do','In Progress','Review','Completed'] as const).map(status => <button key={status} type="button" aria-pressed={normalizeTaskStatus(selectedTask.status) === status} disabled={!canEditSelectedTask || (status === 'Completed' && normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin)} onClick={event => { handleUpdateTaskStatus(selectedTask.id,status); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{status === 'Completed' ? 'Done' : status}</button>)}</div></details></div><span className="task-section-label">Workflow</span><div className="task-status-options">
+              {(['To Do','In Progress','Review','Completed'] as const).map(status => <button key={status} type="button" aria-pressed={normalizeTaskStatus(selectedTask.status) === status} disabled={!canEditSelectedTask || (status === 'Completed' && normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin)} onClick={() => handleUpdateTaskStatus(selectedTask.id,status)}>{status === 'Completed' ? 'Done' : status}</button>)}
+            </div>{normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin && <p className="task-hint">Super Admin approval is required to complete this task.</p>}</section>
+            <section className="task-overview">
+              <div className="task-description"><h3>Description</h3>{canEditSelectedTask ? <textarea aria-label="Description" value={selectedTask.description || ''} placeholder="Add a description" rows={3} onChange={e => setSelectedTask(prev => prev ? { ...prev, description: e.target.value } : prev)} onBlur={e => saveTaskDescription(selectedTask, e.target.value)} /> : <p>{selectedTask.description || 'No description provided.'}</p>}</div>
+              <div className="task-metadata">
+                <div className="task-field"><label htmlFor="task-priority">Priority</label><select id="task-priority" value={selectedTask.priority} disabled={!canEditSelectedTask} onChange={e => saveTaskPriority(selectedTask,e.target.value as Task['priority'])}>{priorityOptions.map(priority => <option key={priority}>{priority}</option>)}</select></div>
+                <TaskPeopleField value={taskAssigneeIds(selectedTask)} people={state.employees} disabled={!canAssignSelectedTask} onChange={ids => saveTaskAssignees(selectedTask,ids)} />
+                <div className="task-field task-due-field"><label htmlFor="task-due-date">Due date</label><div className="task-due-line"><DateInput id="task-due-date" value={selectedTask.dueDate?.slice(0,10) || ''} disabled={!canEditSelectedTask} onChange={e => e.target.value && saveTaskDueDate(selectedTask,e.target.value)} />{canEditSelectedTask && selectedTask.dueDate && <button type="button" className="task-text-button" onClick={() => saveTaskDueDate(selectedTask,'')}>Clear date</button>}</div>{isTaskOverdue(selectedTask) && <p className="task-overdue">Overdue</p>}</div>
+                {selectedTask.recurrenceSeriesId && <fieldset className="task-recurrence"><legend>{recurrenceLabel(selectedTask.recurrenceRule) || 'Repeats'}</legend><label><input type="radio" name="due-scope" checked={editDueScope === 'occurrence'} onChange={() => setEditDueScope('occurrence')} />This occurrence</label><label><input type="radio" name="due-scope" checked={editDueScope === 'future'} onChange={() => setEditDueScope('future')} />This and future</label></fieldset>}
+                <div className="task-mobile-time"><span>Time tracked</span><span>{formatHM(getTaskTotalSeconds(selectedTask))}</span></div>
               </div>
-
-              {/* Drawer Body */}
-              <div className="p-4 sm:p-6 sm:px-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto custom-scrollbar bg-white">
-                {/* Modern Workflow Status Segmented Stepper */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between flex-wrap gap-1">
-                    <label className="text-xs font-semibold text-slate-700">Workflow Status</label>
-                    {normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin && (
-                      <span className="text-[10px] sm:text-[11px] text-amber-600 font-medium flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                        <AlertCircle className="h-3 w-3 shrink-0" /> Requires Super Admin to complete
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-slate-100 border border-slate-200">
-                    {(['To Do', 'In Progress', 'Review', 'Completed'] as const).map((st) => {
-                      const isActive = normalizeTaskStatus(selectedTask.status) === st;
-                      const isReviewCompletedLocked =
-                        !canEditSelectedTask ||
-                        (st === 'Completed' && normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin);
-
-                      return (
-                        <button
-                          key={st}
-                          type="button"
-                          disabled={isReviewCompletedLocked}
-                          onClick={() => handleUpdateTaskStatus(selectedTask.id, st)}
-                          className={`py-2 px-1 sm:px-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all text-center flex items-center justify-center cursor-pointer truncate ${isActive
-                            ? 'bg-[var(--studio-navy)] text-white shadow-xs'
-                            : isReviewCompletedLocked
-                              ? 'text-slate-300 cursor-not-allowed opacity-50'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                            }`}
-                          title={
-                            !canEditSelectedTask
-                              ? 'You can only update your own or your team’s tasks'
-                              : isReviewCompletedLocked
-                                ? 'Super Admin approval required'
-                                : `Move to ${st}`
-                          }
-                        >
-                          <span className="truncate">{st === 'Completed' ? 'Done' : st}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Description */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-2">Description & Deliverables</label>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5 sm:p-4 text-xs sm:text-sm text-slate-700 leading-relaxed break-words">
-                    {selectedTask.description || 'No detailed description provided for this deliverable.'}
-                  </div>
-                </div>
-
-                {/* Subtasks Checklist Manager */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                      <CheckSquare className="h-3.5 w-3.5 text-[var(--studio-navy)]" />
-                      <span>Subtasks Checklist ({completedSubtaskCount}/{taskSubtasks.length})</span>
-                    </label>
-                  </div>
-
-                  {/* Subtask Items */}
-                  <div className="space-y-2">
-                    {taskSubtasks.map((st) => (
-                      <div
-                        key={st.id}
-                        className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl border border-slate-200 bg-slate-50/40 hover:bg-slate-50 transition-colors gap-2"
-                      >
-                        <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
-                          <input
-                            type="checkbox"
-                            checked={st.completed}
-                            onChange={() => handleToggleSubtask(selectedTask.id, st.id)}
-                            className="h-4 w-4 rounded text-[var(--studio-navy)] border-slate-300 focus:ring-blue-500 cursor-pointer shrink-0"
-                          />
-                          <span className={`text-xs font-medium truncate ${st.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
-                            {st.title}
-                          </span>
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteSubtask(selectedTask.id, st.id)}
-                          className="text-slate-400 hover:text-rose-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors shrink-0"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))}
-
-                    {/* Add Subtask Form */}
-                    <div className="flex items-center gap-2 pt-1">
-                      <input
-                        type="text"
-                        placeholder="Add a step or acceptance criterion..."
-                        value={newSubtaskTitle}
-                        onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddSubtask(selectedTask.id);
-                          }
-                        }}
-                        className="flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleAddSubtask(selectedTask.id)}
-                        className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-[var(--studio-navy)] hover:text-white text-slate-700 text-xs font-semibold cursor-pointer transition-colors shrink-0"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Task Meta Stats Grid */}
-                <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-                  <div className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0 overflow-hidden">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Workspace</span>
-                    <span className="text-xs font-bold text-[var(--studio-navy)] block truncate" title={selectedTask.projectName || 'General'}>
-                      {selectedTask.projectName || 'General'}
-                    </span>
-                  </div>
-                  <div className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0 overflow-hidden">
-                    <label htmlFor="task-priority" className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Priority</label>
-                    <select
-                      id="task-priority"
-                      value={selectedTask.priority}
-                      disabled={!canEditSelectedTask}
-                      onChange={(e) => saveTaskPriority(selectedTask, e.target.value as Task['priority'])}
-                      className={`w-full -ml-1 bg-transparent text-xs font-bold outline-none rounded-md px-1 py-0.5 hover:bg-slate-50 focus:bg-slate-50 disabled:hover:bg-transparent disabled:cursor-default cursor-pointer ${selectedTask.priority === 'Urgent'
-                        ? 'text-rose-600'
-                        : selectedTask.priority === 'High'
-                          ? 'text-amber-600'
-                          : 'text-slate-700'
-                        }`}
-                    >
-                      {priorityOptions.map((p) => (
-                        <option key={p} value={p} className="text-slate-800">{p}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Assignee */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1.5">Assignees</label>
-                  {canEditSelectedTask ? (
-                    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2.5 bg-white">
-                      {taskAssigneeIds(selectedTask).map((id) => {
-                        const person = state.employees.find((emp) => emp.id === id);
-                        return (
-                          <span key={id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 py-0.5 pl-2 pr-0.5 text-[11px] font-semibold text-slate-700">
-                            {person?.name || selectedTask.assigneeName}
-                            <button
-                              type="button"
-                              onClick={() => saveTaskAssignees(selectedTask, taskAssigneeIds(selectedTask).filter((item) => item !== id))}
-                              className="rounded-full px-1 text-slate-400 hover:text-rose-600"
-                            >
-                              ×
-                            </button>
-                          </span>
-                        );
-                      })}
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          if (e.target.value) saveTaskAssignees(selectedTask, [...taskAssigneeIds(selectedTask), e.target.value]);
-                        }}
-                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 outline-none"
-                      >
-                        <option value="">{taskAssigneeIds(selectedTask).length ? '+ Add another' : '+ Add people'}</option>
-                        {assignableEmployees.filter((emp) => !taskAssigneeIds(selectedTask).includes(emp.id)).map((emp) => (
-                          <option key={emp.id} value={emp.id}>
-                            {emp.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 bg-white">
-                      {renderAssigneeStack(selectedTask)}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="task-due-date" className="text-xs font-semibold text-slate-700 block">
-                      Due date <span className="text-slate-400 font-medium">(optional)</span>
-                    </label>
-                    {canEditSelectedTask && selectedTask.dueDate && (
-                      <button
-                        type="button"
-                        onClick={() => saveTaskDueDate(selectedTask, '')}
-                        className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 cursor-pointer"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    id="task-due-date"
-                    type="date"
-                    value={selectedTask.dueDate ? selectedTask.dueDate.slice(0, 10) : ''}
-                    disabled={!canEditSelectedTask}
-                    onChange={(e) => e.target.value && saveTaskDueDate(selectedTask, e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 disabled:bg-slate-50 disabled:text-slate-500"
-                  />
-                  {isTaskOverdue(selectedTask) && (
-                    <p className="text-[11px] font-semibold text-rose-600">Overdue</p>
-                  )}
-                  {selectedTask.recurrenceSeriesId && (
-                    <div className="flex items-center gap-3 text-[11px] text-slate-600">
-                      <span className="font-semibold">{recurrenceLabel(selectedTask.recurrenceRule) || 'Repeats'}</span>
-                      <label className="inline-flex items-center gap-1">
-                        <input
-                          type="radio"
-                          name="due-scope"
-                          checked={editDueScope === 'occurrence'}
-                          onChange={() => setEditDueScope('occurrence')}
-                        />
-                        This occurrence
-                      </label>
-                      <label className="inline-flex items-center gap-1">
-                        <input
-                          type="radio"
-                          name="due-scope"
-                          checked={editDueScope === 'future'}
-                          onChange={() => setEditDueScope('future')}
-                        />
-                        This and future
-                      </label>
-                    </div>
-                  )}
-                </div>
-
-                {/* Live Time Tracking Section (No set work / estimated hours) */}
-                <div className="space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700">Time Tracked</label>
-                    <button
-                      onClick={() => {
-                        setTaskLogHours('1.0');
-                        setTaskLogDate(new Date().toISOString().split('T')[0]);
-                        setTaskLogDescription('');
-                        setShowTaskLogTimeModal(true);
-                      }}
-                      className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer border border-slate-200 flex items-center gap-1"
-                    >
-                      <Plus className="h-3 w-3" /> Log Time
-                    </button>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 p-3.5 sm:p-4 bg-slate-50/70">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Total Time</span>
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-xl font-bold font-mono text-slate-900">
-                            {formatHM(getTaskTotalSeconds(selectedTask))}
-                          </span>
-                          {selectedTask.isTimerRunning && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 animate-pulse">
-                              <span className="h-1.5 w-1.5 rounded-full bg-[var(--studio-navy)] animate-ping" />
-                              Running
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Timer Actions */}
-                      <div className="flex items-center gap-1.5">
-                        {selectedTask.isTimerRunning ? (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTimer(selectedTask.id)}
-                            className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-                          >
-                            <Pause className="h-3.5 w-3.5 fill-current" />
-                            <span>Pause</span>
-                          </button>
-                        ) : normalizeTaskStatus(selectedTask.status) === 'In Progress' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTimer(selectedTask.id)}
-                            className="px-3.5 py-1.5 rounded-lg bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-                          >
-                            <Play className="h-3.5 w-3.5 fill-current" />
-                            <span>Resume</span>
-                          </button>
-                        ) : normalizeTaskStatus(selectedTask.status) === 'Completed' ? (
-                          <span className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold flex items-center gap-1.5">
-                            <Check className="h-3.5 w-3.5 stroke-[2.5]" /> Completed
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateTaskStatus(selectedTask.id, 'In Progress')}
-                            className="px-3.5 py-1.5 rounded-lg bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-                          >
-                            <Play className="h-3.5 w-3.5 fill-current" />
-                            <span>Start Working</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Attached Documents */}
-                <div className="space-y-3 pt-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                      <Paperclip className="h-3.5 w-3.5 text-slate-500" />
-                      <span>Attached Documents ({resolveTaskAttachments(selectedTask).length})</span>
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={!canEditSelectedTask}
-                        onClick={() => setShowAttachDriveModal(true)}
-                        className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer transition-colors shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        + Drive
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!canEditSelectedTask}
-                        onClick={() => setShowUploadAttachModal(true)}
-                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white cursor-pointer transition-colors shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Upload
-                      </button>
-                    </div>
-                  </div>
-
-                  {resolveTaskAttachments(selectedTask).length > 0 ? (
-                    <div className="space-y-2">
-                      {resolveTaskAttachments(selectedTask).map((doc) => (
-                        <div
-                          key={doc.id}
-                          className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <FileText className="h-4 w-4 text-slate-400 shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold text-slate-800 truncate">{doc.name}</p>
-                              <p className="text-[10px] text-slate-400">{[doc.size, doc.owner].filter(Boolean).join(' · ')}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {doc.s3Key && (
-                              <button
-                                type="button"
-                                title="Download"
-                                onClick={() => handleDownloadAttachment(doc)}
-                                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
-                              >
-                                <Download className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                            {canEditSelectedTask && (
-                              <button
-                                type="button"
-                                title="Remove"
-                                onClick={() => handleRemoveAttachment(doc.id)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 cursor-pointer"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-slate-400">No files yet. Upload one or attach from Drive.</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Drawer Footer */}
-              <div className="p-4 sm:p-5 sm:px-8 border-t border-slate-100 bg-white flex items-center justify-between gap-3 shrink-0 pb-7 sm:pb-5">
-                <button
-                  type="button"
-                  onClick={() => handleDeleteTask(selectedTask.id)}
-                  className="py-2.5 px-3.5 sm:px-4 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-600 font-semibold text-xs cursor-pointer transition-all flex items-center gap-1.5 shadow-2xs shrink-0"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  <span>Delete Task</span>
-                </button>
-                <button
-                  onClick={() => setSelectedTask(null)}
-                  className="flex-1 sm:flex-none sm:w-28 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs cursor-pointer transition-all shadow-2xs text-center"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
+            </section>
+            <section className="task-subtasks"><h3>Subtasks · {completedSubtaskCount} of {taskSubtasks.length} complete</h3><div className="task-checklist">
+              {taskSubtasks.map(subtask => <div key={subtask.id}><label><input type="checkbox" checked={subtask.completed} onChange={() => handleToggleSubtask(selectedTask.id,subtask.id)} /><span>{subtask.title}</span></label><button type="button" className="task-icon-button" aria-label={'Delete subtask ' + subtask.title} onClick={() => handleDeleteSubtask(selectedTask.id,subtask.id)}><Trash2 size={14} /></button></div>)}
+              </div><div className="task-add-subtask"><input aria-label="New subtask" placeholder="Add a subtask" value={newSubtaskTitle} onChange={e => setNewSubtaskTitle(e.target.value)} onKeyDown={e => { if(e.key === 'Enter'){ e.preventDefault(); handleAddSubtask(selectedTask.id); } }} /><button type="button" onClick={() => handleAddSubtask(selectedTask.id)}>Add</button></div>
+            </section>
+            <section className="task-time"><div><h3>Time tracked</h3><strong>{formatHM(getTaskTotalSeconds(selectedTask))}</strong>{selectedTask.isTimerRunning && <span className="task-hint"> · Running</span>}</div><div className="task-time-actions">
+              {selectedTask.isTimerRunning || normalizeTaskStatus(selectedTask.status) === 'In Progress' ? <button type="button" onClick={() => handleToggleTimer(selectedTask.id)}>{selectedTask.isTimerRunning ? 'Pause' : 'Resume'}</button> : normalizeTaskStatus(selectedTask.status) === 'Completed' ? <span>Completed</span> : <button type="button" onClick={() => handleUpdateTaskStatus(selectedTask.id,'In Progress')}>Start working</button>}
+              <button type="button" className="task-desktop-log" onClick={openTimeLog}>Log time</button></div>
+            </section>
+            <section className="task-attachments"><div className="task-attachments-heading"><h3>Attachments · {resolveTaskAttachments(selectedTask).length}</h3><div><button type="button" disabled={!canEditSelectedTask} onClick={() => setShowAttachDriveModal(true)}>Add from Drive</button><button type="button" disabled={!canEditSelectedTask} onClick={() => setShowUploadAttachModal(true)}>Upload</button></div></div><div className="task-file-list">
+              {resolveTaskAttachments(selectedTask).length ? resolveTaskAttachments(selectedTask).map(doc => <article key={doc.id} className="task-file"><div className="task-file-identity"><span className="task-file-type">{doc.name.split('.').pop()?.slice(0,3).toUpperCase() || 'FILE'}</span><div><h4>{doc.name}</h4><p>{[doc.size,doc.owner].filter(Boolean).join(' · ') || 'Task attachment'}</p></div></div><div className="task-file-actions">{doc.s3Key && <button type="button" onClick={() => handleDownloadAttachment(doc)}>Download</button>}{canEditSelectedTask && <button type="button" className="task-text-button" onClick={() => handleRemoveAttachment(doc.id)}>Remove</button>}</div></article>) : <p className="task-hint">No files yet. Upload one or attach from Drive.</p>}
+            </div></section>
           </div>
-        );
+          <footer className="task-panel-footer task-detail-footer">{canEditSelectedTask && <button type="button" className="task-danger" onClick={() => handleDeleteTask(selectedTask.id)}>Delete task</button>}<button type="button" className="task-primary task-mobile-log" onClick={openTimeLog}>Log time</button></footer>
+        </TaskPanel>;
       })()}
 
       {/* Start Task & Time Tracking Confirmation Modal */}
@@ -3555,16 +3417,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         const assigneeId = task.assigneeId;
         const assigneeName = task.assigneeName || 'Unassigned';
 
-        // Find attendance record for assignee
-        const attendanceRecord = state.attendance.find(
-          (a) =>
-            (a.employeeId === assigneeId || (assigneeName && (a.employeeName || '').toLowerCase() === assigneeName.toLowerCase())) &&
-            isTodayAttendanceDate(a.date) &&
-            !!a.checkIn
-        );
-        const isCheckedIn = !!attendanceRecord?.checkIn && !attendanceRecord.checkOut;
-        const isCheckedOut = !!attendanceRecord?.checkOut;
-        const isCurrentAssignee = state.currentPersona?.id === assigneeId || state.currentPersona?.name === assigneeName;
+        // Any open session today counts. The first row may be an earlier checkout.
+        const isCheckedIn = isAnyAssigneeClockedIn(task);
+        const isCurrentAssignee = isTaskAssignee(task, state.currentPersona?.id, state.currentPersona?.name);
 
         // Check if assignee has another active running task
         const otherRunningTask = state.tasks.find(
@@ -3800,578 +3655,168 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         </SlideOverDrawer>
       )}
 
-      {/* Quick Log Time Modal */}
-      {showTaskLogTimeModal && selectedTask && (
-        <SlideOverDrawer
-          title="Log Time on Task"
-          description={selectedTask.title}
-          zClass="z-60"
-          onClose={() => setShowTaskLogTimeModal(false)}
-        >
-            <form onSubmit={handleTaskQuickLogTime} className="flex-1 flex flex-col justify-between overflow-hidden">
-              <div className={slideOverBodyClass}>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1.5">Hours Spent *</label>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0.1"
-                    max="24"
-                    value={taskLogHours}
-                    onChange={(e) => setTaskLogHours(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-mono font-bold text-[var(--studio-navy)] outline-none focus:border-blue-500"
-                    required
-                  />
-                </div>
+      {/* Figma: centered desktop 74:2270; mobile 280:9758. */}
+      {showTaskLogTimeModal && selectedTask && <TaskPanel centered title="Log time" description={selectedTask.title} onClose={() => setShowTaskLogTimeModal(false)}>
+        <form onSubmit={handleTaskQuickLogTime} className="task-panel-form task-log-form"><div className="task-panel-body">
+          <div className="task-log-date-hours">
+            <div className="task-field task-log-hours"><label htmlFor="task-log-hours">Hours *</label><input id="task-log-hours" type="number" step="any" min="0.1" max="24" value={taskLogHours} onChange={e => setTaskLogHours(e.target.value)} required /></div>
+            <div className="task-field task-log-date"><label htmlFor="task-log-date">Work date *</label><DateInput id="task-log-date" max={todayStr} value={taskLogDate} onChange={e => setTaskLogDate(e.target.value)} required /><span className="task-hint">Work date cannot be in the future.</span></div>
+          </div>
+          <div className="task-log-context"><div className="task-field"><label htmlFor="task-log-project">Project</label><input id="task-log-project" value={selectedTask.projectName || 'General'} readOnly /></div><div className="task-field"><label htmlFor="task-log-task">Task</label><input id="task-log-task" value={selectedTask.title} readOnly /></div></div>
+          <div className="task-field"><label htmlFor="task-log-category">Category</label><select id="task-log-category" value={taskLogCategory} onChange={e => setTaskLogCategory(e.target.value as typeof taskLogCategory)}><option value="Development">Development</option><option value="Code Review">Code Review</option><option value="Testing">Testing & QA</option><option value="Design">Design & UI/UX</option><option value="Meeting">Meeting</option></select></div>
+          <div className="task-field"><label htmlFor="task-log-notes">Notes</label><textarea id="task-log-notes" rows={2} value={taskLogDescription} onChange={e => setTaskLogDescription(e.target.value)} placeholder="Add a note about your work." /></div>
+          <div className="task-billable"><label htmlFor="task-log-billable">Billable work</label><input id="task-log-billable" type="checkbox" role="switch" checked={taskLogBillable} onChange={e => setTaskLogBillable(e.target.checked)} /></div>
+          <p className="task-log-explanation task-hint">{taskLogDate < todayStr ? 'Past work dates are submitted for regularization.' : 'This creates a submitted timesheet and updates task time.'}</p>
+        </div><footer className="task-panel-footer"><button type="button" onClick={() => setShowTaskLogTimeModal(false)}>Cancel</button><button type="submit" className="task-primary" disabled={taskLogDate > todayStr}>{taskLogDate > todayStr ? 'Future date not allowed' : taskLogDate < todayStr ? 'Apply for regularization' : 'Save time'}</button></footer></form>
+      </TaskPanel>}
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1.5">Work Date *</label>
-                  <input
-                    type="date"
-                    max={todayStr}
-                    value={taskLogDate}
-                    onChange={(e) => setTaskLogDate(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 [color-scheme:light] cursor-pointer"
-                    required
-                  />
-                </div>
+      {/* Figma: desktop 71:2787; mobile 280:9553. */}
+      {showCreateTaskModal && (
+        <TaskPanel title="Add a task" description="Add the details needed for your team." onClose={() => setShowCreateTaskModal(false)}>
+          <form onSubmit={handleCreateTask} className="task-panel-form">
+            <div className="task-panel-body">
+              <div className="task-field"><label htmlFor="new-task-title">Task title *</label><input id="new-task-title" required placeholder="What needs to be done?" value={newTaskTitle} onChange={e => setNewTaskTitle(e.target.value)} />
               </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1.5">Category</label>
-                <select
-                  value={taskLogCategory}
-                  onChange={(e) => setTaskLogCategory(e.target.value as any)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 cursor-pointer"
-                >
-                  <option value="Development">Development</option>
-                  <option value="Code Review">Code Review</option>
-                  <option value="Testing">Testing & QA</option>
-                  <option value="Design">Design & UI/UX</option>
-                  <option value="Meeting">Meeting</option>
+              <div className="task-field"><label htmlFor="new-task-project">Project</label><select id="new-task-project" value={newTaskProj} onChange={e => setNewTaskProj(e.target.value)}>
+                  <option value="">General / Standalone</option>
+                  {activeProjects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
                 </select>
               </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1.5">Work Notes / Accomplishment</label>
-                <textarea
-                  value={taskLogDescription}
-                  onChange={(e) => setTaskLogDescription(e.target.value)}
-                  placeholder="Summary of commits, PRs, or work accomplished..."
-                  rows={2}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 resize-none"
-                />
+              {canPickAssignees ? <TaskPeopleField value={newTaskAssignees} people={assignableEmployees} onChange={ids => { setNewTaskAssignees(ids); setNewTaskAssignee(ids[0] || ''); }} /> : <div className="task-field"><span>Assignees</span><div className="task-readonly">{state.currentPersona?.name || 'You'}</div></div>}
+              <div className="task-priority-date">
+                <div className="task-field"><label htmlFor="new-task-priority">Priority</label><select id="new-task-priority" value={newTaskPriority} onChange={e => setNewTaskPriority(e.target.value as Task['priority'])}>{priorityOptions.map(priority => <option key={priority}>{priority}</option>)}</select>
+                </div>
+                <div className="task-field"><label htmlFor="new-task-due">Due date</label><DateInput id="new-task-due" value={newTaskDueDate} onChange={e => setNewTaskDueDate(e.target.value)} />
+                </div>
               </div>
-
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => setTaskLogBillable(!taskLogBillable)}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${taskLogBillable ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-500'
-                    }`}
-                >
-                  {taskLogBillable ? 'Billable' : 'Non-Billable'}
-                </button>
+              <div className="task-field"><label htmlFor="new-task-repeat">Repeat</label><select id="new-task-repeat" value={newTaskRepeat} onChange={e => setNewTaskRepeat(e.target.value as typeof newTaskRepeat)}>
+                  <option value="none">Does not repeat</option><option value="daily">Every day</option><option value="weekly">Every week</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Every month</option>
+                </select>
               </div>
+              {newTaskRepeat !== 'none' && <div className="task-extra-fields">
+                <div className="task-field"><label htmlFor="new-task-repeat-end">Repeat until</label><DateInput id="new-task-repeat-end" value={newTaskRecurrenceEnd} onChange={e => setNewTaskRecurrenceEnd(e.target.value)} /></div>
+                {(newTaskRepeat === 'weekly' || newTaskRepeat === 'biweekly') && <div className="task-field"><label htmlFor="new-task-weekday">Weekday</label><select id="new-task-weekday" value={newTaskWeekday} onChange={e => setNewTaskWeekday(Number(e.target.value))}>{['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, index) => <option key={day} value={index}>{day}</option>)}</select></div>}
+              </div>}
+              <div className="task-field"><label htmlFor="new-task-description">Description</label><textarea id="new-task-description" value={newTaskDescription} onChange={e => setNewTaskDescription(e.target.value)} placeholder="Add the details your team needs." rows={3} />
               </div>
-              <div className={slideOverFooterClass}>
-                  <button
-                    type="button"
-                    onClick={() => setShowTaskLogTimeModal(false)}
-                    className={slideOverCancelClass}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={taskLogDate > todayStr}
-                    className={`${slideOverPrimaryClass} ${taskLogDate > todayStr
-                        ? 'bg-slate-300 hover:bg-slate-300 cursor-not-allowed shadow-none'
-                        : taskLogDate < todayStr
-                          ? 'bg-amber-600 hover:bg-amber-700'
-                          : ''
-                      }`}
-                  >
-                    {taskLogDate > todayStr ? 'Future Date Not Allowed' : taskLogDate < todayStr ? 'Apply for Regularization' : 'Save Time'}
-                  </button>
+              <div className="task-billable">
+                <label htmlFor="new-task-billable">Billable task</label>
+                <input id="new-task-billable" type="checkbox" role="switch" checked={hasBillableClients && newTaskBillable} disabled={!hasBillableClients} aria-describedby={!hasBillableClients ? 'task-billing-help' : undefined} onChange={e => setNewTaskBillable(e.target.checked)} />
               </div>
-            </form>
-        </SlideOverDrawer>
-      )}
-
-      {/* Create Task Slide-over Drawer */}
-      {showCreateTaskModal && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900">
-            {/* Drawer Header */}
-            <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-              <h3 className="text-xl sm:text-2xl font-bold text-slate-900">Add New Task</h3>
-              <button
-                onClick={() => setShowCreateTaskModal(false)}
-                className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors shrink-0"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              {!hasBillableClients && <p id="task-billing-help" className="task-hint">Add a billable client to enable billing.</p>}
+              {hasBillableClients && newTaskBillable && <div className="task-extra-fields">
+                <div className="task-field"><label htmlFor="new-task-billing-type">Billing type</label><select id="new-task-billing-type" value={newTaskBillingType} onChange={e => setNewTaskBillingType(e.target.value as 'deliverable' | 'hourly')}><option value="deliverable">Fixed deliverable price</option><option value="hourly">Hourly</option></select></div>
+                <div className="task-field"><label htmlFor="new-task-client">Charge to client</label><select id="new-task-client" value={newTaskClientId} onChange={e => setNewTaskClientId(e.target.value)}><option value="">Project default</option>{billingClients.map(client => <option key={client.id} value={client.id}>{client.company_name || client.companyName || client.name}</option>)}</select></div>
+                <div className="task-field"><label htmlFor="new-task-price">{newTaskBillingType === 'deliverable' ? 'Fixed price' : 'Hourly rate'}</label><input id="new-task-price" type="number" min="0" step="0.01" placeholder="0.00" value={newTaskPrice} onChange={e => setNewTaskPrice(e.target.value)} /></div>
+              </div>}
             </div>
-
-            {/* Drawer Form Body */}
-            <form onSubmit={handleCreateTask} className="flex-1 flex flex-col justify-between overflow-hidden bg-white">
-              <div className="p-4 sm:p-6 sm:px-8 space-y-4 sm:space-y-5 overflow-y-auto custom-scrollbar text-xs">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
-                    Task Title <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Implement user authentication flow"
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
-                    Project Workspace
-                  </label>
-                  <select
-                    value={newTaskProj}
-                    onChange={(e) => setNewTaskProj(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
-                  >
-                    <option value="">General / Standalone</option>
-                    <optgroup label="Active Projects">
-                      {activeProjects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.code})
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-                </div>
-
-                {isAdmin ? (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
-                      Assignees <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-                      {newTaskAssignees.length === 0 && (
-                        <span className="text-[11px] font-medium text-slate-400">Select one or more people</span>
-                      )}
-                      {newTaskAssignees.map((id) => {
-                        const person = assignableEmployees.find((emp) => emp.id === id);
-                        return (
-                          <span key={id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 py-0.5 pl-2 pr-0.5 text-[11px] font-semibold text-slate-700">
-                            {person?.name || 'Unknown'}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const next = newTaskAssignees.filter((item) => item !== id);
-                                setNewTaskAssignees(next);
-                                setNewTaskAssignee(next[0] || '');
-                              }}
-                              className="rounded-full px-1 text-slate-400 hover:text-rose-600"
-                            >
-                              ×
-                            </button>
-                          </span>
-                        );
-                      })}
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          if (!e.target.value) return;
-                          const next = [...newTaskAssignees, e.target.value];
-                          setNewTaskAssignees(next);
-                          setNewTaskAssignee(next[0]);
-                        }}
-                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 outline-none"
-                      >
-                        <option value="">{newTaskAssignees.length ? '+ Add another' : '+ Add people'}</option>
-                        {assignableEmployees.filter((emp) => !newTaskAssignees.includes(emp.id)).map((emp) => (
-                          <option key={emp.id} value={emp.id}>
-                            {emp.name} ({emp.designation})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
-                      Assignee Member
-                    </label>
-                    <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-slate-400" />
-                        <span>{state.currentPersona?.name || 'Rajesh Sharma'}</span>
-                      </div>
-                      <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                        Assigned to You
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Priority Level</label>
-                  <select
-                    value={newTaskPriority}
-                    onChange={(e) => setNewTaskPriority(e.target.value as Task['priority'])}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
-                  >
-                    {priorityOptions.map((p) => (
-                      <option key={p} value={p} className="bg-white text-slate-800">{p}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
-                    Due date <span className="text-slate-400 font-medium">(optional)</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={newTaskDueDate}
-                    onChange={(e) => setNewTaskDueDate(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Repeat</label>
-                    <select
-                      value={newTaskRepeat}
-                      onChange={(e) => setNewTaskRepeat(e.target.value as typeof newTaskRepeat)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
-                    >
-                      <option value="none">Does not repeat</option>
-                      <option value="daily">Every day</option>
-                      <option value="weekly">Every week</option>
-                      <option value="biweekly">Every 2 weeks</option>
-                      <option value="monthly">Every month</option>
-                    </select>
-                  </div>
-                  {newTaskRepeat !== 'none' && (
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Repeat until</label>
-                      <input
-                        type="date"
-                        value={newTaskRecurrenceEnd}
-                        onChange={(e) => setNewTaskRecurrenceEnd(e.target.value)}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {(newTaskRepeat === 'weekly' || newTaskRepeat === 'biweekly') && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Weekday</label>
-                    <select
-                      value={newTaskWeekday}
-                      onChange={(e) => setNewTaskWeekday(Number(e.target.value))}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
-                    >
-                      {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, index) => (
-                        <option key={day} value={index}>{day}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label
-                      className={`flex items-center gap-2 text-xs font-semibold ${hasBillableClients ? 'text-slate-700' : 'text-slate-400'}`}
-                      title={!hasBillableClients ? 'Add a billable client first' : undefined}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={hasBillableClients && newTaskBillable}
-                        disabled={!hasBillableClients}
-                        onChange={(e) => {
-                          if (!hasBillableClients) return;
-                          setNewTaskBillable(e.target.checked);
-                        }}
-                        className="h-4 w-4 rounded border-slate-300 text-[var(--studio-navy)] disabled:cursor-not-allowed"
-                      />
-                      Billable to client
-                    </label>
-                    {!hasBillableClients && (
-                      <p className="mt-1 text-[11px] text-slate-500">
-                        Add a billable client first to enable this.
-                      </p>
-                    )}
-                  </div>
-                  <select
-                    value={newTaskBillingType}
-                    onChange={(e) => setNewTaskBillingType(e.target.value as 'deliverable' | 'hourly')}
-                    disabled={!hasBillableClients || !newTaskBillable}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
-                  >
-                    <option value="deliverable">Fixed deliverable price</option>
-                    <option value="hourly">Hourly</option>
-                  </select>
-                </div>
-                {hasBillableClients && newTaskBillable && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Charge to client</label>
-                    <select
-                      value={newTaskClientId}
-                      onChange={(e) => setNewTaskClientId(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
-                    >
-                      <option value="">Project default</option>
-                      {billingClients.map((client) => (
-                        <option key={client.id} value={client.id}>
-                          {client.company_name || client.companyName || client.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                {hasBillableClients && newTaskBillable && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
-                      {newTaskBillingType === 'deliverable' ? 'Fixed price' : 'Hourly rate'}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={newTaskPrice}
-                      onChange={(e) => setNewTaskPrice(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400"
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Description & Deliverables</label>
-                  <textarea
-                    value={newTaskDescription}
-                    onChange={(e) => setNewTaskDescription(e.target.value)}
-                    placeholder="Provide deliverables details..."
-                    rows={3}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all resize-none"
-                  />
-                </div>
-              </div>
-
-              {/* Drawer Form Footer */}
-              <div className="p-4 sm:p-5 sm:px-8 border-t border-slate-100 bg-white flex items-center justify-end gap-3 shrink-0 pb-7 sm:pb-5">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateTaskModal(false)}
-                  className="flex-1 py-2.5 sm:py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 cursor-pointer transition-colors shadow-2xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
-                >
-                  Add Task
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            <footer className="task-panel-footer"><button type="button" onClick={() => setShowCreateTaskModal(false)}>Cancel</button><button type="submit" className="task-primary" disabled={isSaving}>{isSaving ? 'Creating…' : 'Create task'}</button></footer>
+          </form>
+        </TaskPanel>
       )}
 
-      {/* Create Project Slide-over Drawer */}
-      {showCreateProjectModal && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900">
-            {/* Drawer Header */}
-            <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-              <h3 className="text-xl sm:text-2xl font-bold text-slate-900">Add New Project</h3>
-              <button
-                onClick={() => setShowCreateProjectModal(false)}
-                className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors shrink-0"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Drawer Form Body */}
-            <form onSubmit={handleCreateProject} className="flex-1 flex flex-col justify-between overflow-hidden bg-white">
-              <div className="p-4 sm:p-6 sm:px-8 space-y-4 sm:space-y-5 overflow-y-auto custom-scrollbar text-xs">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">
-                    Project Name <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. NextGen Mobile Banking Suite"
-                    value={newProjName}
-                    onChange={(e) => setNewProjName(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Project Code</label>
-                    <input
-                      type="text"
-                      placeholder={`PRJ-${String(state.projects.length + 1).padStart(3, '0')}`}
-                      value={newProjCode}
-                      onChange={(e) => setNewProjCode(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm font-mono uppercase text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Category</label>
-                    <select
-                      value={newProjCategory}
-                      onChange={(e) => setNewProjCategory(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
-                    >
-                      <option value="General" className="bg-white text-slate-800">General</option>
-                      <option value="Development" className="bg-white text-slate-800">Development</option>
-                      <option value="Design" className="bg-white text-slate-800">Design & UI/UX</option>
-                      <option value="DevOps" className="bg-white text-slate-800">DevOps & Cloud</option>
-                      <option value="Security" className="bg-white text-slate-800">Security & Audit</option>
-                      <option value="Marketing" className="bg-white text-slate-800">Marketing</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Client</label>
-                  <select
-                    value={newProjClientId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setNewProjClientId(id);
-                      const match = billingClients.find((c) => c.id === id);
-                      setNewProjClient(match?.company_name || match?.companyName || match?.name || '');
-                    }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 cursor-pointer"
-                  >
-                    <option value="">Internal / no client</option>
-                    {billingClients.map((client) => (
-                      <option key={client.id} value={client.id}>
-                        {client.company_name || client.companyName || client.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1.5 text-[11px] text-slate-500">
-                    Add clients in{' '}
-                    <Link href="/payroll/billable" className="font-semibold text-[var(--studio-navy)]">
-                      Payroll → Billable
-                    </Link>
-                    .
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Total Budget Hours</label>
-                    <input
-                      type="number"
-                      min="1"
-                      placeholder="e.g. 250"
-                      value={newProjTotalHours}
-                      onChange={(e) => setNewProjTotalHours(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Priority</label>
-                    <select
-                      value={newProjPriority}
-                      onChange={(e) => setNewProjPriority(e.target.value as any)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 cursor-pointer transition-all"
-                    >
-                      <option value="Low" className="bg-white text-slate-800">Low</option>
-                      <option value="Medium" className="bg-white text-slate-800">Medium</option>
-                      <option value="High" className="bg-white text-slate-800">High</option>
-                      <option value="Urgent" className="bg-white text-slate-800">Urgent</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 sm:mb-2">Project Overview & Objectives</label>
-                  <textarea
-                    value={newProjDescription}
-                    onChange={(e) => setNewProjDescription(e.target.value)}
-                    placeholder="Outline key deliverables, client expectations, and milestone checkpoints..."
-                    rows={3}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm text-slate-800 placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all resize-none"
-                  />
-                </div>
-              </div>
-
-              {/* Drawer Form Footer */}
-              <div className="p-4 sm:p-5 sm:px-8 border-t border-slate-100 bg-white flex items-center justify-end gap-3 shrink-0 pb-7 sm:pb-5">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateProjectModal(false)}
-                  className="flex-1 py-2.5 sm:py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 cursor-pointer transition-colors shadow-2xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99]"
-                >
-                  Create Project
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Figma: desktop 71:3020; mobile 280:9612. */}
+      {showCreateProjectModal && <TaskPanel title="Create a project" description="Add the details needed for your team." onClose={() => setShowCreateProjectModal(false)}>
+        <form onSubmit={handleCreateProject} className="task-panel-form"><div className="task-panel-body project-create-body">
+          <div className="task-field project-name"><label htmlFor="new-project-name">Project name *</label><input id="new-project-name" required value={newProjName} onChange={e => setNewProjName(e.target.value)} placeholder="Name your project" /></div>
+          <div className="task-field project-code"><label htmlFor="new-project-code">Short code</label><input id="new-project-code" value={newProjCode} onChange={e => setNewProjCode(e.target.value)} placeholder={'PRJ-' + String(state.projects.length + 1).padStart(3,'0')} /></div>
+          <div className="task-field project-category"><label htmlFor="new-project-category">Category</label><select id="new-project-category" value={newProjCategory} onChange={e => setNewProjCategory(e.target.value)}><option value="General">General</option><option value="Development">Development</option><option value="Design">Design & UI/UX</option><option value="DevOps">DevOps & Cloud</option><option value="Security">Security & Audit</option><option value="Marketing">Marketing</option></select></div>
+          <div className="task-field project-client"><label htmlFor="new-project-client">Client</label><select id="new-project-client" value={newProjClientId} onChange={e => { const id=e.target.value;setNewProjClientId(id);const client=billingClients.find(c=>c.id===id);setNewProjClient(client?.company_name || client?.companyName || client?.name || ''); }}><option value="">Internal / no client</option>{billingClients.map(client => <option key={client.id} value={client.id}>{client.company_name || client.companyName || client.name}</option>)}</select></div>
+          <div className="task-field project-lead"><label htmlFor="new-project-lead">Project lead</label><select id="new-project-lead" value={newProjManagerId} onChange={e => setNewProjManagerId(e.target.value)}>{state.employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></div>
+          <div className="task-field project-status"><label htmlFor="new-project-status">Status</label><select id="new-project-status" value={newProjStatus} onChange={e => setNewProjStatus(e.target.value as Project['status'])}>{['Planning','In Progress','On Hold','Completed'].map(status => <option key={status}>{status}</option>)}</select></div>
+          <div className="task-field project-budget"><label htmlFor="new-project-budget">Budget hours</label><input id="new-project-budget" type="number" min="1" value={newProjTotalHours} onChange={e => setNewProjTotalHours(e.target.value)} placeholder="e.g. 250" /></div>
+          <div className="task-project-dates"><div className="task-field"><label htmlFor="new-proj-start">Start date</label><DateInput id="new-proj-start" value={newProjStartDate} onChange={e => setNewProjStartDate(e.target.value)} /></div><div className="task-field"><label htmlFor="new-proj-end">End date</label><DateInput id="new-proj-end" value={newProjEndDate} onChange={e => setNewProjEndDate(e.target.value)} /></div></div>
+          <div className="task-field project-overview"><label htmlFor="new-project-overview">Overview</label><textarea id="new-project-overview" rows={3} value={newProjDescription} onChange={e => setNewProjDescription(e.target.value)} placeholder="Describe the project goals." /></div>
+          <div className="task-field project-priority"><label htmlFor="new-project-priority">Priority</label><select id="new-project-priority" value={newProjPriority} onChange={e => setNewProjPriority(e.target.value as typeof newProjPriority)}>{priorityOptions.map(priority => <option key={priority}>{priority}</option>)}</select></div>
+        </div><footer className="task-panel-footer"><button type="button" onClick={() => setShowCreateProjectModal(false)}>Cancel</button><button type="submit" className="task-primary" disabled={isSaving}>{isSaving ? 'Creating…' : 'Create project'}</button></footer></form>
+      </TaskPanel>}
 
       {/* Project Details & Admin Approval Slide-over Drawer */}
       {selectedProjectForDetails && (() => {
         const p = selectedProjectForDetails;
-        const projectTasks = state.tasks.filter((t) => t.projectId === p.id && !isTestEntity(t.title));
+        const projectTasks = state.tasks.filter(
+          (t) => t.projectId === p.id && !isTestEntity(t.title) && canManageThisTask(t)
+        );
         const projectTimesheets = state.timesheets.filter(
           (ts) => ts.projectId === p.id && !isTestEntity(ts.description)
         );
         const approvedHours = projectTimesheets
           .filter((ts) => ts.status === 'Approved')
           .reduce((sum, ts) => sum + ts.hours, 0);
-        const totalBudgetHours = p.totalWorkHours || 250;
-        const isPending = p.approvalStatus === 'Pending' || p.status === 'Pending Approval';
-        const isDenied = p.approvalStatus === 'Denied' || p.status === 'Denied';
-        const isApproved = p.approvalStatus === 'Approved' || (!isPending && !isDenied);
-        const hoursPercent = Math.min(100, Math.round((approvedHours / totalBudgetHours) * 100));
+        const totalBudgetHours = projectHourBudget(p);
+        const shownBudget = projectEditDraft
+          ? Math.max(0, Number(projectEditDraft.totalWorkHours) || 0)
+          : totalBudgetHours;
+        const hoursPercent = shownBudget > 0 ? Math.min(100, Math.round((approvedHours / shownBudget) * 100)) : 0;
         const canEditProject = canManageThisProject(p);
+        const categoryChoices = PROJECT_CATEGORY_OPTIONS.some(([value]) => value === (projectEditDraft?.category || ''))
+          ? PROJECT_CATEGORY_OPTIONS
+          : ([[projectEditDraft?.category || 'General', projectEditDraft?.category || 'General'], ...PROJECT_CATEGORY_OPTIONS] as Array<[string, string]>);
 
         return (
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-            <div className="relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900">
+          <div className="work-drawer-overlay fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
+            <div role="dialog" aria-modal="true" aria-label="Project details" className="work-drawer relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900">
               {/* Drawer Header */}
-              <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
+              <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-start justify-between bg-white shrink-0 gap-2">
                 <div className="min-w-0 flex-1 pr-2">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <span className="text-[11px] font-bold text-[var(--studio-navy)] uppercase tracking-wider block">
-                      {p.code}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border bg-emerald-50 border-emerald-200 text-emerald-700">
-                      {p.status || 'In Progress'}
-                    </span>
-                  </div>
-                  <h3 className="text-lg sm:text-xl font-bold text-slate-900 truncate">{p.name}</h3>
+                  {projectEditDraft ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <input
+                          value={projectEditDraft.code}
+                          onChange={(e) => setProjectEditDraft({ ...projectEditDraft, code: e.target.value.toUpperCase() })}
+                          aria-label="Project code"
+                          className="w-28 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--studio-navy)] outline-none focus:border-slate-400"
+                        />
+                        <select
+                          value={projectEditDraft.status}
+                          onChange={(e) => setProjectEditDraft({ ...projectEditDraft, status: e.target.value as Project['status'] })}
+                          aria-label="Status"
+                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:border-slate-400"
+                        >
+                          {PROJECT_STATUSES.map((status) => (
+                            <option key={status} value={status}>{status}</option>
+                          ))}
+                        </select>
+                        <span className="work-chip work-chip-muted">{projectEditDraft.priority}</span>
+                      </div>
+                      <input
+                        value={projectEditDraft.name}
+                        onChange={(e) => setProjectEditDraft({ ...projectEditDraft, name: e.target.value })}
+                        aria-label="Project name"
+                        className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-lg font-bold text-slate-900 outline-none focus:border-slate-400"
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="text-[11px] font-bold text-[var(--studio-navy)] uppercase tracking-wider block">
+                          {p.code}
+                        </span>
+                        <span className={projectStatusChip(p.status)}>{p.status || 'In Progress'}</span>
+                        <span className="work-chip work-chip-muted">{p.priority || 'Medium'}</span>
+                      </div>
+                      <h3 className="text-lg sm:text-xl font-bold text-slate-900 truncate">{p.name}</h3>
+                    </>
+                  )}
                 </div>
-                <button
-                  onClick={() => setSelectedProjectForDetails(null)}
-                  className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors shrink-0"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  {canEditProject && !projectEditDraft && (
+                    <button
+                      type="button"
+                      onClick={() => openProjectEditor(p)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[var(--studio-navy)] font-semibold text-xs cursor-pointer"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSelectedProjectForDetails(null)}
+                    className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors shrink-0"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
 
               {/* Drawer Body */}
@@ -4386,10 +3831,10 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                       </span>
                     </div>
 
-                    {canEditProject && !isEditingWorkHours && (
+                    {canEditProject && !isEditingWorkHours && !projectEditDraft && (
                       <button
                         onClick={() => {
-                          setEditWorkHoursValue(String(p.totalWorkHours || 250));
+                          setEditWorkHoursValue(totalBudgetHours > 0 ? String(totalBudgetHours) : '');
                           setIsEditingWorkHours(true);
                         }}
                         className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-[11px] cursor-pointer"
@@ -4410,7 +3855,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                         className="w-28 sm:w-32 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono font-bold text-slate-900 text-xs outline-none focus:border-blue-500"
                       />
                       <button
-                        onClick={() => handleUpdateProjectWorkHours(p.id, parseFloat(editWorkHoursValue) || 250)}
+                        onClick={() => handleUpdateProjectWorkHours(p.id, parseFloat(editWorkHoursValue) || 0)}
                         className="px-3 py-1.5 rounded-lg bg-[var(--studio-navy)] text-white font-bold text-xs cursor-pointer hover:bg-[var(--studio-navy-hover)]"
                       >
                         Save
@@ -4426,9 +3871,22 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                     <div className="flex items-center justify-between pt-1">
                       <div>
                         <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Work Hours Set</span>
-                        <span className="text-base font-mono font-bold text-[var(--studio-navy)]">
-                          {p.totalWorkHours || 250} hrs
-                        </span>
+                        {projectEditDraft ? (
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={projectEditDraft.totalWorkHours}
+                            onChange={(e) => setProjectEditDraft({ ...projectEditDraft, totalWorkHours: e.target.value })}
+                            placeholder="Not set"
+                            aria-label="Total work hours"
+                            className="mt-1 w-28 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono font-bold text-slate-900 text-xs outline-none focus:border-slate-400"
+                          />
+                        ) : (
+                          <span className="text-base font-mono font-bold text-[var(--studio-navy)]">
+                            {totalBudgetHours > 0 ? `${totalBudgetHours} hrs` : 'Not set'}
+                          </span>
+                        )}
                       </div>
                       <div className="text-right">
                         <span className="text-[10px] uppercase font-bold text-slate-400 block">Hours Consumed</span>
@@ -4452,22 +3910,118 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 {/* Project Description */}
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Description</span>
-                  <p className="text-slate-700 bg-slate-50 p-3.5 sm:p-4 rounded-xl border border-slate-200 leading-relaxed text-xs sm:text-sm">
-                    {p.description || 'No detailed overview provided for this project workspace.'}
-                  </p>
+                  {projectEditDraft ? (
+                    <textarea
+                      value={projectEditDraft.description}
+                      onChange={(e) => setProjectEditDraft({ ...projectEditDraft, description: e.target.value })}
+                      rows={3}
+                      aria-label="Description"
+                      className="w-full rounded-xl border border-slate-200 bg-white p-3.5 text-xs sm:text-sm text-slate-800 outline-none focus:border-slate-400 resize-none"
+                    />
+                  ) : (
+                    <p className="text-slate-700 bg-slate-50 p-3.5 sm:p-4 rounded-xl border border-slate-200 leading-relaxed text-xs sm:text-sm">
+                      {p.description || 'No description'}
+                    </p>
+                  )}
                 </div>
 
                 {/* Project Metadata Grid */}
-                <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-                  <div className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0 overflow-hidden">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Category</span>
-                    <span className="text-xs font-bold text-slate-800 block truncate">{p.category || 'General'}</span>
+                {projectEditDraft ? (
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                    <label className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Client</span>
+                      <select
+                        value={projectEditDraft.clientId}
+                        onChange={(e) => setProjectEditDraft({ ...projectEditDraft, clientId: e.target.value })}
+                        className={projectFieldClass}
+                      >
+                        <option value="">Internal</option>
+                        {projectEditDraft.clientId && !billingClients.some((client) => client.id === projectEditDraft.clientId) && (
+                          <option value={projectEditDraft.clientId}>{p.clientName || 'Current client'}</option>
+                        )}
+                        {billingClients.map((client) => (
+                          <option key={client.id} value={client.id}>
+                            {client.company_name || client.companyName || client.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Category</span>
+                      <select
+                        value={projectEditDraft.category}
+                        onChange={(e) => setProjectEditDraft({ ...projectEditDraft, category: e.target.value })}
+                        className={projectFieldClass}
+                      >
+                        {categoryChoices.map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Lead</span>
+                      <select
+                        value={projectEditDraft.managerId}
+                        onChange={(e) => setProjectEditDraft({ ...projectEditDraft, managerId: e.target.value })}
+                        className={projectFieldClass}
+                      >
+                        <option value="">Unassigned</option>
+                        {projectEditDraft.managerId && !state.employees.some((emp) => emp.id === projectEditDraft.managerId) && (
+                          <option value={projectEditDraft.managerId}>{p.managerName || 'Current lead'}</option>
+                        )}
+                        {state.employees.map((emp) => (
+                          <option key={emp.id} value={emp.id}>{emp.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Priority</span>
+                      <select
+                        value={projectEditDraft.priority}
+                        onChange={(e) => setProjectEditDraft({ ...projectEditDraft, priority: e.target.value as Project['priority'] })}
+                        className={projectFieldClass}
+                      >
+                        {PROJECT_PRIORITIES.map((priority) => (
+                          <option key={priority} value={priority}>{priority}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Start</span>
+                      <DateInput
+                        value={projectEditDraft.startDate}
+                        onChange={(e) => setProjectEditDraft({ ...projectEditDraft, startDate: e.target.value })}
+                        aria-label="Start date"
+                        className={projectFieldClass}
+                      />
+                    </label>
+                    <label className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">End</span>
+                      <DateInput
+                        value={projectEditDraft.endDate}
+                        onChange={(e) => setProjectEditDraft({ ...projectEditDraft, endDate: e.target.value })}
+                        aria-label="End date"
+                        className={projectFieldClass}
+                      />
+                    </label>
                   </div>
-                  <div className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0 overflow-hidden">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Client</span>
-                    <span className="text-xs font-bold text-slate-800 block truncate">{p.clientName || 'Internal Project'}</span>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                    {[
+                      ['Client', p.clientName || 'Internal'],
+                      ['Category', p.category || 'General'],
+                      ['Lead', p.managerName || '—'],
+                      ['Priority', p.priority || 'Medium'],
+                      ['Start', p.startDate ? String(p.startDate).slice(0, 10) : '—'],
+                      ['End', p.endDate ? String(p.endDate).slice(0, 10) : '—'],
+                    ].map(([label, value]) => (
+                      <div key={label} className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0 overflow-hidden">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">{label}</span>
+                        <span className="text-xs font-bold text-slate-800 block truncate">{value}</span>
+                      </div>
+                    ))}
                   </div>
-                </div>
+                )}
 
                 {canEditProject && (
                 <div className="p-4 sm:p-5 rounded-xl border border-slate-200 bg-white space-y-3">
@@ -4598,7 +4152,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
                   {projectTasks.length === 0 ? (
                     <div className="p-6 text-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                      No deliverables added to this project yet.
+                      No tasks yet
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -4631,27 +4185,95 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
               {/* Drawer Footer */}
               <div className="p-4 sm:p-5 sm:px-8 border-t border-slate-100 bg-white flex items-center justify-between gap-3 shrink-0 pb-7 sm:pb-5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedProjectForDetails(null);
-                    handleOpenCreateTaskModal(p.id);
-                  }}
-                  className="flex-1 py-2.5 sm:py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 cursor-pointer transition-colors shadow-2xs text-center"
-                >
-                  + Add Deliverable
-                </button>
-                <button
-                  onClick={() => setSelectedProjectForDetails(null)}
-                  className="flex-1 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99] text-center"
-                >
-                  Close
-                </button>
+                {projectEditDraft ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setProjectEditDraft(null)}
+                      disabled={isSaving}
+                      className="flex-1 py-2.5 sm:py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 cursor-pointer transition-colors shadow-2xs text-center disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveProjectDetails()}
+                      disabled={isSaving}
+                      className="flex-1 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99] text-center disabled:opacity-60"
+                    >
+                      {isSaving ? 'Saving…' : 'Save changes'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {canEditProject && (
+                      <button
+                        type="button"
+                        onClick={() => setPendingDeleteProject(p)}
+                        className="py-2.5 sm:py-3 px-4 rounded-xl border border-rose-200 bg-white hover:bg-rose-50 text-sm font-semibold text-rose-700 cursor-pointer transition-colors"
+                      >
+                        Delete
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedProjectForDetails(null);
+                        handleOpenCreateTaskModal(p.id);
+                      }}
+                      className="flex-1 py-2.5 sm:py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 cursor-pointer transition-colors shadow-2xs text-center"
+                    >
+                      Add task
+                    </button>
+                    <button
+                      onClick={() => setSelectedProjectForDetails(null)}
+                      className="flex-1 py-2.5 sm:py-3 rounded-xl bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-sm font-semibold cursor-pointer shadow-md shadow-blue-600/20 transition-all active:scale-[0.99] text-center"
+                    >
+                      Close
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
         );
       })()}
+
+      {pendingDeleteProject && (
+        <ConfirmDialog
+          title={`Delete ${pendingDeleteProject.name}?`}
+          description="Its tasks and time logs will be removed. Invoices stay, unlinked from this project."
+          confirmLabel="Delete project"
+          busy={isSaving}
+          busyLabel="Deleting…"
+          onCancel={() => setPendingDeleteProject(null)}
+          onConfirm={() => void handleDeleteProject(pendingDeleteProject)}
+        />
+      )}
+
+      {pendingDeleteTask && (
+        <ConfirmDialog
+          title={`Delete “${pendingDeleteTask.title}”?`}
+          description="This task and its time logs will be removed. This cannot be undone."
+          confirmLabel="Delete task"
+          busy={isSaving}
+          busyLabel="Deleting…"
+          onCancel={() => setPendingDeleteTask(null)}
+          onConfirm={() => void confirmDeleteTask()}
+        />
+      )}
+
+      {pendingUnbilledDelete && (
+        <ConfirmDialog
+          title={`Delete “${pendingUnbilledDelete.description}”?`}
+          description="This unbilled task will be removed. This cannot be undone."
+          confirmLabel="Delete task"
+          busy={isSaving}
+          busyLabel="Deleting…"
+          onCancel={() => setPendingUnbilledDelete(null)}
+          onConfirm={() => void confirmDeleteUnbilledProjectTask()}
+        />
+      )}
 
       {/* Denial Reason Modal */}
       {showDenyReasonModal && (
@@ -4688,42 +4310,17 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         </SlideOverDrawer>
       )}
 
-      {/* Confirm Reject Task Modal */}
       {confirmRejectTaskId && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4 animate-in zoom-in-95 duration-200 text-slate-900">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
-                <AlertCircle className="h-5 w-5" />
-              </div>
-              <h3 className="text-base font-bold text-slate-900">Are you sure you want to reject?</h3>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-              This task will be moved to Review status.
-            </p>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setConfirmRejectTaskId(null)}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs cursor-pointer transition-all shadow-2xs"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleRejectTask(confirmRejectTaskId);
-                  setConfirmRejectTaskId(null);
-                }}
-                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs cursor-pointer shadow-sm transition-all"
-              >
-                Yes, Reject
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Are you sure you want to reject?"
+          description="This task will be moved to Review status."
+          confirmLabel="Yes, Reject"
+          onCancel={() => setConfirmRejectTaskId(null)}
+          onConfirm={() => {
+            handleRejectTask(confirmRejectTaskId);
+            setConfirmRejectTaskId(null);
+          }}
+        />
       )}
     </div>
   );

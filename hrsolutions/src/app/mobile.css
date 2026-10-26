@@ -1,0 +1,230 @@
+/* Mobile layouts use Figma's 390px frames as a fluid reference.
+   No device status bars are drawn: the browser/OS owns those areas. */
+.pixbe-mobile-tabs { position: fixed; inset: auto 0 0; z-index: 35; display: grid; grid-template-columns: repeat(var(--mobile-tab-count,5),minmax(0,1fr)); background: var(--bg-surface); border-top: 1px solid var(--border-color); padding: 0 max(0px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(0px,env(safe-area-inset-left)); }
+.pixbe-mobile-tab { min-width: 0; min-height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--text-secondary); text-decoration: none; font-size: 10px; line-height: 18px; }
+.pixbe-mobile-tab[aria-current="page"] { color: var(--studio-navy); font-weight: 600; }
+.pixbe-mobile-tab:focus-visible { outline: 2px solid var(--primary-blue); outline-offset: -4px; border-radius: 6px; }
+.pixbe-mobile-tab__icon { position: relative; display: flex; }
+.pixbe-mobile-tab__badge { position: absolute; top: -7px; left: 11px; min-width: 16px; height: 16px; padding-inline: 4px; border-radius: 4px; background: var(--studio-navy); color: white; font-size: 9px; line-height: 16px; text-align: center; }
+.settings-mobile-picker, .timetable-mobile-agenda { display: none; }
+@media(min-width:1024px) { .pixbe-mobile-tabs { display: none; } }
+
+@media(max-width:767px) {
+  .pixbe-app { height: 100dvh; }
+  .pixbe-app .workspace-canvas { min-height: 0; }
+  .pixbe-app .pixbe-header { height: calc(60px + env(safe-area-inset-top)); min-height: calc(60px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 16px 0; gap: 8px; background: var(--bg-surface); }
+  .pixbe-header > div:first-child { flex: 1; gap: 8px; }
+  .pixbe-header [aria-label="Breadcrumb"] { min-width: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+  .pixbe-header .header-desktop-crumb { display: none; }
+  .pixbe-header [aria-label="Breadcrumb"] > span:first-child { color: var(--text-primary); }
+  .pixbe-header button[title="Toggle Menu"], .pixbe-header button[title="Notifications"] { display: grid; place-items: center; width: 44px; height: 44px; min-width: 44px; padding: 0; }
+  .pixbe-header button[title="Search"] { display: none; }
+  .pixbe-header > div:last-child { gap: 0; flex-wrap: nowrap; }
+  .pixbe-header [class*="absolute"][class*="w-80"], .pixbe-header [class*="absolute"][class*="w-72"] { position: fixed; top: calc(60px + env(safe-area-inset-top)); left: 12px; right: 12px; width: auto; max-height: calc(100dvh - 150px); overflow-y: auto; }
+  .pixbe-app .pixbe-main { min-height: 0; padding: 0 16px calc(84px + env(safe-area-inset-bottom)); scroll-padding-block: 16px 96px; overscroll-behavior-y: contain; }
+  .pixbe-app .chat-main { padding: 0 0 calc(64px + env(safe-area-inset-bottom)); }
+  .pixbe-app .pixbe-main > * { min-width: 0; max-width: 100%; }
+  .pixbe-app .work-page { padding-top: 16px; gap: 16px; }
+  .pixbe-app :is(.work-title,.people-studio__title,.settings-studio__title) { font-size: 22px; line-height: 1.35; }
+  .pixbe-app :is(.work-field,.settings-field input,.settings-field select,.settings-field textarea,.settings-page input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),.settings-page select) { min-height: 44px; min-width: 0; max-width: 100%; }
+  .pixbe-app :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),select,textarea) { scroll-margin-block: 80px; }
+  .pixbe-app :is(.work-head,.people-studio__page-head,.finance-page-head) { gap: 12px; }
+  .pixbe-app .studio-pagination { flex-wrap: wrap; gap: 12px; }
+  .pixbe-app .studio-pagination button { min-height: 40px; }
+  .pixbe-app :is(.work-drawer,.studio-form-panel,.chat-drawer,.mobile-drawer-panel) { height: 100dvh; max-height: 100dvh; min-height: 0; width: 100%; border-radius: 0; }
+  .pixbe-app :is(.work-drawer,.studio-form-panel,.mobile-drawer-panel) > :last-child { padding-bottom: max(16px,env(safe-area-inset-bottom)); }
+
+  /* Labelled cards replace wide operational tables without duplicating controls. */
+  .pixbe-app table.mobile-record-table, table.mobile-record-table { display: block; width: 100%; min-width: 0; border: 0; border-collapse: separate; background: transparent; }
+  .mobile-record-table > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .mobile-record-table > tbody { display: flex; flex-direction: column; gap: 12px; width: 100%; }
+  .mobile-record-table > tbody > tr { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px 12px; padding: 16px; width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-surface); }
+  .pixbe-app .mobile-record-table > tbody > tr > :is(td,th), .mobile-record-table > tbody > tr > :is(td,th) { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; max-width: 100%; width: auto; height: auto; padding: 0; border: 0; white-space: normal; overflow-wrap: anywhere; font-size: 13px; text-align: left; }
+  .mobile-record-table td[data-label]::before { content: attr(data-label); color: var(--text-muted); font-size: 12px; font-weight: 400; line-height: 1.4; }
+  .mobile-record-table td[data-mobile-title="true"], .mobile-record-table td[data-mobile-wide="true"] { grid-column: 1 / -1; }
+  .mobile-record-table td[data-mobile-title="true"] { padding-bottom: 12px; border-bottom: 1px solid var(--border-color); font-weight: 600; }
+  .mobile-record-table td[data-mobile-title="true"]::before, .mobile-record-table td[data-label=""]::before { display: none; }
+  .mobile-record-table td > * { max-width: 100%; }
+  .mobile-record-table td :is(input:not([type="checkbox"]),select) { width: 100%; min-width: 0; }
+  .mobile-record-table td[data-label="Actions"], .mobile-record-table td[data-label="Action"] { grid-column: 1 / -1; }
+
+  /* Employee dashboard order follows the dedicated phone frame, 9:67988. */
+  .pixbe-app .dash-page { padding-top: 16px; gap: 20px; }
+  .pixbe-app .dash-page--employee { display: flex; flex-direction: column; }
+  .dash-page--employee :is(.dash-employee-columns,.dash-employee-main,.dash-employee-aside), .dash-page--employee > .dash-board { display: contents; }
+  .dash-page--employee > .dash-intro { order: 0; }
+  .dash-page--employee .dash-workday-card { order: 1; }
+  .dash-page--employee .dash-figures--actions-only { order: 2; }
+  .dash-page--employee .dash-employee-leave { order: 3; }
+  .dash-page--employee .dash-employee-holidays { order: 4; }
+  .dash-page--employee .dash-employee-tasks { order: 5; }
+  .dash-page--employee .cal-w { order: 6; }
+  .dash-page--employee .dash-employee-schedules { order: 7; }
+  .dash-page--employee .dash-employee-balances { order: 8; }
+  .pixbe-app .dash-page .dash-figures--member > .dash-action-rail { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+  .pixbe-app .dash-page .dash-employee-main .dash-action, .pixbe-app .dash-page .dash-action { padding: 12px; min-height: 96px; }
+  .pixbe-app .dash-page .dash-action > span { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .pixbe-app .dash-action-copy strong { font-size: 12px; line-height: 1.45; }
+  .pixbe-app .dash-action-copy small, .pixbe-app .dash-action-arrow { display: none; }
+  .pixbe-app .dash-page .dash-employee-tasks { flex: none; min-height: 0; }
+  .pixbe-app .dash-page .dash-employee-tasks .dash-row { min-height: 64px; padding-block: 14px; }
+  .pixbe-app .dash-page .dash-employee-tasks .dash-empty-state { min-height: 180px; }
+  .pixbe-app .dash-page .dash-quota-grid { gap: 12px; }
+  .pixbe-app .dash-page .dash-hr-metrics { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+
+  /* Settings: choose one subsection, then work in its full-width form. */
+  .settings-mobile-picker { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+  .settings-mobile-picker select { min-width: 0; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); font: inherit; font-size: 14px; }
+  .pixbe-app .settings-studio__layout { display: flex; flex-direction: column; gap: 20px; }
+  .pixbe-app .settings-studio__rail { width: 100%; position: static; padding: 0; border: 0; background: transparent; }
+  .pixbe-app .settings-studio__index { display: none; }
+  .pixbe-app .settings-studio__rail:has(input:not(:placeholder-shown)) .settings-studio__index { display: block; }
+  .pixbe-app .settings-studio__scope { display: none; }
+  .pixbe-app .settings-studio__search { width: 100%; margin-bottom: 12px; }
+  .pixbe-app .settings-studio__body { width: 100%; min-width: 0; }
+  .pixbe-app :is(.settings-fields-grid,.settings-fields-grid--three,.settings-choice-grid,.settings-loading__card > div) { grid-template-columns: minmax(0,1fr); }
+  .pixbe-app .settings-page .settings-page__card { padding: 16px; }
+  .pixbe-app :is(.settings-card__header,.settings-page__header) { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .pixbe-app .settings-page__actions { flex-wrap: wrap; }
+  .pixbe-app .settings-day-picker > div { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); }
+  .pixbe-app .settings-day-picker button { min-height: 44px; min-width: 0; }
+
+  /* Finance references use two-column totals and full-width record cards. */
+  .pixbe-app .finance-page { padding-top: 16px; gap: 20px; }
+  .pixbe-app .finance-summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+  .pixbe-app .finance-invoice-sidebar { grid-template-columns: minmax(0,1fr); }
+  .pixbe-app .finance-invoice-layout .invoice-print { padding: 20px; min-width: 0; }
+  .pixbe-app .finance-invoice-layout .invoice-print > :first-child { flex-direction: column; gap: 20px; }
+  .pixbe-app .finance-invoice-layout .invoice-print table { min-width: 0; table-layout: fixed; }
+
+  /* Chat retains one focused list, thread or details panel at a time. */
+  .pixbe-app .chat-workspace { height: 100%; min-height: 0; }
+  .pixbe-app .chat-workspace .chat-thread-head { padding: 8px 12px; }
+  .pixbe-app .chat-workspace .chat-message-row { padding-inline: 12px; gap: 8px; }
+  .pixbe-app .chat-workspace .chat-composer { padding: 8px 12px 12px; }
+  .pixbe-app .chat-workspace .chat-file-attachment { flex-wrap: wrap; }
+  .pixbe-app .chat-workspace .chat-file-download { min-height: 40px; }
+  .pixbe-app .chat-workspace .chat-icon-btn { min-width: 40px; min-height: 40px; }
+  .pixbe-app .chat-workspace .chat-message-actions { opacity: 1; }
+
+  /* A timetable becomes a day agenda; grids remain available on larger screens. */
+  .timetable-mobile-agenda { display: flex; flex-direction: column; gap: 16px; }
+  .timetable-mobile-days { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 6px; }
+  .timetable-mobile-days button { min-width: 0; min-height: 48px; border-radius: 6px; border: 1px solid transparent; background: var(--bg-surface); font-size: 12px; color: var(--text-secondary); }
+  .timetable-mobile-days button[aria-pressed="true"] { color: white; background: var(--studio-navy); }
+  .timetable-mobile-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .timetable-mobile-heading h3 { font-size: 15px; font-weight: 600; }
+  .timetable-mobile-slot { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; }
+  .timetable-mobile-slot[data-break="true"] { background: var(--accent-amber-surface); }
+  .timetable-mobile-slot h4 { font-size: 15px; font-weight: 600; margin: 0; }
+  .timetable-mobile-slot p { font-size: 13px; color: var(--text-secondary); }
+  .timetable-mobile-slot time { color: var(--primary-blue); font-size: 13px; }
+  .timetable-mobile-slot footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); }
+  .timetable-mobile-slot footer button, .timetable-mobile-heading > button { min-height: 44px; padding: 8px 12px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; color: var(--studio-navy); }
+  .timetable-desktop-view { display: none; }
+  .timetable-page > div:first-child { gap: 16px; }
+  .timetable-page .timetable-view-switch { display: none; }
+}
+
+/* Auth and setup adapt their Figma desktop forms using the mobile spacing rhythm. */
+@media(max-width:767px) {
+  .figma-auth { padding: max(24px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom)); min-height: 100dvh; gap: 24px; }
+  .figma-auth .fa-panel { width: 100%; max-width: 448px; padding: 20px; gap: 24px; }
+  .figma-auth .fa-field input, .figma-auth .auth-input, .figma-auth .auth-input-wrap input { font-size: 16px; height: 48px; }
+  .figma-auth .fa-code input { height: 48px; font-size: 20px; }
+  .figma-auth :is(.fa-primary,.auth-btn-primary,.auth-btn-secondary) { min-height: 44px; }
+  .fa-preferences { height: auto; min-height: 32px; gap: 8px; flex-wrap: wrap; }
+  .fa-destination { align-items: flex-start; }
+  .fa-footer { gap: 16px; flex-wrap: wrap; }
+  .fa-resend button { min-height: 40px; }
+  .figma-setup .fs-rail { padding: 20px 16px 12px; }
+  .figma-setup .fs-rail-top { gap: 16px; }
+  .figma-setup .fs-journey > :is(h1,h2,p), .figma-setup .fs-rail-bottom { display: none; }
+  .figma-setup .fs-journey { margin-top: 16px; gap: 0; }
+  .figma-setup .fs-progress-list { display: flex; flex-wrap: nowrap; gap: 8px; overflow-x: auto; padding: 0 0 4px; scroll-snap-type: x proximity; }
+  .figma-setup .fs-progress { flex: 0 0 auto; min-width: 110px; min-height: 48px; padding: 8px; gap: 8px; scroll-snap-align: start; }
+  .figma-setup .fs-step-copy strong { font-size: 12px; }
+  .figma-setup .fs-step-copy small { display: none; }
+  .figma-setup .fs-content { padding: 20px 16px; gap: 20px; }
+  .figma-setup :is(.fs-type-options,.fs-license-options,.fs-form-grid,.fs-review-grid) { grid-template-columns: minmax(0,1fr); }
+  .figma-setup .fs-choice { min-height: 110px; }
+  .figma-setup .fs-form-actions, .figma-setup .setup-workplace__footer { flex-wrap: wrap; gap: 12px; padding-bottom: max(16px,env(safe-area-inset-bottom)); }
+  .figma-setup :is(.fs-primary,.fs-secondary,.setup-button) { min-height: 44px; }
+  .figma-setup :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),select,textarea), .figma-employee :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),select,textarea) { max-width: 100%; min-width: 0; font-size: 16px; }
+  .figma-employee .employee-onboarding-header { padding: 16px; gap: 12px; }
+  .figma-employee .employee-onboarding-header .onboarding-account > span { display: none; }
+  .figma-employee .employee-profile-photo-action { min-width: 0; }
+  .figma-employee .setup-form-grid { grid-template-columns: minmax(0,1fr); }
+  .figma-employee .employee-onboarding-footer { flex-wrap: wrap; gap: 12px; padding-bottom: max(16px,env(safe-area-inset-bottom)); }
+  .mobile-drawer-panel { height: 100dvh; max-height: 100dvh; }
+  .mobile-drawer-panel > :last-child { padding-bottom: max(16px,env(safe-area-inset-bottom)); }
+}
+@media(prefers-reduced-motion:reduce) { .fs-progress-list { scroll-behavior: auto; } }
+/* Optional filters remain in the same DOM and retain their current values. */
+.mobile-filter-disclosure { display: contents; }
+.mobile-filter-disclosure > summary, .mobile-filter-today { display: none; }
+.mobile-filter-content { display: contents; }
+@media(max-width:767px) {
+  .mobile-filter-disclosure { display: block; grid-column: 1 / -1; min-width: 0; }
+  .mobile-filter-disclosure > summary { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary); font-size: 12px; background: var(--bg-surface); cursor: pointer; list-style: none; }
+  .mobile-filter-disclosure > summary::after { content: '+'; font-size: 18px; }
+  .mobile-filter-disclosure[open] > summary::after { content: '−'; }
+  .mobile-filter-disclosure > summary::-webkit-details-marker { display: none; }
+  .mobile-filter-content { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; padding-top: 12px; }
+  .mobile-filter-disclosure:not([open]) > .mobile-filter-content { display: none; }
+  .mobile-filter-today { display: inline-flex; align-items: center; min-height: 44px; font-size: 12px; color: var(--primary-blue); }
+  .projects-page .work-actions > .work-btn-secondary { display: none; }
+  .pixbe-app .work-title { font-weight: 600; letter-spacing: -.6px; }
+  .pixbe-app .projects-page .work-task-card { border-color: var(--border-color); }
+  .pixbe-app .work-time-toolbar { grid-template-columns: 44px minmax(0,1fr) 44px; }
+  .pixbe-app .work-time-toolbar .work-date-step { display: contents; }
+  .work-time-toolbar .work-date-step > button:first-child { display: none; }
+  .work-time-toolbar .work-date-step > button:nth-child(2) { grid-column: 1; grid-row: 2; width: 44px; height: 44px; }
+  .work-time-toolbar .work-date-step > button:nth-child(3) { grid-column: 3; grid-row: 2; width: 44px; height: 44px; }
+  .pixbe-app .work-time-toolbar .work-period-title { grid-column: 2; grid-row: 2; margin: 0; align-self: center; }
+  .work-time-toolbar .mobile-filter-disclosure { grid-column: 1 / -1; }
+  .pixbe-app .work-time-toolbar .work-time-views { grid-column: 1 / -1; grid-row: 1; }
+  .work-time-toolbar .mobile-filter-content > .work-log-search { grid-column: 1 / -1; }
+  .work-time-toolbar .mobile-filter-content > select { width: 100%; max-width: none; }
+  .pixbe-app .timetable-page { padding-top: 16px; }
+  .pixbe-app .settings-studio__rail:has(input:not(:placeholder-shown)) .settings-studio__panes { flex-direction: column; }
+  .organization-onboarding .fs-journey ol { gap: 8px; }
+  .organization-onboarding .fs-progress { padding: 8px; height: auto; min-height: 48px; }
+  .organization-onboarding .fs-field-row { grid-template-columns: minmax(0,1fr); }
+}
+@font-face { font-family:'Plus Jakarta Sans';font-style:normal;font-weight:400;font-display:swap;src:url('/fonts/plus-jakarta-sans-400.ttf') format('truetype'); }
+@font-face { font-family:'Plus Jakarta Sans';font-style:normal;font-weight:500;font-display:swap;src:url('/fonts/plus-jakarta-sans-500.ttf') format('truetype'); }
+@font-face { font-family:'Plus Jakarta Sans';font-style:normal;font-weight:600;font-display:swap;src:url('/fonts/plus-jakarta-sans-600.ttf') format('truetype'); }
+@font-face { font-family:'Plus Jakarta Sans';font-style:normal;font-weight:700;font-display:swap;src:url('/fonts/plus-jakarta-sans-700.ttf') format('truetype'); }
+.people-studio__mobile-location { display: none; }
+@media(max-width:767px) {
+  .pixbe-app .people-roster-panel .people-studio__filters { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+  .pixbe-app .people-roster-panel .people-studio__controls { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); width: 100%; }
+  .pixbe-app .people-roster-panel .mobile-filter-content { grid-template-columns: minmax(0,1fr); }
+  .pixbe-app .people-roster-panel .people-studio__seg { grid-column: 1 / -1; }
+  .people-studio__sheet.people-studio__mobile-row > .people-studio__mobile-meta { display: none; }
+  .people-studio__mobile-location { display: block; margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+  .pixbe-app .people-roster-panel .people-studio__mobile-row { padding: 14px; border-radius: 10px; }
+  .pixbe-app .people-roster-panel .people-studio__mobile-top { align-items: flex-start; }
+  .pixbe-app .people-roster-panel .people-studio__who { align-items: center; }
+  .pixbe-app .people-roster-panel .people-studio__who-name { font-weight: 600; font-size: 13px; }
+  .pixbe-app .people-roster-panel .people-studio__cards { gap: 12px; }
+  .pixbe-app .notifications-page { padding-top: 16px; }
+  .notifications-page > div:first-child { flex-wrap: wrap; gap: 12px; }
+  .notifications-page > div:first-child > div { flex-wrap: wrap; }
+  .notifications-page > div:first-child button { min-height: 40px; }
+  .student-setup-page { padding: 20px 16px max(24px,env(safe-area-inset-bottom)); background: var(--bg-app); }
+  .student-setup-page > div > div { box-shadow: none; }
+  .pixbe-app .dash-page--hr .dash-figures { min-width: 0; }
+  .pixbe-app .dash-page .dash-attendance-table td[data-mobile-title="true"] { padding-bottom: 12px; }
+  .pixbe-app .dash-page .dash-attendance-table td[data-label]::before { color: var(--text-muted); }
+}
+@media(max-width:1023px) {
+  .sidebar-mobile-tools { display: flex; flex-shrink: 0; flex-direction: column; gap: 4px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); }
+  .sidebar-mobile-tools button { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); text-align: left; font-size: 13px; }
+  .sidebar-mobile-tools button:hover { background: var(--bg-surface); color: var(--studio-navy); }
+}
+@media(min-width:768px) and (max-width:1199px) {
+  .timetable-head { flex-direction: column; align-items: stretch; }
+  .timetable-head > div:last-child { flex-wrap: wrap; justify-content: space-between; min-width: 0; }
+}

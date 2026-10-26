@@ -16,6 +16,8 @@ declare global {
         stateProvince?: string;
         postalCode?: string;
         country?: string;
+        createdAt?: string;
+        adminEmail?: string;
       };
       user?: AuthenticatedUser;
       tenantId?: string;

@@ -1,4 +1,5 @@
 import type { AttendanceRegularization } from '../types';
+import { api } from '../services/apiClient';
 
 export function isWfhRegularizationText(value?: string | null): boolean {
   const text = String(value || '').toLowerCase();
@@ -59,4 +60,103 @@ export function splitRegularizationReason(raw: string | null | undefined): {
     return { reason: matched, remarks: remarks || (matched === headTrim ? '' : headTrim) };
   }
   return { reason: 'Forgot Punch In', remarks: full };
+}
+
+function to24HourTime(value: string): string {
+  const match = String(value || '').trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) return '09:00';
+  let hours = parseInt(match[1], 10);
+  const mins = match[2];
+  const meridiem = match[3]?.toUpperCase();
+  if (meridiem === 'PM' && hours < 12) hours += 12;
+  if (meridiem === 'AM' && hours === 12) hours = 0;
+  return `${String(hours).padStart(2, '0')}:${mins}`;
+}
+
+/** Newest WFH regularization status for a calendar day, or null when none exists. */
+export function latestWfhRegularizationStatus(
+  rows: Array<{ date?: string; status?: string; reason?: string; created_at?: string; createdAt?: string }>,
+  date: string
+): string | null {
+  const day = String(date || '').slice(0, 10);
+  const matches = rows.filter((row) => {
+    const rowDate = String(row.date || '').slice(0, 10);
+    return rowDate === day && isWfhRegularizationText(row.reason);
+  });
+  matches.sort((a, b) =>
+    String(b.created_at || b.createdAt || '').localeCompare(String(a.created_at || a.createdAt || ''))
+  );
+  return matches[0] ? String(matches[0].status || '').toLowerCase() : null;
+}
+
+/**
+ * File one pending WFH regularization for the day. Does not invent attendance hours.
+ * A rejected request does not block a later punch from filing a new one.
+ */
+export async function ensurePendingWfhRegularization(input: {
+  employeeId: string;
+  employeeName: string;
+  avatar?: string;
+  department?: string;
+  date: string;
+  shiftStart: string;
+  shiftEnd: string;
+  remarks: string;
+  existing: AttendanceRegularization[];
+}): Promise<
+  | { kind: 'created'; regularization: AttendanceRegularization }
+  | { kind: 'pending' }
+  | { kind: 'approved' }
+> {
+  const day = String(input.date).slice(0, 10);
+  let status: string | null = null;
+  try {
+    const listed = await api.attendance.getRegularizations({ employeeId: input.employeeId });
+    if (listed.success && Array.isArray(listed.data)) {
+      status = latestWfhRegularizationStatus(listed.data, day);
+    }
+  } catch {
+    status = null;
+  }
+  if (!status) {
+    const mine = input.existing.filter(
+      (reg) =>
+        reg.employeeId === input.employeeId &&
+        String(reg.date).slice(0, 10) === day &&
+        isWfhRegularization(reg)
+    );
+    if (mine.some((reg) => reg.status === 'Pending')) status = 'pending';
+    else if (mine.some((reg) => reg.status === 'Approved')) status = 'approved';
+  }
+  if (status === 'pending') return { kind: 'pending' };
+  if (status === 'approved') return { kind: 'approved' };
+
+  const created = await api.attendance.requestRegularization({
+    employeeId: input.employeeId,
+    date: day,
+    requestedCheckIn: to24HourTime(input.shiftStart),
+    requestedCheckOut: to24HourTime(input.shiftEnd),
+    reason: 'Work From Home',
+    remarks: input.remarks || 'Work from home request',
+  });
+  if (!created.success) {
+    throw new Error(created.error?.message || 'Could not submit WFH request');
+  }
+  return {
+    kind: 'created',
+    regularization: {
+      id: created.data?.id || `reg_${Date.now()}`,
+      employeeId: created.data?.employee_id || input.employeeId,
+      employeeName: input.employeeName,
+      avatar: input.avatar || '',
+      department: input.department || '',
+      date: String(created.data?.date || day).slice(0, 10),
+      requestedCheckIn: input.shiftStart,
+      requestedCheckOut: input.shiftEnd,
+      reason: 'Work From Home',
+      remarks: input.remarks || 'Work from home request',
+      status: 'Pending',
+      appliedOn: day,
+    },
+  };
 }

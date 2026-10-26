@@ -30,7 +30,7 @@ export async function runTaskDueReminders(): Promise<void> {
     for (const tenant of tenants) {
       try {
         const n = await withTenantContext(tenant.schema_name, async (_client, query) =>
-          sendDueRemindersForTenant(query, tenant.name)
+          sendDueRemindersForTenant(query, tenant.name, tenant.schema_name)
         );
         sent += n;
       } catch (err) {

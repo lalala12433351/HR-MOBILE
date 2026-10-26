@@ -1,14 +1,16 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { MobileHeader } from './MobileHeader';
+import { Menu, Bell } from 'lucide-react';
+import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { UserPersona, NotificationItem } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { UserAvatar } from '@/components/common/UserAvatar';
-import { OrgBrandMark } from '@/components/common/PixbeBrand';
 import { GoogleIcon } from '@/components/ui/GoogleIcon';
 import { isInstitutionMode } from '@/utils/organizationMode';
+import { flattenWorkspaceNav } from '@/utils/workspaceNav';
 import { compressAvatarImage } from '@/utils/imageUtils';
 import { saveStoredState } from '@/services/store';
 import { api } from '@/services/apiClient';
@@ -44,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileSidebar,
 }) => {
   const router = useRouter();
+  const pathname = usePathname();
   const { state, updateState, triggerToast, logout, deleteNotification, clearAllNotifications } = useApp();
   const [showPersonaMenu, setShowPersonaMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
@@ -224,25 +227,32 @@ export const Header: React.FC<HeaderProps> = ({
       ? state.organization.name
       : (isInstitution ? 'Kite Institute of Aviation' : 'Pixbe Workspace');
 
+  const pageLabel = (() => {
+    if (!pathname || pathname === '/' || pathname === '/dashboard') return 'Home';
+    const match = flattenWorkspaceNav(state.organization, currentPersona).find(
+      (item) => item.path !== '/dashboard' && pathname.startsWith(item.path)
+    );
+    return match?.label || 'Workspace';
+  })();
+
   return (
-    <header className="pixbe-header sticky top-0 z-30 flex h-14 items-center justify-between border-b px-5 lg:px-6 shrink-0 gap-3">
-      {/* Left: Institute / School Name Capsule Selector */}
-      <div className="flex items-center gap-3">
+    <>
+    <React.Suspense fallback={null}><MobileHeader /></React.Suspense>
+    <header className="pixbe-desktop-header pixbe-header sticky top-0 z-30 flex h-[72px] items-center justify-between px-5 lg:px-8 shrink-0 gap-3">
+      <div className="flex items-center gap-3 min-w-0">
         <button
           onClick={onToggleMobileSidebar}
-          className="rounded-[7px] p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] lg:hidden shrink-0 transition-colors cursor-pointer"
-          title="Toggle Menu"
+          className="rounded-[6px] p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] lg:hidden shrink-0 transition-colors cursor-pointer"
+          title="Toggle Menu" aria-label="Open navigation" aria-controls="pixbe-sidebar"
         >
-          <GoogleIcon name="menu" size={20} />
+          <Menu size={18} aria-hidden="true" />
         </button>
 
-        {/* Organization / School Pill Badge */}
-        <div className="inline-flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-[8px] border border-[var(--border-color)] bg-[var(--bg-surface)] select-none">
-          <OrgBrandMark src={state.organization?.logo} />
-          <span className="text-[13px] font-semibold text-[var(--text-primary)] tracking-tight truncate max-w-[200px] sm:max-w-[320px]">
-            {displayOrgName}
-          </span>
-        </div>
+        <nav aria-label="Breadcrumb" className="flex items-center gap-2 min-w-0 text-[13px]">
+          <span className="truncate text-[var(--text-muted)]">{displayOrgName}</span>
+          <span className="header-desktop-crumb text-[var(--text-muted)]" aria-hidden>/</span>
+          <span className="header-desktop-crumb truncate font-semibold text-[var(--studio-ink)]">{pageLabel}</span>
+        </nav>
       </div>
 
       {/* Right Controls: Search anything, Notifications, Profile */}
@@ -251,17 +261,11 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           type="button"
           onClick={onOpenCommandPalette}
-          className="relative hidden sm:flex items-center h-9 bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-[7px] px-3 w-56 md:w-64 transition-[border-color] duration-150 cursor-pointer hover:border-[var(--border-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--primary-blue)] focus-visible:outline-offset-2"
-          aria-label="Search anything"
+          className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--studio-ink)] cursor-pointer"
+          aria-label={`Search anything (${modKey} K)`}
+          title="Search"
         >
-          <GoogleIcon name="search" size={16} className="text-[var(--text-muted)] shrink-0 mr-2.5" />
-          <span className="flex-1 text-left text-[13px] text-[var(--text-muted)] truncate">
-            Search anything
-          </span>
-          <kbd className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] px-1.5 py-0.5 rounded-[5px] border border-[var(--border-color)]">
-            <span>{modKey}</span>
-            <span>K</span>
-          </kbd>
+          <GoogleIcon name="search" size={18} className="shrink-0" />
         </button>
 
         {/* Global Notifications Bell */}
@@ -274,10 +278,10 @@ export const Header: React.FC<HeaderProps> = ({
               setShowNotifMenu(prev => !prev);
               setShowPersonaMenu(false);
             }}
-            className="relative p-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-subtle)] transition-[color,background-color] duration-150 cursor-pointer flex items-center justify-center"
+            className="relative flex h-8 w-8 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--studio-ink)] cursor-pointer"
             title="Notifications"
           >
-            <GoogleIcon name="notifications" size={19} weight={500} />
+            <Bell size={18} aria-hidden="true" />
             {unreadCount > 0 && (
               <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
@@ -432,22 +436,14 @@ export const Header: React.FC<HeaderProps> = ({
               setShowPersonaMenu(prev => !prev);
               setShowNotifMenu(false);
             }}
-            className="flex items-center gap-2.5 pl-1.5 py-1 pr-2 rounded-xl hover:bg-slate-50 dark:hover:bg-[#1e1e24] transition cursor-pointer"
+            className="flex h-8 w-8 items-center justify-center rounded-full cursor-pointer"
             title={`${currentPersona.name} (${roleDisplay})`}
           >
             <UserAvatar
               src={resolvedAvatar}
               name={currentPersona.name}
-              className="w-9 h-9 ring-1.5 ring-slate-200 hover:ring-blue-500 shadow-xs"
+              className="h-8 w-8"
             />
-            <div className="flex flex-col text-left hidden sm:flex">
-              <span className="text-xs font-bold text-[#0f172a] dark:text-white leading-tight">
-                {currentPersona.name}
-              </span>
-              <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-                {roleDisplay}
-              </span>
-            </div>
           </button>
 
           {showPersonaMenu && (
@@ -543,6 +539,6 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
     </header>
+    </>
   );
 };
-

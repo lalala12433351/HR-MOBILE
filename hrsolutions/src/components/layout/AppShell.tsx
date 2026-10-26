@@ -12,16 +12,25 @@ import { ImpersonationBanner } from '@/components/common/ImpersonationBanner';
 import { LicenseBanner } from '@/components/common/LicenseBanner';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { AIAssistantModal } from '@/components/ai/AIAssistantModal';
-import { AppToaster } from '@/components/ui/AppToaster';
-import { isMasterAdminHost } from '@/config/origins';
-import { ChatProvider } from '@/hooks/useChat';
+import { AttendanceSessionGuard } from '@/components/attendance/AttendanceSessionGuard';
+import { NativeShellBootstrap } from '@/components/native/NativeShellBootstrap';
+import { isNativePlatform } from '@/lib/native';
 import { useWorkplaceLocationWatch } from '@/hooks/useWorkplaceLocationWatch';
+import { AppToaster } from '@/components/ui/AppToaster';
+import { DesktopPushPrompt } from '@/components/common/DesktopPushPrompt';
+import { IMPERSONATION_TENANT_KEY, isMasterAdminHost } from '@/config/origins';
+import { ChatProvider } from '@/hooks/useChat';
+import {
+  clearDesktopPushLoginAsk,
+  desktopPushGranted,
+  desktopPushLoginAskPending,
+  syncDesktopPush,
+} from '@/services/desktopPush';
 
 /** Max wait for persona to hydrate from session /me before forcing re-login. */
 const PERSONA_HYDRATE_MS = 4000;
 
 function AppShellContent({ children }: { children?: React.ReactNode }) {
-  useWorkplaceLocationWatch();
   const router = useRouter();
   const pathname = usePathname();
   const {
@@ -46,7 +55,9 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     toggleThemeMode,
   } = useApp();
   const [personaTimedOut, setPersonaTimedOut] = useState(false);
+  const [pushAskOpen, setPushAskOpen] = useState(false);
   const personaHydrateAttempted = useRef(false);
+  useWorkplaceLocationWatch();
 
   const isAuthPage =
     pathname === '/login' ||
@@ -56,6 +67,7 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     pathname === '/accept-invite' ||
     pathname === '/forgot-password' ||
     pathname === '/reset-password' ||
+    pathname === '/change-email' ||
     Boolean(pathname?.startsWith('/student-login'));
   const isDevPreviewPage =
     process.env.NODE_ENV === 'development' && Boolean(pathname?.startsWith('/dev/'));
@@ -78,7 +90,7 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     isEmployeeOnboardingPage ||
     isDevPreviewPage;
 
-  // Strict route protection: authenticated only when a real JWT exists (not a cookie marker)
+  // Strict route protection: AppContext already verified the authorization token before isLoaded.
   useEffect(() => {
     if (!isLoaded || isAuthPage || isMasterAdminPage || isImpersonatePage || isDevPreviewPage) return;
 
@@ -153,6 +165,49 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
 
     return () => window.clearTimeout(timer);
   }, [isLoaded, bypassTenantGates, currentPersona, state.isAuthenticated]);
+
+  useEffect(() => {
+    if (!currentPersona || bypassTenantGates || !state.isAuthenticated || isNativePlatform()) return;
+    let impersonating = false;
+    try {
+      impersonating = Boolean(sessionStorage.getItem(IMPERSONATION_TENANT_KEY));
+    } catch {
+      impersonating = false;
+    }
+    if (impersonating || desktopPushGranted() || !desktopPushLoginAskPending()) {
+      if (impersonating || desktopPushGranted()) clearDesktopPushLoginAsk();
+      return;
+    }
+    if (typeof Notification === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      clearDesktopPushLoginAsk();
+      return;
+    }
+    setPushAskOpen(true);
+  }, [currentPersona, bypassTenantGates, state.isAuthenticated]);
+
+  const dismissPushAsk = () => {
+    clearDesktopPushLoginAsk();
+    setPushAskOpen(false);
+  };
+
+  useEffect(() => {
+    if (!currentPersona || bypassTenantGates || !state.isAuthenticated || isNativePlatform()) return;
+    void syncDesktopPush();
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; url?: string } | null;
+      if (!data || data.type !== 'pixbe-push-open' || typeof data.url !== 'string') return;
+      try {
+        const url = new URL(data.url, window.location.origin);
+        if (url.origin !== window.location.origin) return;
+        router.push(`${url.pathname}${url.search}`);
+      } catch {
+        /* ignore a malformed notification url */
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [currentPersona, bypassTenantGates, state.isAuthenticated, router]);
 
   const handleSessionRecovery = () => {
     logout();
@@ -252,12 +307,11 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
 
   const isChatPage = pathname === '/chat';
   const isPayrollPage = Boolean(pathname?.startsWith('/payroll'));
-  const isFillCanvas = isChatPage || isPayrollPage;
   const isWorkPage = pathname === '/projects' || pathname === '/timesheets';
 
   return (
     <ChatProvider>
-    <div className="flex h-screen w-full bg-[var(--bg-app)] text-[var(--text-primary)] overflow-hidden font-sans">
+    <div data-workspace-page={pathname} className="pixbe-app flex h-screen w-full bg-[var(--bg-app)] text-[var(--text-primary)] overflow-hidden font-sans">
       {/* Fixed Sidebar Dock on Desktop / Slide-over Drawer on Mobile */}
       <Sidebar
         currentPersona={currentPersona}
@@ -266,7 +320,7 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
       />
 
       {/* Main Connected Workspace Area */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-transparent pl-0 lg:pl-[var(--sidebar-width)]">
+      <div className="workspace-canvas flex-1 flex flex-col h-full overflow-hidden min-w-0 bg-transparent pl-0 lg:pl-[var(--sidebar-width)]">
         {/* Impersonation Banner if active */}
         <ImpersonationBanner />
         {!isMasterAdminPage && !isSetupPage && !isEmployeeOnboardingPage && <LicenseBanner />}
@@ -293,8 +347,8 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
           <main className="pixbe-main chat-main flex flex-col flex-1 w-full min-w-0 min-h-0 overflow-hidden relative">
             {children}
           </main>
-        ) : isFillCanvas ? (
-          <main className="pixbe-main flex flex-col flex-1 w-full max-w-[1600px] mx-auto min-w-0 min-h-0 overflow-hidden px-5 sm:px-6 lg:px-8 pt-5 pb-[88px] lg:pb-6 relative">
+        ) : isPayrollPage ? (
+          <main className="pixbe-main flex flex-col flex-1 w-full max-w-[1600px] mx-auto min-w-0 min-h-0 overflow-y-auto px-5 sm:px-6 lg:px-8 pt-5 pb-[88px] lg:pb-6 relative">
             {children}
           </main>
         ) : (
@@ -327,6 +381,10 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
         state={state}
         initialQuery={aiQuery}
       />
+
+      {pushAskOpen ? <DesktopPushPrompt onClose={dismissPushAsk} /> : null}
+      <NativeShellBootstrap />
+      <AttendanceSessionGuard />
     </div>
     </ChatProvider>
   );

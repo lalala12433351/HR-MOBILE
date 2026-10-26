@@ -1,5 +1,6 @@
 'use client';
 
+import { SettingsPageHeader, SettingsButton, SettingsCard, SettingsField, SettingsSwitchRow } from '../settings/SettingsPrimitives';
 import React, { useState } from 'react';
 import { AppState } from '@/services/store';
 import { api } from '@/services/apiClient';
@@ -146,309 +147,43 @@ export const ReportsSettingsView: React.FC<ReportsSettingsViewProps> = ({ state,
   return (
     <div className="settings-page">
       <SettingsToast message={toast} />
-
-      <div className="settings-page__header">
-        <h2 className="settings-page__heading">Reports Settings</h2>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="settings-page__action shrink-0"
-        >
-          {saving ? 'Saving…' : 'Save Changes'}
-        </button>
-      </div>
-
-      {/* 1. Defaults */}
-      <section className="settings-page__card space-y-4">
-        <div className="border-b border-[var(--border-color)] pb-3">
-          <h4 className="settings-page__section-heading">Default Landing</h4>
-          <p className="settings-page__section-description">
-            Choose what opens first when visiting Reports & Analytics
-          </p>
+      <SettingsPageHeader title="Reports" actions={<SettingsButton loading={saving} onClick={handleSave}>{saving ? 'Saving…' : 'Save changes'}</SettingsButton>} />
+      <SettingsCard title="Report defaults">
+        <div className="settings-fields-grid settings-fields-grid--three">
+          <SettingsField label="Default tab"><select value={defaultTab} onChange={(event) => setDefaultTab(event.target.value as 'overview' | 'attendance')}><option value="overview">Overview</option><option value="attendance">Attendance</option></select></SettingsField>
+          <SettingsField label="Default attendance report"><select value={defaultReport} onChange={(event) => setDefaultReport(event.target.value)}>{ATTENDANCE_REPORT_CATALOG.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></SettingsField>
+          <SettingsField label="Default month"><select value={defaultMonthOffset} onChange={(event) => setDefaultMonthOffset(Number(event.target.value) as 0 | -1)}><option value={0}>Current month</option><option value={-1}>Previous month</option></select></SettingsField>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">Default tab</span>
-            <select
-              value={defaultTab}
-              onChange={(e) => setDefaultTab(e.target.value as 'overview' | 'attendance')}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)] cursor-pointer"
-            >
-              <option value="overview">Overview</option>
-              <option value="attendance">Attendance</option>
-            </select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">Default attendance report</span>
-            <select
-              value={defaultReport}
-              onChange={(e) => setDefaultReport(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)] cursor-pointer"
-            >
-              {ATTENDANCE_REPORT_CATALOG.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">Default month</span>
-            <select
-              value={defaultMonthOffset}
-              onChange={(e) => setDefaultMonthOffset(Number(e.target.value) as 0 | -1)}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)] cursor-pointer"
-            >
-              <option value={0}>Current month</option>
-              <option value={-1}>Previous month</option>
-            </select>
-          </label>
+      </SettingsCard>
+      <SettingsCard title="Overview widgets" description="Choose the analytics shown in the overview.">
+        <div className="settings-choice-grid">{OVERVIEW_WIDGET_CATALOG.map((item) => <label key={item.id} className={`settings-page__choice${enabledOverviewWidgets.includes(item.id) ? ' settings-page__choice--active' : ''}`}><input type="checkbox" checked={enabledOverviewWidgets.includes(item.id)} onChange={() => toggleWidget(item.id as OverviewWidgetId)} /><span>{item.name}<span className="settings-choice__description">{item.desc}</span></span></label>)}</div>
+      </SettingsCard>
+      <SettingsCard title="Attendance report categories" description="At least one report must remain available.">
+        <div className="settings-choice-grid">{ATTENDANCE_REPORT_CATALOG.map((item) => <label key={item.id} className={`settings-page__choice${enabledReports.includes(item.id) ? ' settings-page__choice--active' : ''}`}><input type="checkbox" checked={enabledReports.includes(item.id)} onChange={() => toggleReport(item.id)} /><span>{item.name}<span className="settings-choice__description">{item.desc}</span></span></label>)}</div>
+      </SettingsCard>
+      <SettingsCard title="Display & filters">
+        <div>
+          <SettingsSwitchRow title="Display charts" description="Show graphs above report tables." checked={showCharts} onChange={setShowCharts} />
+          <SettingsSwitchRow title="Display metric cards" description="Show summary figures at the top of each view." checked={showKpiCards} onChange={setShowKpiCards} />
+          <SettingsSwitchRow title="Department filter" checked={showDepartmentFilter} onChange={setShowDepartmentFilter} />
+          <SettingsSwitchRow title="Branch filter" checked={showBranchFilter} onChange={setShowBranchFilter} />
+          <SettingsSwitchRow title="Shift filter" checked={showShiftFilter} onChange={setShowShiftFilter} />
         </div>
-      </section>
-
-      {/* 2. Overview widgets */}
-      <section className="settings-page__card space-y-4">
-        <div className="border-b border-[var(--border-color)] pb-3">
-          <h4 className="settings-page__section-heading">Overview Widgets</h4>
-          <p className="settings-page__section-description">
-            Toggle live ops analytics cards on the Overview tab
-          </p>
+      </SettingsCard>
+      <SettingsCard title="Tables & working hours">
+        <div className="settings-fields-grid">
+          <SettingsField label="Rows per page" hint="Between 5 and 100 rows."><input type="number" min={5} max={100} value={rowsPerPage} onChange={(event) => setRowsPerPage(Number(event.target.value))} /></SettingsField>
+          <SettingsField label="Expected hours per day"><input type="number" min={1} max={24} step={0.5} value={expectedHoursPerDay} onChange={(event) => setExpectedHoursPerDay(Number(event.target.value))} /></SettingsField>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {OVERVIEW_WIDGET_CATALOG.map((w) => {
-            const checked = enabledOverviewWidgets.includes(w.id);
-            return (
-              <label
-                key={w.id}
-                className={`flex items-start gap-3 p-3.5 rounded-lg border transition-all cursor-pointer select-none ${
-                  checked ? 'settings-page__choice settings-page__choice--active' : 'settings-page__choice'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleWidget(w.id as OverviewWidgetId)}
-                  className="mt-0.5 h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
-                />
-                <div>
-                  <div className="text-[14px] font-semibold text-[var(--text-primary)]">{w.name}</div>
-                  <div className="settings-page__hint mt-0.5">{w.desc}</div>
-                </div>
-              </label>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* 3. Attendance reports */}
-      <section className="settings-page__card space-y-4">
-        <div className="border-b border-[var(--border-color)] pb-3">
-          <h4 className="settings-page__section-heading">Attendance Report Categories</h4>
-          <p className="settings-page__section-description">
-            Choose which reports appear in the Attendance tab sidebar
-          </p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {ATTENDANCE_REPORT_CATALOG.map((rep) => {
-            const checked = enabledReports.includes(rep.id);
-            return (
-              <label
-                key={rep.id}
-                className={`flex items-start gap-3 p-3.5 rounded-lg border transition-all cursor-pointer select-none ${
-                  checked ? 'settings-page__choice settings-page__choice--active' : 'settings-page__choice'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleReport(rep.id)}
-                  className="mt-0.5 h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
-                />
-                <div>
-                  <div className="text-[14px] font-semibold text-[var(--text-primary)]">{rep.name}</div>
-                  <div className="settings-page__hint mt-0.5">{rep.desc}</div>
-                </div>
-              </label>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* 4. Visuals */}
-      <section className="settings-page__card space-y-4">
-        <div className="border-b border-[var(--border-color)] pb-3">
-          <h4 className="settings-page__section-heading">Visual Elements</h4>
-          <p className="settings-page__section-description">Applies to Overview and Attendance reports</p>
-        </div>
-        <div className="space-y-3">
-          <label className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] transition-all cursor-pointer select-none">
-            <div>
-              <div className="text-[14px] font-semibold text-[var(--text-primary)]">Display charts & graphs</div>
-              <div className="settings-page__hint mt-0.5">Bar, pie and area charts above tables</div>
-            </div>
-            <input
-              type="checkbox"
-              checked={showCharts}
-              onChange={(e) => setShowCharts(e.target.checked)}
-              className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
-            />
-          </label>
-          <label className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] transition-all cursor-pointer select-none">
-            <div>
-              <div className="text-[14px] font-semibold text-[var(--text-primary)]">Display KPI metric cards</div>
-              <div className="settings-page__hint mt-0.5">Summary metrics at the top of each view</div>
-            </div>
-            <input
-              type="checkbox"
-              checked={showKpiCards}
-              onChange={(e) => setShowKpiCards(e.target.checked)}
-              className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
-            />
-          </label>
-        </div>
-      </section>
-
-      {/* 5. Filters */}
-      <section className="settings-page__card space-y-4">
-        <div className="border-b border-[var(--border-color)] pb-3">
-          <h4 className="settings-page__section-heading">Attendance Filters</h4>
-          <p className="settings-page__section-description">Show or hide filter controls on attendance reports</p>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {[
-            { key: 'dept', label: 'Department filter', value: showDepartmentFilter, set: setShowDepartmentFilter },
-            { key: 'branch', label: 'Branch filter', value: showBranchFilter, set: setShowBranchFilter },
-            { key: 'shift', label: 'Shift filter', value: showShiftFilter, set: setShowShiftFilter },
-          ].map((f) => (
-            <label
-              key={f.key}
-              className={`flex items-center gap-3 p-3.5 rounded-lg border transition-all cursor-pointer select-none ${
-                  f.value ? 'settings-page__choice settings-page__choice--active' : 'settings-page__choice'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={f.value}
-                onChange={(e) => f.set(e.target.checked)}
-                className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
-              />
-              <span className="text-xs font-bold text-[var(--text-primary)]">{f.label}</span>
-            </label>
-          ))}
-        </div>
-      </section>
-
-      {/* 6. Table & hours */}
-      <section className="settings-page__card space-y-4">
-        <div className="border-b border-[var(--border-color)] pb-3">
-          <h4 className="settings-page__section-heading">Table & Hours</h4>
-          <p className="settings-page__section-description">Pagination and expected hours for working-hours reports</p>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">Rows per page</span>
-            <input
-              type="number"
-              min={5}
-              max={100}
-              value={rowsPerPage}
-              onChange={(e) => setRowsPerPage(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-mono font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)]"
-            />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-semibold text-[var(--text-secondary)]">Expected hours per day</span>
-            <input
-              type="number"
-              min={1}
-              max={24}
-              step={0.5}
-              value={expectedHoursPerDay}
-              onChange={(e) => setExpectedHoursPerDay(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-xs font-mono font-medium text-[var(--text-primary)] outline-none focus:border-blue-600 focus:bg-[var(--bg-surface)]"
-            />
-          </label>
-        </div>
-      </section>
-
-      {/* 7. Column visibility */}
-      <section className="settings-page__card space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)] pb-3">
-          <div>
-            <h4 className="settings-page__section-heading">Report Column Visibility</h4>
-            <p className="settings-page__section-description">Select a report to customize its table columns</p>
-          </div>
-          <select
-            value={selectedReportForFields}
-            onChange={(e) => setSelectedReportForFields(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-xs font-semibold text-[var(--text-primary)] outline-none focus:border-blue-600 cursor-pointer"
-          >
-            {ATTENDANCE_REPORT_CATALOG.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-          {fieldOptions.map((f) => {
-            const current = visibleFields[selectedReportForFields] || [];
-            const checked = current.includes(f.key);
-            return (
-              <label
-                key={f.key}
-                className={`flex items-center gap-2.5 p-3 rounded-lg border transition-all cursor-pointer select-none ${
-                  checked ? 'settings-page__choice settings-page__choice--active' : 'settings-page__choice'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleField(selectedReportForFields, f.key)}
-                  className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
-                />
-                <span className="text-xs font-semibold text-[var(--text-primary)]">{f.label}</span>
-              </label>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* 8. Export */}
-      <section className="settings-page__card space-y-4">
-        <div className="border-b border-[var(--border-color)] pb-3">
-          <h4 className="settings-page__section-heading">CSV Export</h4>
-          <p className="settings-page__section-description">Control export availability and geofence columns</p>
-        </div>
-        <div className="space-y-3">
-          <label className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] transition-all cursor-pointer select-none">
-            <div>
-              <div className="text-[14px] font-semibold text-[var(--text-primary)]">Allow CSV export</div>
-              <div className="settings-page__hint mt-0.5">Show Export CSV on overview and attendance reports</div>
-            </div>
-            <input
-              type="checkbox"
-              checked={allowCsvExport}
-              onChange={(e) => setAllowCsvExport(e.target.checked)}
-              className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer"
-            />
-          </label>
-          <label className="flex items-center justify-between p-3.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] transition-all cursor-pointer select-none">
-            <div>
-              <div className="text-[14px] font-semibold text-[var(--text-primary)]">Include geofence in daily punch CSV</div>
-              <div className="settings-page__hint mt-0.5">Adds Verified Inside / Outside Geofence column</div>
-            </div>
-            <input
-              type="checkbox"
-              checked={csvIncludeGeofence}
-              onChange={(e) => setCsvIncludeGeofence(e.target.checked)}
-              disabled={!allowCsvExport}
-              className="h-4 w-4 rounded border-[var(--border-strong)] text-blue-600 focus:ring-[var(--primary-blue)] cursor-pointer disabled:opacity-40"
-            />
-          </label>
-        </div>
-      </section>
+      </SettingsCard>
+      <SettingsCard title="Visible columns">
+        <SettingsField label="Report"><select value={selectedReportForFields} onChange={(event) => setSelectedReportForFields(event.target.value)}>{ATTENDANCE_REPORT_CATALOG.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></SettingsField>
+        <div className="settings-choice-grid">{fieldOptions.map((field) => { const checked = (visibleFields[selectedReportForFields] || []).includes(field.key); return <label key={field.key} className={`settings-page__choice${checked ? ' settings-page__choice--active' : ''}`}><input type="checkbox" checked={checked} onChange={() => toggleField(selectedReportForFields, field.key)} /><span>{field.label}</span></label>; })}</div>
+      </SettingsCard>
+      <SettingsCard title="Export permissions"><div>
+        <SettingsSwitchRow title="Allow CSV export" description="Make CSV downloads available on reports." checked={allowCsvExport} onChange={setAllowCsvExport} />
+        <SettingsSwitchRow title="Include geofence in daily punch CSV" description="Add the inside or outside geofence verification column." checked={csvIncludeGeofence} onChange={setCsvIncludeGeofence} disabled={!allowCsvExport} />
+      </div></SettingsCard>
     </div>
   );
 };

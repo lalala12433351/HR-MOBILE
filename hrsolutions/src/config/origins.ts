@@ -4,12 +4,18 @@
  */
 
 const LOCAL_APP_ORIGIN = 'http://localhost:3000';
-const PROD_APP_ORIGIN = 'https://app.pixbe.in';
+/** Canonical tenant app host — used whenever env is missing or still points at localhost. */
+export const APP_PIXBE_IN = 'https://app.pixbe.in';
 const PROD_MASTER_ADMIN_ORIGIN = 'https://masteradmin.pixbe.in';
 
+function isLoopbackOrigin(value: string): boolean {
+  return /https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/i.test(value.trim());
+}
+
 function trimOrigin(value: string | undefined, fallback: string): string {
-  const raw = (value || fallback).trim().replace(/\/+$/, '');
-  return raw || fallback;
+  const raw = (value || '').trim().replace(/\/+$/, '');
+  if (!raw || isLoopbackOrigin(raw)) return fallback;
+  return raw;
 }
 
 function isProductionRuntime(): boolean {
@@ -18,7 +24,7 @@ function isProductionRuntime(): boolean {
 
 export const APP_ORIGIN = trimOrigin(
   typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_APP_ORIGIN : undefined,
-  isProductionRuntime() ? PROD_APP_ORIGIN : LOCAL_APP_ORIGIN
+  isProductionRuntime() ? APP_PIXBE_IN : LOCAL_APP_ORIGIN
 );
 
 export const MASTER_ADMIN_ORIGIN = trimOrigin(

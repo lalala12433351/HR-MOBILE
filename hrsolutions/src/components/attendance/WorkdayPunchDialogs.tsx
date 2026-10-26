@@ -2,20 +2,18 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { useMobileViewport } from '@/hooks/useMobileViewport';
 import { PunchLocationLeafletMap } from '@/components/common/PunchLocationLeafletMap';
 import { reverseGeocodeLatLng } from '@/lib/googleMaps';
-import {
-  getCurrentPosition,
-  getSelfieStream,
-  isNativePlatform,
-} from '@/lib/native';
+import { captureSelfiePhoto, getCurrentPosition, getSelfieStream, isNativePlatform } from '@/lib/native';
+import { captureMirroredSelfie } from '@/utils/selfieCapture';
 
 function formatClock(date: Date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 function formatDate(date: Date) {
-  return date.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' });
+  return date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
 }
 
 function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -78,6 +76,8 @@ export function WorkdayPunchDialogs({
   onClose,
   onConfirm,
 }: WorkdayPunchDialogsProps) {
+  const mobile = useMobileViewport();
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const isWfh = selectedLocation === 'wfh';
   const hasOfficeCoords =
     Number.isFinite(Number(officeLat)) &&
@@ -125,6 +125,7 @@ export function WorkdayPunchDialogs({
         });
         const lat = coords.latitude;
         const lng = coords.longitude;
+        setGpsAccuracy(coords.accuracy ?? null);
         setCurrentLat(lat);
         setCurrentLng(lng);
         setHasDeviceGps(true);
@@ -161,11 +162,13 @@ export function WorkdayPunchDialogs({
             ? isNativePlatform()
               ? 'Location is blocked. Allow location for this app in system settings, then retry.'
               : 'Location is blocked. Allow it in the address bar, then retry.'
-            : 'Unable to retrieve your current location.'
+            : message.includes('not supported')
+              ? 'Geolocation is not supported by your browser.'
+              : 'Unable to retrieve your current location.'
         );
       }
     })();
-  }, [geofenceOptional, hasOfficeCoords, isWfh, locationLabel, officeLat, officeLng, radiusMeters]);
+  }, [geofenceOptional, hasOfficeCoords, isWfh, officeLat, officeLng, radiusMeters]);
 
   useEffect(() => {
     if (!open) {
@@ -227,6 +230,20 @@ export function WorkdayPunchDialogs({
         }
       } catch (err: unknown) {
         if (cancelled) return;
+        if (isNativePlatform()) {
+          try {
+            const dataUrl = await captureSelfiePhoto();
+            if (!cancelled) {
+              setCapturedSelfie(dataUrl);
+              setCameraError(null);
+              setIsCameraLoading(false);
+              setIsCameraReady(true);
+            }
+            return;
+          } catch {
+            // Fall through to the same error state as a blocked browser camera.
+          }
+        }
         const name = err && typeof err === 'object' && 'name' in err ? String((err as { name?: string }).name) : '';
         const message = err instanceof Error ? err.message : '';
         setCameraError(
@@ -274,12 +291,8 @@ export function WorkdayPunchDialogs({
 
   const proceedFromMap = () => {
     if (!isWfh && !geofenceOptional && !hasOfficeCoords) return;
-    if (isWfh || geofenceOptional || insideRadius) {
+    if (isWfh || geofenceOptional || insideRadius || outOfRadiusAction === 'Allow') {
       openSelfieOrFinish(isWfh);
-      return;
-    }
-    if (outOfRadiusAction === 'Allow') {
-      openSelfieOrFinish(true);
       return;
     }
     setStep('confirm_out_radius');
@@ -294,15 +307,9 @@ export function WorkdayPunchDialogs({
     setIsFlashing(true);
     window.setTimeout(() => setIsFlashing(false), 400);
 
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.save();
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-    ctx.restore();
-    setCapturedSelfie(canvas.toDataURL('image/jpeg', 0.92));
+    const dataUrl = captureMirroredSelfie(video);
+    if (!dataUrl) return;
+    setCapturedSelfie(dataUrl);
     stopCamera();
   };
 
@@ -324,7 +331,11 @@ export function WorkdayPunchDialogs({
     !isWfh &&
     hasOfficeCoords &&
     (!hasDeviceGps || gpsStatus !== 'granted');
-  const isPunchDisabled = isLocating || officeCoordsMissing || gpsRequiredMissing || saving;
+  const isPunchDisabled =
+    saving ||
+    officeCoordsMissing ||
+    gpsRequiredMissing ||
+    (isLocating && !isWfh && !geofenceOptional);
 
   const timeLabel = formatClock(now);
   const dateLabel = formatDate(now);
@@ -332,11 +343,11 @@ export function WorkdayPunchDialogs({
   if (step === 'selfie') {
     return (
       <div className="att-overlay" role="presentation">
-        <div className="att-dialog" role="dialog" aria-modal="true" aria-labelledby="att-selfie-title">
+        <div className={'att-dialog' + (capturedSelfie ? ' att-dialog--captured' : '')} role="dialog" aria-modal="true" aria-labelledby="att-selfie-title">
           <div className="att-dialog-head">
-            <h2 id="att-selfie-title">Take photo</h2>
+            <h2 id="att-selfie-title">{capturedSelfie ? (isCheckedIn ? 'Confirm clock out' : 'Confirm punch in') : 'Take attendance photo'}</h2>
             <div className="flex items-center gap-1">
-              <button
+              {!capturedSelfie && <button
                 type="button"
                 className="work-btn-secondary h-9 px-3 text-xs"
                 onClick={() => {
@@ -345,7 +356,7 @@ export function WorkdayPunchDialogs({
                 }}
               >
                 Location
-              </button>
+              </button>}
               <button type="button" className="att-dialog-close" aria-label="Close" onClick={onClose} disabled={saving}>
                 <X className="h-4 w-4" />
               </button>
@@ -359,7 +370,11 @@ export function WorkdayPunchDialogs({
             {cameraError ? (
               <div className="att-dialog-camera-empty">
                 <p>{cameraError}</p>
-                <p>Allow the camera in the address bar, then retry.</p>
+                <p>
+                  {isNativePlatform()
+                    ? 'Allow the camera in system settings, then retry.'
+                    : 'Allow the camera in the address bar, then retry.'}
+                </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   <button type="button" onClick={retryCamera} disabled={isCameraLoading} className="work-btn-primary">
                     {isCameraLoading ? 'Connecting…' : 'Retry camera'}
@@ -387,6 +402,7 @@ export function WorkdayPunchDialogs({
           </div>
 
           <canvas ref={canvasRef} className="hidden" />
+          {mobile && capturedSelfie && <div className="att-photo-location"><strong>{locationLabel}</strong><p>{punchAddress}</p><p>This photo and verified location will be saved with your attendance record.</p></div>}
 
           <div className="att-dialog-foot">
             <div className="att-dialog-meta">
@@ -395,9 +411,9 @@ export function WorkdayPunchDialogs({
             </div>
             {capturedSelfie ? (
               <div className="flex items-center gap-2">
-                <button type="button" className="work-btn-secondary" onClick={retryCamera} disabled={saving}>
+                {!mobile && <button type="button" className="work-btn-secondary" onClick={retryCamera} disabled={saving}>
                   Retake
-                </button>
+                </button>}
                 <button
                   type="button"
                   className="work-btn-primary"
@@ -426,14 +442,14 @@ export function WorkdayPunchDialogs({
   return (
     <div className="att-overlay" role="presentation" onClick={saving ? undefined : onClose}>
       <div
-        className="att-dialog"
+        className={'att-dialog' + (step === 'map' ? ' att-dialog--location' : '')}
         role="dialog"
         aria-modal="true"
         aria-labelledby="att-punch-title"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="att-dialog-head">
-          <h2 id="att-punch-title">{step === 'map' ? 'Confirm location' : 'Outside the office'}</h2>
+          <h2 id="att-punch-title">{step === 'map' ? 'Confirm punch location' : 'Outside the office'}</h2>
           <button type="button" className="att-dialog-close" onClick={onClose} aria-label="Close" disabled={saving}>
             <X className="h-4 w-4" />
           </button>
@@ -460,12 +476,24 @@ export function WorkdayPunchDialogs({
             <div className="att-dialog-alert">
               {isInstitution
                 ? 'Campus attendance is blocked outside the campus boundary. You need to be on campus to punch.'
-                : 'Office attendance is blocked outside the radius. Be at the workplace, or request WFH approval for your manager.'}
+                : outOfRadiusAction === 'Warn'
+                  ? `You are outside ${locationLabel}. You can still punch there, or switch this login to work from home.`
+                  : 'Office attendance is blocked outside the radius. Be at the workplace, or request WFH approval for your manager.'}
             </div>
             <div className="dash-clock-dialog-actions" style={{ justifyContent: 'stretch' }}>
               <button type="button" className="work-btn-secondary flex-1" onClick={() => setStep('map')}>
                 Back to map
               </button>
+              {outOfRadiusAction === 'Warn' && !isInstitution && (
+                <button
+                  type="button"
+                  className="work-btn-secondary flex-1"
+                  onClick={() => openSelfieOrFinish(false)}
+                  disabled={saving}
+                >
+                  Punch at {locationLabel}
+                </button>
+              )}
               {!isInstitution && (
                 <button
                   type="button"
@@ -480,6 +508,13 @@ export function WorkdayPunchDialogs({
           </div>
         )}
 
+        {mobile && step === 'map' && <div className="m2-punch-details">
+          <h3>{isLocating ? 'Finding punch location' : gpsStatus === 'denied' ? 'Location permission required' : !hasDeviceGps ? 'Location not verified' : geofenceOptional ? 'Location detected' : insideRadius ? 'You’re within the office zone' : 'You’re outside the office zone'}</h3>
+          <div><small>Punch location</small><p role="status">{punchAddress}</p></div>
+          <div className="m2-punch-time"><div><strong suppressHydrationWarning>{timeLabel}</strong><small>{dateLabel}</small></div><div><p>{locationLabel}</p><small>{gpsAccuracy != null ? 'GPS accuracy · ' + Math.round(gpsAccuracy) + ' m' : 'Waiting for GPS'}</small></div></div>
+          {gpsStatus === 'denied' && <button type="button" className="work-btn-secondary" onClick={fetchLocation}>Retry GPS</button>}
+          <small>Your location is used only to verify this attendance punch.</small>
+        </div>}
         {step === 'map' && (
           <div className="shrink-0">
             {geofenceOptional && !isWfh && (
@@ -549,6 +584,7 @@ export function WorkdayPunchDialogs({
               >
                 Confirm location
               </button>
+              {mobile && requireSelfie && <small>Next · Take your attendance photo</small>}
             </div>
           </div>
         )}

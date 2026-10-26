@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Check, Search, X } from 'lucide-react';
 import { useChat } from '@/hooks/useChat';
 import type { ChatPerson } from '@/services/chatTypes';
@@ -32,8 +32,28 @@ export function ChatDialogFrame({
   children: React.ReactNode;
   footer: React.ReactNode;
 }) {
+  const titleId = useId();
+  useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const dialog = document.getElementById(titleId)?.closest<HTMLElement>('[role="dialog"]');
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex="0"]') || []).filter((el) => el.getClientRects().length > 0);
+    if (dialog && !dialog.contains(document.activeElement)) focusable()[0]?.focus();
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first) return;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', trapFocus);
+    return () => { document.removeEventListener('keydown', trapFocus); previousFocus?.focus(); };
+  }, [titleId]);
+
   return (
-    <SlideOverDrawer title={title} description={description} onClose={onClose} footer={footer} zClass="z-[80]">
+    <SlideOverDrawer title={title} onClose={onClose} footer={footer} zClass="chat-dialog-overlay z-[80]" panelClassName="chat-drawer" labelledBy={titleId}>
+      {description && <p className="chat-drawer-description">{description}</p>}
       {children}
     </SlideOverDrawer>
   );
@@ -125,20 +145,6 @@ export function NewChatDialog({ open, mode, excludeIds = [], onClose, onSubmit }
         </>
       }
     >
-      {selected.length > 0 && (
-        <ul className="mb-3 flex flex-wrap gap-1.5" aria-label="Selected people">
-          {selected.map((p) => (
-            <li key={p.id} className="flex items-center gap-1.5 rounded-full border border-[#d8e8f2] bg-[#f8fbfe] dark:bg-white/5 dark:border-white/10 py-0.5 pl-1 pr-1.5 text-[12px]">
-              <ChatAvatar name={p.name} src={p.avatarUrl} size={20} />
-              <span className="font-semibold text-[var(--text-primary)]">{p.name}</span>
-              <button type="button" onClick={() => toggle(p)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]" aria-label={`Remove ${p.name}`}>
-                <X className="h-3 w-3" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
       {isGroup && (
         <div className="mb-3">
           <label className={labelClass} htmlFor="new-chat-name">
@@ -166,6 +172,19 @@ export function NewChatDialog({ open, mode, excludeIds = [], onClose, onSubmit }
           className={`${fieldClass} pl-9`}
         />
       </label>
+
+      {selected.length > 0 && (
+        <ul className="my-3 flex flex-wrap gap-1.5" aria-label="Selected people">
+          {selected.map((p) => (
+            <li key={p.id} className="flex items-center gap-1.5 rounded-full border border-[#d8e8f2] bg-[#f8fbfe] dark:bg-white/5 dark:border-white/10 py-0.5 pl-1 pr-1.5 text-[12px]">
+              <span className="font-semibold text-[var(--text-primary)]">{p.name}</span>
+              <button type="button" onClick={() => toggle(p)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]" aria-label={`Remove ${p.name}`}>
+                <X className="h-3 w-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {error && <p className="mt-2 text-[12px] text-[#8b3133] dark:text-red-300">{error}</p>}
 

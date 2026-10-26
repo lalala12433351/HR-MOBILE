@@ -1,4 +1,5 @@
 'use client';
+import { ResponsiveFilters } from '@/components/common/ResponsiveFilters';
 
 import React, { useState, useMemo, useEffect } from 'react';
 import {
@@ -11,9 +12,12 @@ import {
 } from 'lucide-react';
 import { Employee, AccountStatus } from '../../../types';
 import { AppState } from '../../../services/store';
+import { WorkspacePagination } from '@/components/common/WorkspacePagination';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { DepartmentCodeBadge, DepartmentTag } from '@/components/common/DepartmentTag';
 import { buildDepartmentCodeMap } from '@/utils/departmentCode';
+import { alignedDepartment } from '@/utils/departmentTeam';
+import { getMyTeamRoster, TeamNameRecord } from '@/utils/teamAccess';
 
 interface EmployeeTableTabProps {
   state: AppState;
@@ -22,7 +26,6 @@ interface EmployeeTableTabProps {
   isSuperAdmin: boolean;
   isHR: boolean;
   isInstitution: boolean;
-  accessibleEmployees: Employee[];
   initialScope?: 'team' | 'all';
   onScopeChange?: (scope: 'team' | 'all') => void;
   onSelectEmployee: (emp: Employee) => void;
@@ -38,7 +41,6 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
   isSuperAdmin,
   isHR,
   isInstitution,
-  accessibleEmployees,
   initialScope,
   onScopeChange,
   onSelectEmployee,
@@ -47,6 +49,8 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
   onPrintIdCards,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [teamScopeFilter, setTeamScopeFilter] = useState<'team' | 'all'>(
     initialScope || (isManager && !isSuperAdmin && !isHR ? 'team' : 'all')
@@ -64,12 +68,21 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
   const [statusFilter, setStatusFilter] = useState('All');
   const [employmentTypeFilter, setEmploymentTypeFilter] = useState('All');
   const [viewLayout, setViewLayout] = useState<'grouped' | 'flat'>('grouped');
+  useEffect(() => { if (window.matchMedia('(max-width: 767px)').matches) setViewLayout('flat'); }, []);
+
+  const teamRecords = ((state.customOptions as { teamRecords?: TeamNameRecord[] } | undefined)?.teamRecords ||
+    []) as TeamNameRecord[];
+
+  const teamRoster = useMemo(
+    () => getMyTeamRoster(state.currentPersona, state.employees || [], teamRecords),
+    [state.currentPersona, state.employees, state.customOptions]
+  );
 
   const baseEmployeesList = useMemo(() => {
     let list: Employee[];
-    // Team scope → accessible team list; Organization / all → full synced roster
+    // Team scope → same-team roster (peers included); Organization / all → full synced roster
     if (teamScopeFilter === 'team') {
-      list = accessibleEmployees;
+      list = teamRoster;
     } else {
       list = state.employees || [];
     }
@@ -92,6 +105,10 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
           department: 'Management' as any,
           team: 'Executive Leadership',
         };
+      }
+      const department = alignedDepartment(e.department, e.team, state.customOptions?.departments || []);
+      if (department && department !== e.department) {
+        return { ...e, department: department as typeof e.department };
       }
       return e;
     });
@@ -151,7 +168,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
     }
 
     return sanitizedList;
-  }, [isSuperAdmin, isHR, state.employees, accessibleEmployees, teamScopeFilter, state.currentPersona, state.customOptions?.offices]);
+  }, [isSuperAdmin, isHR, state.employees, teamRoster, teamScopeFilter, state.currentPersona, state.customOptions?.offices]);
 
   const departmentCodes = useMemo(() => buildDepartmentCodeMap(state), [state.customOptions]);
   const deptCodeOf = (department?: string) =>
@@ -205,17 +222,21 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
       return matchesSearch && matchesBranch && matchesDept && matchesJob && matchesStatus && matchesEmpType;
     });
   }, [baseEmployeesList, searchQuery, branchFilter, departmentFilter, jobTitleFilter, statusFilter, employmentTypeFilter, state.currentPersona, departmentCodes]);
+  useEffect(() => setPage(1), [searchQuery, branchFilter, departmentFilter, statusFilter, jobTitleFilter, employmentTypeFilter, teamScopeFilter, viewLayout]);
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(filteredEmployees.length / pageSize)));
+  const pagedEmployees = filteredEmployees.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
 
   // Group filtered employees by department
   const groupedByDepartment = useMemo(() => {
     const map: Record<string, Employee[]> = {};
-    filteredEmployees.forEach((emp) => {
+    pagedEmployees.forEach((emp) => {
       const dept = emp.department?.trim() || 'Unassigned';
       if (!map[dept]) map[dept] = [];
       map[dept].push(emp);
     });
     return map;
-  }, [filteredEmployees]);
+  }, [pagedEmployees]);
 
 
   const getStatusBadge = (emp: Employee) => {
@@ -235,7 +256,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
 
     return (
       <span className={`people-studio__status ${tone}`}>
-        {accStatus === 'Activated' ? 'Active' : accStatus}
+        {accStatus === 'Activated' ? 'Active' : accStatus === 'Not Activated' ? 'Inactive' : accStatus}
       </span>
     );
   };
@@ -321,8 +342,8 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
 
   const teamPreviewMembers = useMemo(() => {
     const excludedIds = new Set([currentEmployee?.id, ...managementChain.map((employee) => employee.id)].filter(Boolean));
-    return accessibleEmployees.filter((employee) => !excludedIds.has(employee.id));
-  }, [accessibleEmployees, currentEmployee, managementChain]);
+    return teamRoster.filter((employee) => !excludedIds.has(employee.id));
+  }, [teamRoster, currentEmployee, managementChain]);
 
   const renderEmployeeRow = (emp: Employee, hideDept = false) => {
     const branchText = emp.officeName || emp.location || '—';
@@ -421,7 +442,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
   };
 
   return (
-    <div className="people-studio__panel">
+    <div className="people-studio__panel people-roster-panel">
       {teamScopeFilter === 'team' && (
         <section className="people-studio__sheet people-studio__line">
           <div className="people-studio__line-main">
@@ -491,7 +512,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
             )}
           </div>
 
-          <div className="people-studio__controls">
+          <ResponsiveFilters active={hasActiveFilters}><div className="people-studio__controls">
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
@@ -530,7 +551,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
               className="people-studio__select"
             >
               <option value="All">All statuses</option>
-              <option value="Not Activated">Not Activated</option>
+              <option value="Not Activated">Inactive</option>
               <option value="Invited">Invited</option>
               <option value="Active">Active</option>
               <option value="In Probation">In Probation</option>
@@ -545,6 +566,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
                 type="button"
                 onClick={() => setViewLayout('grouped')}
                 className={viewLayout === 'grouped' ? 'is-on' : ''}
+                aria-pressed={viewLayout === 'grouped'}
               >
                 <Layers3 className="h-3.5 w-3.5" /> Grouped
               </button>
@@ -552,6 +574,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
                 type="button"
                 onClick={() => setViewLayout('flat')}
                 className={viewLayout === 'flat' ? 'is-on' : ''}
+                aria-pressed={viewLayout === 'flat'}
               >
                 <LayoutList className="h-3.5 w-3.5" /> Unified
               </button>
@@ -562,7 +585,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
                 <X className="w-3 h-3" /> Clear
               </button>
             )}
-          </div>
+          </div></ResponsiveFilters>
         </div>
         <div className="people-studio__count">
           <span>
@@ -576,7 +599,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
               className="people-studio__btn people-studio__btn--secondary people-studio__btn--compact"
             >
               <Printer className="h-3.5 w-3.5" />
-              Print ID cards
+              Print this view
             </button>
           )}
         </div>
@@ -625,7 +648,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
                     onClick={() => onSelectEmployee(emp)}
                     className="people-studio__mobile-row"
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') onSelectEmployee(emp);
+                      if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelectEmployee(emp); }
                     }}
                     role="button"
                     tabIndex={0}
@@ -652,7 +675,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
             </div>
           ))
         ) : (
-          filteredEmployees.map((emp) => {
+          pagedEmployees.map((emp) => {
             const branchText = emp.officeName || emp.location || 'No office';
             const managerName = emp.managerName || emp.lineManager?.name;
             const roleLabel =
@@ -663,7 +686,7 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
                 onClick={() => onSelectEmployee(emp)}
                 className="people-studio__sheet people-studio__mobile-row"
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') onSelectEmployee(emp);
+                  if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelectEmployee(emp); }
                 }}
                 role="button"
                 tabIndex={0}
@@ -673,7 +696,8 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
                     <UserAvatar src={emp.avatar} name={emp.name} className="h-9 w-9 shrink-0 text-[11px]" />
                     <div className="people-studio__who-copy">
                       <p className="people-studio__who-name">{emp.name}</p>
-                      <p className="people-studio__who-mail">{emp.email}</p>
+                      <p className="people-studio__who-mail">{roleLabel}</p>
+                          <p className="people-studio__mobile-location">{[branchText,emp.employeeId].filter(Boolean).join(' · ')}</p>
                     </div>
                   </div>
                   {getStatusBadge(emp)}
@@ -765,13 +789,14 @@ export const EmployeeTableTab: React.FC<EmployeeTableTabProps> = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredEmployees.map((emp) => renderEmployeeRow(emp, false))}
+                  {pagedEmployees.map((emp) => renderEmployeeRow(emp, false))}
                 </tbody>
               </table>
             </div>
           </div>
         )}
       </div>
+      <WorkspacePagination total={filteredEmployees.length} page={currentPage} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}/>
     </div>
   );
 };

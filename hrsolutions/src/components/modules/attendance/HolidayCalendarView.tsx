@@ -1,4 +1,5 @@
 'use client';
+import { DateInput } from '@/components/common/DateInput';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
@@ -33,7 +34,7 @@ const toLocalDateStr = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 const weekdayOf = (dateStr: string) =>
-  new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long' });
+  new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long' });
 
 const holidayYear = (h: Holiday) => (h.year ? Number(h.year) : parseInt(h.date?.split('-')[0], 10));
 
@@ -769,6 +770,12 @@ export const HolidayCalendarView: React.FC<HolidayCalendarViewProps> = ({
         </div>
       </div>
 
+      {!isHR && yearHolidays.length === 0 && (
+        <div className={`${ATT_CARD} p-4 text-xs text-[var(--text-secondary)]`}>
+          <span className="font-bold text-[var(--text-primary)]">No holidays published for {activeYear} yet.</span>
+        </div>
+      )}
+
       {isHR && yearHolidays.length === 0 && (
         <div className={`${ATT_CARD} p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3`}>
           <div className="text-xs text-[var(--text-secondary)]">
@@ -979,7 +986,7 @@ export const HolidayCalendarView: React.FC<HolidayCalendarViewProps> = ({
                         className={`w-full text-left px-2 py-1 rounded text-[11px] font-semibold truncate transition-all cursor-pointer flex items-center justify-between gap-1.5 ${
                           isApproved ? theme.chipApproved : theme.chipPending
                         } ${highlightedHolidayId === h.id ? 'ring-2 ring-blue-500 scale-[1.02] shadow-xs' : ''}`}
-                        title={`${h.name} (${isApproved ? 'Approved' : 'Pending Approval'}) - Click to manage`}
+                        title={isHR ? `${h.name} (${isApproved ? 'Approved' : 'Pending Approval'}) — click to manage` : h.name}
                       >
                         <span className="truncate">{h.name}</span>
                         {!isApproved && <span className="ml-auto text-[9px] font-bold opacity-75">Pending</span>}
@@ -1692,13 +1699,7 @@ export const HolidayCalendarView: React.FC<HolidayCalendarViewProps> = ({
                 <label className="text-xs font-semibold text-[var(--text-secondary)]">
                   Holiday Date
                 </label>
-                <input
-                  type="date"
-                  required
-                  value={newHolidayDate}
-                  min={`${activeYear}-01-01`}
-                  max={`${activeYear}-12-31`}
-                  onChange={(e) => {
+                <DateInput required value={newHolidayDate} min={`${activeYear}-01-01`} max={`${activeYear}-12-31`} onChange={(e) => {
                     setNewHolidayDate(e.target.value);
                     setAddHolidayError(null);
                   }}
@@ -1782,6 +1783,7 @@ export const HolidayCalendarView: React.FC<HolidayCalendarViewProps> = ({
                 </div>
               </div>
 
+              {isHR && (
               <div>
                 <span className="text-[var(--text-muted)] block text-[11px] font-medium">Approval Status</span>
                 <div className="mt-1">
@@ -1796,6 +1798,7 @@ export const HolidayCalendarView: React.FC<HolidayCalendarViewProps> = ({
                   )}
                 </div>
               </div>
+              )}
             </div>
 
             {isHR && (

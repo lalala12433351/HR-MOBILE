@@ -11,6 +11,8 @@ import { UpcomingHolidaysCard } from './UpcomingHolidaysCard';
 import { PendingLeavesCard } from './PendingLeavesCard';
 import { DirectorySnapshotCard } from './DirectorySnapshotCard';
 import { EmployeeAttendanceTable } from './EmployeeAttendanceTable';
+import { DashboardHeader } from './DashboardHeader';
+import { TasksCard } from './TasksCard';
 
 function HrDashboardContent() {
   const { loading } = useDashboardContext();
@@ -20,10 +22,8 @@ function HrDashboardContent() {
   }
 
   return (
-    <div className="dash-page">
-      <header className="dash-header">
-        <h1 className="dash-header-title">Review people today</h1>
-      </header>
+    <div className="dash-page dash-page--hr">
+      <DashboardHeader variant="hr" />
 
       <SetupPromptModal />
 
@@ -33,10 +33,11 @@ function HrDashboardContent() {
       </section>
 
       <div className="dash-board">
-        <OnLeaveTodayCard className="dash-span-7" scope="org" limit={8} />
-        <UpcomingHolidaysCard className="dash-span-5" manageHref />
-        <PendingLeavesCard className="dash-span-7" />
-        <DirectorySnapshotCard className="dash-span-5" />
+        <OnLeaveTodayCard className="dash-span-4" scope="org" limit={2} />
+        <UpcomingHolidaysCard className="dash-span-4" limit={2} manageHref />
+        <DirectorySnapshotCard className="dash-span-4" />
+        <PendingLeavesCard className="dash-span-8" />
+        <TasksCard className="dash-span-4" title="People follow-ups" />
         <EmployeeAttendanceTable className="dash-span-12" />
       </div>
     </div>

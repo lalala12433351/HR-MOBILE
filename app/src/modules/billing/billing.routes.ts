@@ -19,9 +19,10 @@ billingRoutes.use(authenticateToken);
 billingRoutes.use(requireTenantContext);
 
 const writeRoles = requireRole(['super_admin', 'hr_manager']);
-const readRoles = requireRole(['super_admin', 'hr_manager', 'manager']);
+// Employees and faculty create billable tasks and need client names. Detail fields stay limited in listClients.
+const clientListRoles = requireRole(['super_admin', 'hr_manager', 'manager', 'employee', 'faculty']);
 
-billingRoutes.get('/clients', readRoles, listClients);
+billingRoutes.get('/clients', clientListRoles, listClients);
 billingRoutes.post('/clients', writeRoles, createClient);
 billingRoutes.patch('/clients/:id', writeRoles, updateClient);
 billingRoutes.get('/unbilled', writeRoles, getUnbilled);

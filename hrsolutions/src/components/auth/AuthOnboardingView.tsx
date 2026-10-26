@@ -1,6 +1,11 @@
 'use client';
 
+import { OnboardingAccount, OnboardingContextBar, OnboardingPageFooter, OnboardingHelp } from '@/components/modules/setup/OnboardingChrome';
+import '@/components/modules/setup/onboarding-studio.css';
+import '@/components/modules/setup/figma-onboarding.css';
+import { WORLD_COUNTRIES } from '@/data/nations';
 import React, { useState, useRef, useEffect } from 'react';
+import { useMobileViewport } from '@/hooks/useMobileViewport';
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { UserPersona, Role, Employee, Student, LicensePlan } from '@/types';
@@ -11,8 +16,8 @@ import { getDefaultState, AppState, saveStoredState } from '@/services/store';
 import { CognitoPasswordPolicyGuide } from '@/components/auth/CognitoPasswordPolicyGuide';
 import { evaluateCognitoPassword } from '@/utils/cognitoPasswordPolicy';
 import { fromApiAuthRole, toAuthSessionRole } from '@/utils/roleMapping';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
-import { PixbeWordmark } from '@/components/common/PixbeBrand';
+import { Eye, EyeOff, Loader2, Building2, GraduationCap, Mail, Check, BadgeCheck } from 'lucide-react';
+import { PixbePixelMark, PixbeWordmark, PixbeDesignWordmark } from '@/components/common/PixbeBrand';
 import '@/components/modules/setup/workspace-setup.css';
 
 interface AuthOnboardingViewProps {
@@ -31,94 +36,27 @@ const ORG_SETUP_STEPS = [
 ] as const;
 
 function WorkspaceTypeIcon({ kind }: { kind: 'Office' | 'Institute' | 'Other' }) {
-  const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
-  return (
-    <svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true" {...common}>
-      {kind === 'Office' && (
-        <>
-          <path d="M10 38V14l14-6 14 6v24H10Z" />
-          <path d="M18 38V24h12v14M17 18h3m8 0h3M17 22h3m8 0h3" />
-          <circle cx="24" cy="31" r="1.5" fill="currentColor" stroke="none" />
-        </>
-      )}
-      {kind === 'Institute' && (
-        <>
-          <path d="M8 20l16-8 16 8-16 8-16-8Z" />
-          <path d="M14 24v8c4 3 16 3 20 0v-8M40 20v14" />
-        </>
-      )}
-      {kind === 'Other' && (
-        <>
-          <rect x="8" y="12" width="32" height="24" rx="3" />
-          <path d="M14 20h20M14 26h12" />
-        </>
-      )}
-    </svg>
-  );
+  if (kind === 'Other') return null;
+  const Icon = kind === 'Office' ? Building2 : GraduationCap;
+  return <Icon size={20} strokeWidth={1.6} aria-hidden="true"/>;
 }
 
-export const AuthSplitLayout: React.FC<{
-  children: React.ReactNode;
-  maxWidth?: string;
-  contentKey?: string;
-}> = ({ children, contentKey }) => {
-  return (
-    <div className="pixbe-auth">
-      <div className="pixbe-auth__bar">
-        <PixbeWordmark className="pixbe-setup__brand text-[15px]" markClassName="h-5 w-5" />
-      </div>
-      <main className="pixbe-auth__main">
-        <div className="pixbe-auth__panel space-y-6">
-          {children}
-        </div>
-      </main>
-    </div>
-  );
-};
+export const AuthSplitLayout: React.FC<{ children: React.ReactNode; maxWidth?: string; contentKey?: string }> = ({ children, contentKey }) => (
+  <div className="figma-auth" data-screen={contentKey}>
+    <header className="m2-auth-header"><button type="button" className="m2-icon-button" aria-label="Go back" onClick={() => { if (window.history.length > 1) window.history.back(); }}><img src="/mobile-v2/auth-back.svg" width="24" height="24" alt="" /></button><span>pixbe</span></header>
+    <PixbeDesignWordmark/>
+    <main className="fa-panel">{children}</main>
+    <footer className="fa-footer"><span>&copy; {new Date().getFullYear()} Pixbe</span><span><span>Privacy</span><OnboardingHelp label="Get help"/></span></footer>
+  </div>
+);
 
-function AuthWizardLayout({
-  children,
-  currentStep,
-}: {
-  children: React.ReactNode;
-  currentStep: number;
-}) {
-  return (
-    <div className="pixbe-setup">
-      <main className="pixbe-setup__main">
-        <aside className="pixbe-setup__rail">
-          <PixbeWordmark className="pixbe-setup__brand text-[15px]" markClassName="h-5 w-5" />
-          <h1>Open your workspace.</h1>
-          <ol className="pixbe-setup__steps">
-            {ORG_SETUP_STEPS.map((step, index) => {
-              const number = index + 1;
-              const status = number < currentStep ? 'done' : number === currentStep ? 'current' : 'upcoming';
-              return (
-                <li key={step.label}>
-                  <button
-                    type="button"
-                    disabled
-                    className={status === 'current' ? 'is-current' : status === 'done' ? 'is-done' : ''}
-                    aria-current={status === 'current' ? 'step' : undefined}
-                  >
-                    <span className="pixbe-setup__step-no">{status === 'done' ? '✓' : number}</span>
-                    <span>
-                      <strong>{step.label}</strong>
-                      <small>{step.detail}</small>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-          <div className="pixbe-setup__illustration">
-            <img src="/pixbe-workspace-plan.png" alt="" />
-          </div>
-        </aside>
-        <section className="pixbe-setup__content">{children}</section>
-      </main>
-    </div>
-  );
+function AuthWizardLayout({ children, currentStep, onStepChange, name, email }: { children: React.ReactNode; currentStep: number; onStepChange: (step: number) => void; name: string; email: string }) {
+  return <div className="figma-setup organization-onboarding" data-step={currentStep}>
+    <main className="fs-shell">
+      <aside className="fs-rail"><div><PixbeDesignWordmark/><div className="fs-journey"><h1>Open your workspace</h1><p>A few details to make Pixbe yours.</p><ol>{ORG_SETUP_STEPS.map((item,index) => { const number = index+1; const status = number < currentStep ? 'done' : number === currentStep ? 'current' : 'upcoming'; return <li key={item.label}><button type="button" className={`fs-progress is-${status}`} disabled={number >= currentStep} onClick={() => onStepChange(number)} aria-current={status === 'current' ? 'step' : undefined}><span className="fs-step-number">{status === 'done' ? <Check size={14}/> : number}</span><span><strong>{item.label}</strong><small>{status === 'done' ? 'Complete' : status === 'current' ? `Step ${number} of 5, Current` : 'Upcoming'}</small></span></button></li>; })}</ol></div></div><OnboardingAccount name={name} email={email}/></aside>
+      <section className="fs-content"><OnboardingContextBar/><div className="fs-form-area">{children}</div><footer className="fs-page-footer"><span>Your progress is saved as you go.</span><span>{String(currentStep).padStart(2,'0')} / 05</span></footer></section>
+    </main>
+  </div>;
 }
 
 export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
@@ -127,6 +65,7 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
   autoLogin,
 }) => {
   const router = useRouter();
+  const mobile = useMobileViewport();
   const { state, updateState, selectPersona, triggerToast, syncWithBackend } = useApp();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -233,6 +172,37 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
   const [country, setCountry] = useState('India');
   const [addressError, setAddressError] = useState('');
 
+  const restoredSetupDraftFor = useRef('');
+  useEffect(() => {
+    if (view !== 'onboarding' || !verificationToken || !verifiedEmail) return;
+    const key = `pixbe_verified_org_setup:${verifiedEmail}`;
+    if (restoredSetupDraftFor.current !== verifiedEmail) {
+      restoredSetupDraftFor.current = verifiedEmail;
+      try {
+        const draft = JSON.parse(sessionStorage.getItem(key) || 'null');
+        if (draft && typeof draft === 'object') {
+          if (typeof draft.companyName === 'string') setCompanyName(draft.companyName);
+          if (typeof draft.companyDomain === 'string') setCompanyDomain(draft.companyDomain);
+          if (typeof draft.companySize === 'string') setCompanySize(draft.companySize);
+          if (typeof draft.streetAddress === 'string') setStreetAddress(draft.streetAddress);
+          if (typeof draft.city === 'string') setCity(draft.city);
+          if (typeof draft.stateProvince === 'string') setStateProvince(draft.stateProvince);
+          if (typeof draft.postalCode === 'string') setPostalCode(draft.postalCode);
+          if (typeof draft.country === 'string') setCountry(draft.country);
+          if (typeof draft.industry === 'string') setIndustry(draft.industry);
+          if (typeof draft.customIndustry === 'string') setCustomIndustry(draft.customIndustry);
+          if (typeof draft.role === 'string') setRole(draft.role);
+          if (typeof draft.customRole === 'string') setCustomRole(draft.customRole);
+          if (['trial','monthly','annual'].includes(draft.billingCycle)) setBillingCycle(draft.billingCycle);
+          if (typeof draft.selectedPlanId === 'string') setSelectedPlanId(draft.selectedPlanId);
+          if (Number.isInteger(draft.step) && draft.step >= 1 && draft.step <= 5) setStep(draft.step);
+          return;
+        }
+      } catch { /* Setup still works when session storage is unavailable. */ }
+    }
+    try { sessionStorage.setItem(key, JSON.stringify({ companyName, companyDomain, companySize, streetAddress, city, stateProvince, postalCode, country, industry, customIndustry, role, customRole, billingCycle, selectedPlanId, step })); } catch { /* Keep the in-memory draft. */ }
+  }, [view, verificationToken, verifiedEmail, companyName, companyDomain, companySize, streetAddress, city, stateProvince, postalCode, country, industry, customIndustry, role, customRole, billingCycle, selectedPlanId, step]);
+
   const validateDomain = (dom: string) => {
     const trimmed = dom.trim().toLowerCase();
     if (!trimmed) return '';
@@ -292,8 +262,8 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
         setDomainError('');
       }
 
-      if (streetAddress.trim().length < 5 || city.trim().length < 2 || country.trim().length < 2) {
-        setAddressError('Enter street address, city, and country.');
+      if (streetAddress.trim().length < 5 || city.trim().length < 2 || !postalCode.trim() || country.trim().length < 2) {
+        setAddressError('Enter street address, city, postcode, and country.');
         hasErr = true;
       } else {
         setAddressError('');
@@ -557,7 +527,8 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
   const requestVerificationCode = async (): Promise<boolean> => {
     setOtpSending(true);
     try {
-      await api.auth.sendVerificationCode({ email: signupEmail.trim().toLowerCase(), name: signupName.trim() });
+      const result = await api.auth.sendVerificationCode({ email: signupEmail.trim().toLowerCase(), name: signupName.trim() });
+      if (!result.success) throw new Error(result.error?.message || 'We could not send the verification email.');
       setOtpCooldown(60);
       return true;
     } catch (err: any) {
@@ -675,7 +646,8 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
     try {
       const cleanSignupEmail = signupEmail.trim().toLowerCase();
       const res = await api.auth.verifyEmail({ email: cleanSignupEmail, code: fullOtp });
-      setVerificationToken(res.data?.verificationToken || '');
+      if (!res.success || !res.data?.verificationToken) throw new Error(res.error?.message || 'This code could not be verified. Please try again.');
+      setVerificationToken(res.data.verificationToken);
       setVerifiedEmail(cleanSignupEmail);
       setView('onboarding');
       setStep(1);
@@ -759,6 +731,7 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
       });
 
       if (res.success && res.data) {
+        try { sessionStorage.removeItem(`pixbe_verified_org_setup:${verifiedEmail || signupEmail.trim().toLowerCase()}`); } catch { /* Storage is optional. */ }
         const { token, tenant, user } = res.data;
         const activeTenantSlug = tenant?.slug || slug;
 
@@ -970,588 +943,82 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
   // ==========================================
   if (view === 'login' || view === 'signup') {
     const isLogin = view === 'login';
-
-    return (
-      <AuthSplitLayout contentKey={isLogin ? 'login' : 'signup'}>
-        <div className="pixbe-setup__heading">
-          <h2>{isLogin ? 'Sign in.' : 'Create an account.'}</h2>
+    const changeAuthView = (next: 'login' | 'signup') => { setSignupNameError(''); setSignupEmailError(''); setSignupPasswordError(''); setLoginError(''); setPasswordMismatch(false); setView(next); };
+    return <AuthSplitLayout contentKey={isLogin ? 'login' : 'register'}>
+      <div className="fa-tabs" role="tablist" aria-label="Authentication mode"><button type="button" role="tab" aria-selected={isLogin} onClick={() => changeAuthView('login')}>Sign in</button><button type="button" role="tab" aria-selected={!isLogin} onClick={() => changeAuthView('signup')}>Register</button></div>
+      <header className="fa-intro"><h1>{isLogin ? (mobile ? 'Welcome back.' : 'Welcome back') : (mobile ? 'Start something good.' : 'Create your account')}</h1><p>{isLogin ? 'Sign in to your Pixbe workspace.' : 'Start with your details. Your workspace comes next.'}</p></header>
+      <form onSubmit={isLogin ? handleLogin : handleSignup} className={`fa-form ${isLogin ? 'is-login' : 'is-register'}`}>
+        <div className="fa-fields">
+          {!isLogin && <div className="fa-field"><label htmlFor="auth-name">Full name *</label><input id="auth-name" name="name" autoComplete="name" required value={signupName} onChange={(event) => { setSignupName(event.target.value); setSignupNameError(''); }} placeholder="Your full name" aria-invalid={!!signupNameError} aria-describedby="auth-name-hint"/><small id="auth-name-hint" className={signupNameError ? 'is-error' : ''}>{signupNameError || 'As it should appear to your team.'}</small></div>}
+          <div className="fa-field"><label htmlFor="auth-email">Email *</label><input id="auth-email" name="email" type={isLogin ? 'text' : 'email'} inputMode="email" autoComplete={isLogin ? 'username' : 'email'} autoCapitalize="none" spellCheck={false} required value={isLogin ? loginEmail : signupEmail} onChange={(event) => { if (isLogin) setLoginEmail(event.target.value); else { setSignupEmail(event.target.value); setSignupEmailError(''); } }} placeholder="you@company.com" aria-invalid={!isLogin && !!signupEmailError} aria-describedby="auth-email-hint"/><small id="auth-email-hint" className={!isLogin && signupEmailError ? 'is-error' : ''}>{isLogin ? 'Use the email linked to your workspace.' : signupEmailError || 'We’ll send a verification code to this address.'}</small></div>
+          <div className="fa-field"><label htmlFor="auth-password">Password *</label><div className="fa-password"><input id="auth-password" name="password" type={showPassword ? 'text' : 'password'} autoComplete={isLogin ? 'current-password' : 'new-password'} required value={isLogin ? loginPassword : signupPassword} onChange={(event) => { if (isLogin) setLoginPassword(event.target.value); else { setSignupPassword(event.target.value); setSignupPasswordError(''); } }} placeholder={isLogin ? 'Your password' : 'Create a secure password'} aria-invalid={!isLogin && !!signupPasswordError}/><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <Eye size={16}/> : <EyeOff size={16}/>}</button></div><small className={signupPasswordError ? 'is-error' : ''}>{isLogin ? 'Show or hide your password using the eye icon.' : signupPasswordError || 'Password requirements'}</small></div>
+          {!isLogin && <><CognitoPasswordPolicyGuide password={signupPassword} showAlways variant="figma"/><div className="fa-field"><label htmlFor="auth-confirm-password">Confirm password *</label><div className="fa-password"><input id="auth-confirm-password" type={showConfirmPassword ? 'text' : 'password'} autoComplete="new-password" required value={signupConfirmPassword} onChange={(event) => { setSignupConfirmPassword(event.target.value); if (event.target.value === signupPassword) setPasswordMismatch(false); }} placeholder="Re-enter password" aria-invalid={passwordMismatch}/><button type="button" aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'} onClick={() => setShowConfirmPassword(!showConfirmPassword)}>{showConfirmPassword ? <Eye size={16}/> : <EyeOff size={16}/>}</button></div><small className={passwordMismatch ? 'is-error' : ''}>{passwordMismatch ? 'Passwords do not match.' : signupConfirmPassword && signupConfirmPassword === signupPassword ? 'Passwords match.' : 'Re-enter your password to confirm.'}</small></div></>}
+          {isLogin && <div className="fa-preferences"><label><input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)}/>Remember me</label><button type="button" onClick={() => router.push('/forgot-password')}>Forgot password?</button></div>}
         </div>
-
-        <div className="setup-chips pixbe-setup__mode" role="tablist" aria-label="Authentication mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isLogin}
-            className={`setup-chip${isLogin ? ' is-on' : ''}`}
-            onClick={() => {
-              setSignupNameError('');
-              setSignupEmailError('');
-              setSignupPasswordError('');
-              setLoginError('');
-              setPasswordMismatch(false);
-              setView('login');
-            }}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!isLogin}
-            className={`setup-chip${!isLogin ? ' is-on' : ''}`}
-            onClick={() => {
-              setSignupNameError('');
-              setSignupEmailError('');
-              setSignupPasswordError('');
-              setLoginError('');
-              setPasswordMismatch(false);
-              setView('signup');
-            }}
-          >
-            Register
-          </button>
-        </div>
-
-        <form onSubmit={isLogin ? handleLogin : handleSignup} className="setup-fields">
-          {!isLogin && (
-            <label className="setup-field">
-              Full name
-              <input
-                type="text"
-                required
-                value={signupName}
-                onChange={(e) => {
-                  setSignupName(e.target.value);
-                  if (signupNameError) setSignupNameError('');
-                }}
-                placeholder="e.g. Asha Patel"
-                aria-invalid={Boolean(signupNameError)}
-              />
-              {signupNameError && <p className="setup-location__hint">{signupNameError}</p>}
-            </label>
-          )}
-
-          <label className="setup-field" htmlFor="auth-email">
-            Email address
-            <input
-              id="auth-email"
-              type={isLogin ? 'text' : 'email'}
-              autoComplete={isLogin ? 'username' : 'email'}
-              inputMode="email"
-              autoCapitalize="none"
-              spellCheck={false}
-              required
-              value={isLogin ? loginEmail : signupEmail}
-              onChange={(e) => {
-                if (isLogin) {
-                  setLoginEmail(e.target.value);
-                } else {
-                  setSignupEmail(e.target.value);
-                  if (signupEmailError) setSignupEmailError('');
-                }
-              }}
-              placeholder="you@company.com"
-              aria-invalid={!isLogin && Boolean(signupEmailError)}
-            />
-            {!isLogin && signupEmailError && <p className="setup-location__hint">{signupEmailError}</p>}
-          </label>
-
-          <label className="setup-field" htmlFor="auth-password">
-            Password
-            <span className="setup-password">
-              <input
-                id="auth-password"
-                type={showPassword ? 'text' : 'password'}
-                autoComplete={isLogin ? 'current-password' : 'new-password'}
-                required
-                value={isLogin ? loginPassword : signupPassword}
-                onChange={(e) => {
-                  if (isLogin) {
-                    setLoginPassword(e.target.value);
-                  } else {
-                    setSignupPassword(e.target.value);
-                    if (signupPasswordError) setSignupPasswordError('');
-                  }
-                }}
-                placeholder={isLogin ? 'Your password' : 'At least 8 characters'}
-                aria-invalid={!isLogin && Boolean(signupPasswordError)}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="setup-icon-btn"
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? (
-                  <EyeOff className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
-                ) : (
-                  <Eye className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
-                )}
-              </button>
-            </span>
-            {!isLogin && (
-              <>
-                <CognitoPasswordPolicyGuide password={signupPassword} showAlways={signupPassword.length > 0} />
-                {signupPasswordError && <p className="setup-location__hint">{signupPasswordError}</p>}
-              </>
-            )}
-          </label>
-
-          {!isLogin && (
-            <label className="setup-field">
-              Confirm password
-              <span className="setup-password">
-                <input
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  required
-                  value={signupConfirmPassword}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSignupConfirmPassword(val);
-                    if (val === signupPassword) setPasswordMismatch(false);
-                  }}
-                  placeholder="Re-enter password"
-                  aria-invalid={passwordMismatch}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="setup-icon-btn"
-                  aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showConfirmPassword ? (
-                    <EyeOff className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
-                  ) : (
-                    <Eye className="w-4 h-4" strokeWidth={1.8} aria-hidden="true" />
-                  )}
-                </button>
-              </span>
-              {passwordMismatch && <p className="setup-location__hint">Passwords do not match.</p>}
-            </label>
-          )}
-
-          {isLogin && (
-            <div className="setup-form-actions">
-              <label className="setup-check">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                />
-                Remember me
-              </label>
-              <button type="button" onClick={() => router.push('/forgot-password')} className="setup-link">
-                Forgot password?
-              </button>
-            </div>
-          )}
-
-          {isLogin && loginError && (
-            <div role="alert" className="pixbe-setup__message is-error">
-              <span>{loginError}</span>
-            </div>
-          )}
-
-          <button type="submit" disabled={isSubmitting} className="setup-button setup-button--primary">
-            {isSubmitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2.2} aria-hidden="true" />
-                <span>{isLogin ? 'Signing in…' : 'Sending code…'}</span>
-              </>
-            ) : (
-              <span>{isLogin ? 'Sign in' : 'Continue to verification'}</span>
-            )}
-          </button>
-        </form>
-
-        {isLogin && (
-          <p className="setup-facts-detail">
-            <button type="button" className="setup-link" onClick={() => router.push('/student-login')}>
-              Student portal
-            </button>
-          </p>
-        )}
-      </AuthSplitLayout>
-    );
+        {isLogin && loginError && <p className="fa-error" role="alert">{loginError}</p>}
+        <div className="fa-submit-area"><button type="submit" className="fa-primary" disabled={isSubmitting}>{isSubmitting && <Loader2 size={16} className="animate-spin"/>}{isSubmitting ? isLogin ? 'Signing in…' : 'Sending code…' : isLogin ? 'Sign in' : mobile ? 'Create account' : 'Continue to verification'}</button>{!isLogin && <p className="fa-terms">By continuing, you agree to Pixbe’s <span>Terms of service</span> and <span>Privacy policy</span>.</p>}</div>
+      </form>
+      <button type="button" className="m2-auth-switch" onClick={() => changeAuthView(isLogin ? 'signup' : 'login')}>{isLogin ? 'New here? Create an account' : 'Already have an account? Sign in'}</button>
+      {isLogin && <section className="fa-student"><h2>Here as a student?</h2><p>Use your institute account to view attendance.</p><button type="button" onClick={() => router.push('/student-login')}>Go to student portal →</button></section>}
+    </AuthSplitLayout>;
   }
 
-  // ==========================================
-  // VIEW 2: OTP EMAIL VERIFICATION
-  // ==========================================
   if (view === 'otp') {
     const otpComplete = otpDigits.join('').length === 6;
-    return (
-      <AuthSplitLayout contentKey="otp">
-        <div className="pixbe-setup__heading">
-          <h2>Enter the code.</h2>
-        </div>
-        <label className="setup-field">
-          Sent to
-          <input type="email" value={signupEmail} readOnly />
-        </label>
-
-        <form onSubmit={handleVerifyOtp} className="setup-fields">
-          <div className="setup-otp" role="group" aria-label="Verification code">
-            {otpDigits.map((digit, i) => (
-              <input
-                key={i}
-                ref={(el) => {
-                  otpInputRefs.current[i] = el;
-                }}
-                type="text"
-                inputMode="numeric"
-                autoComplete={i === 0 ? 'one-time-code' : 'off'}
-                maxLength={1}
-                value={digit}
-                autoFocus={i === 0}
-                onChange={(e) => handleOtpChange(i, e.target.value)}
-                onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                onPaste={handleOtpPaste}
-                onFocus={(e) => e.target.select()}
-                aria-label={`Digit ${i + 1}`}
-                aria-invalid={Boolean(otpError)}
-              />
-            ))}
-          </div>
-
-          {otpError && <p className="setup-location__hint" role="alert">{otpError}</p>}
-
-          <button type="submit" disabled={isSubmitting || !otpComplete} className="setup-button setup-button--primary">
-            {isSubmitting ? 'Verifying…' : 'Verify email'}
-          </button>
-        </form>
-
-        <div className="setup-form-actions">
-          <button
-            type="button"
-            className="setup-link"
-            onClick={() => {
-              setOtpDigits(['', '', '', '', '', '']);
-              setOtpError('');
-              setView('signup');
-            }}
-          >
-            Change email
-          </button>
-          <button
-            type="button"
-            className="setup-link"
-            onClick={handleResendOtp}
-            disabled={otpCooldown > 0 || otpSending}
-          >
-            {otpSending ? 'Sending…' : otpCooldown > 0 ? `Resend in ${otpCooldown}s` : 'Resend code'}
-          </button>
-        </div>
-      </AuthSplitLayout>
-    );
+    return <AuthSplitLayout contentKey="otp">
+      <div className="fa-tabs" role="tablist" aria-label="Authentication mode"><button type="button" role="tab" aria-selected={false} onClick={() => { setOtpError(''); setView('login'); }}>Sign in</button><button type="button" role="tab" aria-selected={true} onClick={() => setView('signup')}>Register</button></div>
+      <div className="fa-mail"><Mail size={20}/></div>
+      <header className="fa-intro"><h1>Check your email</h1><p>Enter the six-digit code we sent to:</p></header>
+      <div className="fa-destination"><strong>{signupEmail}</strong><button type="button" onClick={() => { setOtpDigits(['','','','','','']); setOtpError(''); setView('signup'); }}>Change email</button></div>
+      <form onSubmit={handleVerifyOtp} className="fa-form"><div className="fa-code-field"><label id="verification-code-label">Verification code *</label><div className="fa-code" role="group" aria-labelledby="verification-code-label">{otpDigits.map((digit,index) => <input key={index} ref={(element) => { otpInputRefs.current[index] = element; }} type="text" inputMode="numeric" autoComplete={index === 0 ? 'one-time-code' : 'off'} maxLength={1} value={digit} autoFocus={index === 0} onChange={(event) => handleOtpChange(index,event.target.value)} onKeyDown={(event) => handleOtpKeyDown(index,event)} onPaste={handleOtpPaste} onFocus={(event) => event.target.select()} aria-label={`Digit ${index+1}`} aria-invalid={!!otpError} disabled={isSubmitting}/>)}</div><small>Your code is valid for 10 minutes.</small></div>{otpError && <p className="fa-error" role="alert">{otpError}</p>}<button type="submit" className="fa-primary" disabled={isSubmitting || !otpComplete}>{isSubmitting ? 'Verifying…' : 'Verify email'}</button></form>
+      <div className="fa-resend"><p>Didn’t receive it? Check your spam folder or request a new code.</p><button type="button" onClick={handleResendOtp} disabled={otpCooldown > 0 || otpSending || isSubmitting}>{otpSending ? 'Sending…' : otpCooldown > 0 ? `Resend in ${otpCooldown}s` : 'Resend code'}</button></div>
+    </AuthSplitLayout>;
   }
 
   // ==========================================
   // VIEW 5: ONBOARDING WIZARD
   // ==========================================
   if (view === 'onboarding') {
-    const titleOptions =
-      industry === 'Institute'
-        ? ['Principal / Dean', 'Academic Head', 'Academic Administrator', 'Other']
-        : industry === 'Office'
-          ? ['CEO / Executive Owner', 'HR Manager', 'Operations Lead', 'Other']
-          : ['Executive / Owner', 'Operations Lead', 'Workspace Administrator', 'Other'];
-
-    return (
-      <AuthWizardLayout currentStep={step}>
-        <div
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && event.target instanceof HTMLInputElement && !isSubmitting) {
-              event.preventDefault();
-              handleNextStep();
-            }
-          }}
-        >
-          {step === 1 && (
-            <div className="setup-workplace">
-              <div className="setup-workplace__heading">
-                <h2>Name the organisation.</h2>
-                <p>Include the registered company address.</p>
-              </div>
-              <div className="setup-fields" style={{ marginTop: 32, maxWidth: 520 }}>
-                <label className="setup-field">
-                  Organisation name
-                  <input
-                    type="text"
-                    value={companyName}
-                    onChange={(e) => {
-                      setCompanyName(e.target.value);
-                      if (e.target.value.trim()) setCompanyNameError('');
-                    }}
-                    placeholder="e.g. Northwind or St. Jude Academy"
-                  />
-                  {companyNameError && <p className="setup-location__hint">{companyNameError}</p>}
-                </label>
-                <label className="setup-field">
-                  Domain
-                  <input
-                    type="text"
-                    value={companyDomain}
-                    onChange={(e) => {
-                      setCompanyDomain(e.target.value);
-                      if (e.target.value && !validateDomain(e.target.value)) setDomainError('');
-                    }}
-                    placeholder="e.g. company.com"
-                  />
-                  {domainError && <p className="setup-location__hint">{domainError}</p>}
-                </label>
-                <div>
-                  <p className="setup-field">Headcount</p>
-                  <div className="setup-chips">
-                    {['1-10', '11-50', '51-100', '101-200', '201-500', '500+'].map((size) => (
-                      <button
-                        key={size}
-                        type="button"
-                        className={`setup-chip${companySize === size ? ' is-on' : ''}`}
-                        onClick={() => setCompanySize(size)}
-                      >
-                        {size}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <p className="setup-field" style={{ marginTop: 8 }}>Registered address</p>
-                <label className="setup-field">
-                  Street address
-                  <input
-                    type="text"
-                    value={streetAddress}
-                    onChange={(e) => {
-                      setStreetAddress(e.target.value);
-                      if (addressError) setAddressError('');
-                    }}
-                    placeholder="e.g. 12 MG Road"
-                  />
-                </label>
-                <div className="setup-location__field-row">
-                  <label className="setup-field">
-                    City
-                    <input
-                      type="text"
-                      value={city}
-                      onChange={(e) => {
-                        setCity(e.target.value);
-                        if (addressError) setAddressError('');
-                      }}
-                      placeholder="e.g. Bengaluru"
-                    />
-                  </label>
-                  <label className="setup-field">
-                    State / Province
-                    <input
-                      type="text"
-                      value={stateProvince}
-                      onChange={(e) => setStateProvince(e.target.value)}
-                      placeholder="e.g. Karnataka"
-                    />
-                  </label>
-                </div>
-                <div className="setup-location__field-row">
-                  <label className="setup-field">
-                    Postal / ZIP code
-                    <input
-                      type="text"
-                      value={postalCode}
-                      onChange={(e) => setPostalCode(e.target.value)}
-                      placeholder="e.g. 560001"
-                    />
-                  </label>
-                  <label className="setup-field">
-                    Country
-                    <input
-                      type="text"
-                      value={country}
-                      onChange={(e) => {
-                        setCountry(e.target.value);
-                        if (addressError) setAddressError('');
-                      }}
-                      placeholder="e.g. India"
-                    />
-                  </label>
-                </div>
-                {addressError && <p className="setup-location__hint">{addressError}</p>}
-              </div>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="setup-workplace">
-              <div className="setup-workplace__heading">
-                <h2>What kind of workspace is this?</h2>
-              </div>
-              <div className="setup-mode-list" role="radiogroup" aria-label="Workspace type">
-                {([
-                  { key: 'Office' as const, title: 'Company', detail: 'Departments, attendance, and payroll for a team.' },
-                  { key: 'Institute' as const, title: 'Institute', detail: 'Students, batches, and timetables for a school.' },
-                  { key: 'Other' as const, title: 'Other', detail: 'A custom organisation that is neither of those.' },
-                ]).map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    role="radio"
-                    aria-checked={industry === item.key}
-                    className={`setup-mode${industry === item.key ? ' setup-mode--selected' : ''}`}
-                    onClick={() => {
-                      setIndustry(item.key);
-                      setRole(item.key === 'Institute' ? 'Principal / Dean' : item.key === 'Office' ? 'CEO / Executive Owner' : 'Executive / Owner');
-                    }}
-                  >
-                    <span className="setup-mode__icon"><WorkspaceTypeIcon kind={item.key} /></span>
-                    <span className="setup-mode__copy"><strong>{item.title}</strong><small>{item.detail}</small></span>
-                    <span className="setup-mode__radio" aria-hidden="true" />
-                  </button>
-                ))}
-              </div>
-              {industry === 'Other' && (
-                <label className="setup-field" style={{ marginTop: 24, maxWidth: 520 }}>
-                  Organisation type
-                  <input
-                    type="text"
-                    value={customIndustry}
-                    onChange={(e) => setCustomIndustry(e.target.value)}
-                    placeholder="e.g. Healthcare clinic"
-                    autoFocus
-                  />
-                </label>
-              )}
-              {onboardingError && <p role="alert" className="setup-location__hint">{onboardingError}</p>}
-            </div>
-          )}
-
-          {step === 3 && (
-            <div className="setup-workplace">
-              <div className="setup-workplace__heading">
-                <h2>Choose your title.</h2>
-              </div>
-              <div className="setup-chips" style={{ marginTop: 32 }} role="radiogroup" aria-label="Your title">
-                {titleOptions.map((title) => (
-                  <button
-                    key={title}
-                    type="button"
-                    role="radio"
-                    aria-checked={role === title}
-                    className={`setup-chip${role === title ? ' is-on' : ''}`}
-                    onClick={() => setRole(title)}
-                  >
-                    {title}
-                  </button>
-                ))}
-              </div>
-              {role === 'Other' && (
-                <label className="setup-field" style={{ marginTop: 24, maxWidth: 520 }}>
-                  Title
-                  <input
-                    type="text"
-                    value={customRole}
-                    onChange={(e) => setCustomRole(e.target.value)}
-                    placeholder={industry === 'Institute' ? 'e.g. Registrar' : 'e.g. Operations Director'}
-                    autoFocus
-                  />
-                </label>
-              )}
-              {onboardingError && <p role="alert" className="setup-location__hint">{onboardingError}</p>}
-            </div>
-          )}
-
-          {step === 4 && (
-            <div className="setup-workplace">
-              <div className="setup-workplace__heading">
-                <h2>Choose a license.</h2>
-              </div>
-              <div className="setup-chips" style={{ marginTop: 24 }} role="radiogroup" aria-label="License phase">
-                <button type="button" role="radio" aria-checked={billingCycle === 'trial'} className={`setup-chip${billingCycle === 'trial' ? ' is-on' : ''}`} onClick={() => setBillingCycle('trial')}>Trial</button>
-                <button type="button" role="radio" aria-checked={billingCycle === 'monthly'} className={`setup-chip${billingCycle === 'monthly' ? ' is-on' : ''}`} onClick={() => setBillingCycle('monthly')}>Monthly</button>
-                <button type="button" role="radio" aria-checked={billingCycle === 'annual'} className={`setup-chip${billingCycle === 'annual' ? ' is-on' : ''}`} onClick={() => setBillingCycle('annual')}>Annual</button>
-              </div>
-              {plansLoading && <p className="setup-location__hint" style={{ marginTop: 16 }}>Loading plans…</p>}
-              <div className="setup-mode-list" role="radiogroup" aria-label="License plans" style={{ marginTop: 20 }}>
-                {licensePlans.map((plan) => {
-                  const price = billingCycle === 'annual' ? plan.priceAnnual : plan.priceMonthly;
-                  const trialDays = plan.trialDays > 0 ? plan.trialDays : 14;
-                  const selected = selectedPlanId === plan.id;
-                  const priceLabel =
-                    billingCycle === 'trial'
-                      ? price
-                        ? `Free for ${trialDays} days · then $${price}/mo`
-                        : `${trialDays}-day trial`
-                      : price
-                        ? `$${price}/${billingCycle === 'annual' ? 'yr' : 'mo'}`
-                        : 'Included';
-                  return (
-                    <button
-                      key={plan.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      className={`setup-mode${selected ? ' setup-mode--selected' : ''}`}
-                      onClick={() => {
-                        setSelectedPlanId(plan.id);
-                        setOnboardingError('');
-                      }}
-                    >
-                      <span className="setup-mode__copy">
-                        <strong>{plan.name}</strong>
-                        <small>
-                          {priceLabel} · {plan.maxSeats} seats
-                        </small>
-                        {(plan.features || []).slice(0, 4).map((feature) => (
-                          <small key={feature}>{feature}</small>
-                        ))}
-                      </span>
-                      <span className="setup-mode__radio" aria-hidden="true" />
-                    </button>
-                  );
-                })}
-              </div>
-              {onboardingError && <p role="alert" className="setup-location__hint">{onboardingError}</p>}
-            </div>
-          )}
-
-          {step === 5 && (
-            <div className="setup-workplace">
-              <div className="setup-workplace__heading">
-                <h2>Create the workspace.</h2>
-              </div>
-              <div className="setup-facts">
-                <span><strong>{companyName || '—'}</strong> organisation</span>
-                <span><strong>{industry === 'Office' ? 'Company' : industry === 'Institute' ? 'Institute' : customIndustry || 'Other'}</strong> type</span>
-                <span><strong>{companySize}</strong> headcount</span>
-                <span><strong>{[streetAddress, city, stateProvince, postalCode, country].map((part) => part.trim()).filter(Boolean).join(', ') || '—'}</strong> address</span>
-                <span><strong>{role === 'Other' ? customRole || 'Other' : role}</strong> title</span>
-                <span>
-                  <strong>{licensePlans.find((p) => p.id === selectedPlanId)?.name || '—'}</strong>
-                  {billingCycle === 'trial'
-                    ? ` · ${licensePlans.find((p) => p.id === selectedPlanId)?.trialDays || 14}-day trial`
-                    : ` · ${billingCycle} license`}
-                </span>
-              </div>
-              {onboardingError && <div role="alert" className="pixbe-setup__message is-error"><span>{onboardingError}</span></div>}
-              <div className="setup-next">
-                <h3>What happens next</h3>
-                <p>After this, you set workplaces, structure, hours, and invitations, then launch into the dashboard.</p>
-              </div>
-            </div>
-          )}
-
-          <div className="setup-workplace__footer">
-            {step === 1 ? (
-              <button type="button" className="setup-button setup-button--secondary" onClick={() => setView('login')}>Cancel</button>
-            ) : (
-              <button type="button" className="setup-button setup-button--secondary" onClick={() => setStep((prev) => Math.max(1, prev - 1) as typeof prev)}>Back</button>
-            )}
-            <button type="button" className="setup-button setup-button--primary" disabled={isSubmitting || (step === 4 && !selectedPlanId)} onClick={handleNextStep}>
-              {isSubmitting ? 'Creating…' : step === 5 ? 'Create workspace' : 'Continue'}
-              {!isSubmitting && <span aria-hidden="true">→</span>}
-            </button>
+    const typeLabel = industry === 'Office' ? 'Company' : industry === 'Institute' ? 'Institute' : customIndustry || 'Other';
+    const titleOptions = industry === 'Institute'
+      ? [{ value: 'Principal / Dean', label: 'Principal / Dean' }, { value: 'Academic Head', label: 'Academic Head' }, { value: 'Academic Administrator', label: 'Academic Administrator' }, { value: 'Other', label: 'Other' }]
+      : industry === 'Office'
+        ? [{ value: 'CEO / Executive Owner', label: 'Owner' }, { value: 'HR Manager', label: 'HR' }, { value: 'Operations Lead', label: 'Manager' }, { value: 'Other', label: 'Other' }]
+        : [{ value: 'Executive / Owner', label: 'Owner' }, { value: 'Operations Lead', label: 'Manager' }, { value: 'Workspace Administrator', label: 'Administrator' }, { value: 'Other', label: 'Other' }];
+    const titleLabel = role === 'Other' ? customRole || 'Other' : titleOptions.find((option) => option.value === role)?.label || role;
+    const plan = licensePlans.find((item) => item.id === selectedPlanId);
+    const money = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value);
+    const annualSaving = plan ? Math.max(0, plan.priceMonthly * 12 - plan.priceAnnual) : 0;
+    const reviewRows = [
+      { label: 'Organisation', value: `${companyName}, ${companySize} people`, edit: 1 },
+      { label: 'Registered address', value: [streetAddress,city,stateProvince,postalCode,country].filter(Boolean).join(', '), edit: 1 },
+      { label: 'Type & title', value: `${typeLabel}, ${titleLabel}`, edit: 2 },
+      { label: 'License', value: `${plan?.name || 'Selected plan'} · ${billingCycle === 'trial' ? `${plan?.trialDays || 14}-day trial` : billingCycle === 'annual' ? `${money(plan?.priceAnnual || 0)} / year` : `${money(plan?.priceMonthly || 0)} / month`}${plan ? ` · ${plan.maxSeats} seats` : ''}`, edit: 4 },
+      { label: 'Workspace owner', value: `${signupName}, ${verifiedEmail || signupEmail}`, edit: 0 },
+    ];
+    return <AuthWizardLayout currentStep={step} onStepChange={(next) => setStep(next as typeof step)} name={signupName} email={verifiedEmail || signupEmail}>
+      <div className="fs-form" onKeyDown={(event) => { if (event.key === 'Enter' && event.target instanceof HTMLInputElement && !isSubmitting) { event.preventDefault(); handleNextStep(); } }}>
+        {step === 1 && <section className="fs-step">
+          <header className="fs-heading"><h2>Tell us about your organisation</h2><p>These details will identify your workspace. You can update them later in settings.</p></header>
+          <div className="fs-fields">
+            <div className="fs-field"><label htmlFor="org-name">Organisation name *</label><input id="org-name" value={companyName} onChange={(event) => { setCompanyName(event.target.value); setCompanyNameError(''); }} placeholder="Organisation name" aria-invalid={!!companyNameError}/><small className={companyNameError ? 'is-error' : ''}>{companyNameError || 'The name your team will see in Pixbe.'}</small></div>
+            <div className="fs-field"><label htmlFor="org-size">Organisation size *</label><select id="org-size" value={companySize} onChange={(event) => setCompanySize(event.target.value)}>{['1-10','11-50','51-100','101-200','201-500','500+'].map((size) => <option key={size} value={size}>{size} people</option>)}</select><small>Choose your total team size, not just your first invitees.</small></div>
+            <div className="fs-field"><label htmlFor="org-address">Registered address *</label><input id="org-address" value={streetAddress} onChange={(event) => { setStreetAddress(event.target.value); setAddressError(''); }} placeholder="Street address of your registered office"/><small>Street address of your registered office.</small></div>
+            <div className="fs-field-row"><div className="fs-field"><label htmlFor="org-city">City *</label><input id="org-city" value={city} onChange={(event) => { setCity(event.target.value); setAddressError(''); }}/></div><div className="fs-field"><label htmlFor="org-postcode">Postcode *</label><input id="org-postcode" value={postalCode} onChange={(event) => setPostalCode(event.target.value)}/></div></div>
+            <div className="fs-field fs-country-field"><label htmlFor="org-country">Country *</label><select id="org-country" value={country} onChange={(event) => { setCountry(event.target.value); setAddressError(''); }}>{!WORLD_COUNTRIES.includes(country) && country && <option>{country}</option>}{WORLD_COUNTRIES.map((name) => <option key={name}>{name}</option>)}</select><details className="fs-extra"><summary>More details</summary><div><div className="fs-field"><label htmlFor="org-domain">Domain (optional)</label><input id="org-domain" value={companyDomain} onChange={(event) => { setCompanyDomain(event.target.value); setDomainError(''); }} placeholder="company.com"/>{domainError && <small className="is-error">{domainError}</small>}</div><div className="fs-field"><label htmlFor="org-province">State / Province (optional)</label><input id="org-province" value={stateProvince} onChange={(event) => setStateProvince(event.target.value)}/></div></div></details></div>
           </div>
-        </div>
-      </AuthWizardLayout>
-    );
+          {addressError && <p className="fa-error" role="alert">{addressError}</p>}
+          <aside className="fs-notice"><p>Your registered address stays private to workspace administrators.</p></aside>
+        </section>}
+        {step === 2 && <section className="fs-step"><header className="fs-heading"><h2>What kind of organisation are you?</h2><p>We’ll use this to tailor roles and setup options for {companyName || 'your workspace'}.</p></header><div className="fs-type-field"><label>Organisation type *</label><div className="fs-type-options" role="radiogroup" aria-label="Workspace type">{([{ key: 'Office', title: 'Company', detail: 'Bring teams, projects and operations together.' }, { key: 'Institute', title: 'Institute', detail: 'Connect departments, faculty and learners.' }, { key: 'Other', title: 'Other', detail: 'For nonprofits, associations and other organisations.' }] as const).map((item) => <button type="button" role="radio" aria-checked={industry === item.key} className="fs-choice" key={item.key} onClick={() => { setIndustry(item.key); setRole(item.key === 'Institute' ? 'Principal / Dean' : item.key === 'Office' ? 'CEO / Executive Owner' : 'Executive / Owner'); }}><WorkspaceTypeIcon kind={item.key}/><strong>{item.title}</strong><span>{item.detail}</span><i aria-hidden="true"/></button>)}</div></div>{industry === 'Other' && <div className="fs-field"><label htmlFor="org-custom-type">Organisation type *</label><input id="org-custom-type" value={customIndustry} onChange={(event) => setCustomIndustry(event.target.value)} placeholder="Describe your organisation"/></div>}<aside className="fs-notice"><strong>{typeLabel} selected</strong><p>Next, choose your title at {companyName || 'your workspace'}.{industry === 'Office' ? ' Company roles include Owner, HR and Manager.' : ''}</p></aside><p className="fs-hint">For schools and colleges, choose Institute to use education-specific roles.</p></section>}
+        {step === 3 && <section className="fs-step"><header className="fs-heading"><h2>What’s your role?</h2><p>Choose the title that best describes your role at {companyName || 'your workspace'}.</p></header><aside className="fs-notice fs-context-choice"><div><p>Organisation type</p><strong>{typeLabel}, {companyName}</strong></div><button type="button" onClick={() => setStep(2)}>Change</button></aside><div><label className="fs-group-label">Your title *</label><div className="fs-title-options" role="radiogroup" aria-label="Your title">{titleOptions.map((option) => <button key={option.value} type="button" role="radio" aria-checked={role === option.value} onClick={() => setRole(option.value)}>{role === option.value && <Check size={14}/>} {option.label}</button>)}</div><p className="fs-hint">Showing titles for {industry === 'Office' ? 'a company' : industry === 'Institute' ? 'an institute' : 'your organisation'}. Select one to continue.</p></div>{role === 'Other' && <div className="fs-field"><label htmlFor="org-custom-title">Your title *</label><input id="org-custom-title" value={customRole} onChange={(event) => setCustomRole(event.target.value)} placeholder="Your title"/></div>}<aside className="fs-notice"><strong>You’ll be the workspace owner</strong><p>You can manage billing, invite people and assign access. Titles and team permissions can be changed in settings.</p></aside><p className="fs-hint">Setting up an institute instead? Choose Institute in the previous step for titles such as Principal, Administrator and Faculty.</p></section>}
+        {step === 4 && <section className="fs-step"><header className="fs-heading"><h2>Choose your workspace plan</h2><p>{plan ? `Start with ${plan.maxSeats} seats for ${companyName || 'your workspace'}. You can add more seats as your team grows.` : 'Choose a plan for your workspace.'}</p></header>{licensePlans.length > 1 && <div className="fs-field"><label htmlFor="org-license-product">Workspace plan</label><select id="org-license-product" value={selectedPlanId} onChange={(event) => setSelectedPlanId(event.target.value)}>{licensePlans.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></div>}{plansLoading ? <p className="fs-hint" role="status">Loading plans…</p> : <div className="fs-license-options" role="radiogroup" aria-label="License phase">{(['trial','monthly','annual'] as const).map((cycle) => <button type="button" role="radio" aria-checked={billingCycle === cycle} disabled={!plan} key={cycle} className="fs-license-card" onClick={() => { setBillingCycle(cycle); setOnboardingError(''); }}><header><strong>{cycle === 'trial' ? 'Trial' : cycle === 'monthly' ? 'Monthly' : 'Annual'}</strong><i aria-hidden="true"/></header><div><span className="fs-price">{cycle === 'trial' ? money(0) : plan ? money(cycle === 'annual' ? plan.priceAnnual : plan.priceMonthly) : '—'}</span><p>{cycle === 'trial' ? `for ${plan?.trialDays || 14} days` : cycle === 'annual' ? 'per year' : 'per month'}</p><strong className="fs-seat-count">{plan?.maxSeats || '—'} seats{cycle === 'trial' ? ', no card required' : ''}</strong></div><ul>{(plan?.features || []).slice(0,3).map((feature) => <li key={feature}><Check size={15}/><span>{feature}</span></li>)}</ul></button>)}</div>}<p className="fs-hint">Prices and available seats are supplied by your selected workspace plan.</p><aside className="fs-notice"><strong>{billingCycle === 'annual' ? `Annual selected${annualSaving ? `, Save ${money(annualSaving)} a year` : ''}` : billingCycle === 'monthly' ? 'Monthly selected' : 'Trial selected'}</strong><p>{billingCycle === 'annual' && plan ? `${money(plan.priceAnnual)} billed yearly for ${plan.maxSeats} seats. ` : billingCycle === 'monthly' && plan ? `${money(plan.priceMonthly)} billed monthly for ${plan.maxSeats} seats. ` : `Try your workspace for ${plan?.trialDays || 14} days. `}You’ll add billing details during workspace setup; nothing is charged now.</p></aside></section>}
+        {step === 5 && <section className="fs-step"><header className="fs-heading"><h2>Ready to open {companyName || 'your workspace'}?</h2><p>Review your details before creating your workspace. You can go back to make changes.</p></header><section className="fs-summary"><header><div><h3>{companyName}</h3><p>{typeLabel} workspace</p></div><BadgeCheck size={20}/></header><dl>{reviewRows.map((row) => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd>{row.edit ? <button type="button" onClick={() => setStep(row.edit as typeof step)}>Edit</button> : <span/>}</div>)}</dl></section><aside className="fs-notice"><strong>Your workspace, your next step</strong><p>Creating your workspace won’t invite anyone or charge your card. We’ll guide you through billing and team setup next.</p></aside></section>}
+        {onboardingError && <p className="fa-error" role="alert">{onboardingError}</p>}
+        <div className="fs-actions"><button type="button" className="fs-secondary" onClick={() => step === 1 ? setView('signup') : setStep((previous) => Math.max(1,previous-1) as typeof previous)}>Back</button><button type="button" className="fs-primary" disabled={isSubmitting || step === 4 && !selectedPlanId} onClick={handleNextStep}>{isSubmitting ? 'Creating…' : step === 5 ? 'Create workspace' : 'Continue'}</button></div>
+        {step === 5 && <p className="fs-hint fs-after-action">Next, finish setup, add billing details and invite your team.</p>}
+      </div>
+    </AuthWizardLayout>;
   }
 
   return null;

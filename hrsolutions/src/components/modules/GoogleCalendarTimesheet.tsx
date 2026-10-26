@@ -1,4 +1,5 @@
 'use client';
+import { DateInput } from '@/components/common/DateInput';
 
 import { api } from '../../services/apiClient';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
@@ -34,6 +35,7 @@ import {
 } from 'lucide-react';
 import { AppState, isTestEntity } from '../../services/store';
 import { TimesheetEntry } from '../../types';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 
 interface GoogleCalendarTimesheetProps {
   state: AppState;
@@ -202,6 +204,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
   // New / Edit Work Log Modal
   const [showLogModal, setShowLogModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingDeleteEntryId, setPendingDeleteEntryId] = useState<string | null>(null);
   const [logProjId, setLogProjId] = useState(state.projects[0]?.id || '');
   const [isCustomTask, setIsCustomTask] = useState(true); // Default to custom task input for maximum flexibility!
   const [logTaskId, setLogTaskId] = useState(state.tasks[0]?.id || '');
@@ -372,35 +375,40 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
   };
 
   // Delete Work Log
-  const handleDeleteEntry = async (entryId: string) => {
-    if (confirm('Are you sure you want to delete this work log event?')) {
-      setIsSaving(true);
-      try {
-        await api.projects.deleteTimesheet(entryId);
-        onUpdateState((prev) => ({
-          ...prev,
-          timesheets: prev.timesheets.filter((t) => t.id !== entryId),
-          auditLogs: [
-            {
-              id: `log_${Date.now()}`,
-              timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-              user: prev.currentPersona.name,
-              action: 'DELETED_WORK_LOG',
-              entity: 'TimesheetEntry',
-              entityId: entryId,
-              ipAddress: '127.0.0.1',
-              details: `Deleted Timesheet Entry ${entryId}`,
-            },
-            ...prev.auditLogs,
-          ],
-        }));
-        setSelectedEntry(null);
-      } catch (err) {
-        console.error('Failed to delete timesheet', err);
-        alert('Failed to delete timesheet block.');
-      } finally {
-        setIsSaving(false);
-      }
+  const handleDeleteEntry = (entryId: string) => {
+    setPendingDeleteEntryId(entryId);
+  };
+
+  const confirmDeleteEntry = async () => {
+    const entryId = pendingDeleteEntryId;
+    if (!entryId) return;
+    setIsSaving(true);
+    try {
+      await api.projects.deleteTimesheet(entryId);
+      onUpdateState((prev) => ({
+        ...prev,
+        timesheets: prev.timesheets.filter((t) => t.id !== entryId),
+        auditLogs: [
+          {
+            id: `log_${Date.now()}`,
+            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+            user: prev.currentPersona.name,
+            action: 'DELETED_WORK_LOG',
+            entity: 'TimesheetEntry',
+            entityId: entryId,
+            ipAddress: '127.0.0.1',
+            details: `Deleted Timesheet Entry ${entryId}`,
+          },
+          ...prev.auditLogs,
+        ],
+      }));
+      setSelectedEntry(null);
+      setPendingDeleteEntryId(null);
+    } catch (err) {
+      console.error('Failed to delete timesheet', err);
+      alert('Failed to delete timesheet block.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -486,7 +494,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
           billable: logBillable,
           category: logCategory,
           description: logDescription || 'Logged work event',
-          status: 'Submitted',
+          status: state.currentPersona.role === 'super_admin' ? 'Approved' : 'Submitted',
         };
 
         onUpdateState((prev) => ({
@@ -705,7 +713,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
           <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
             <CalendarIcon className="h-5 w-5 text-blue-400" />
             <span>
-              {new Date(currentDateStr).toLocaleDateString('en-US', {
+              {new Date(currentDateStr).toLocaleDateString('en-GB', {
                 weekday: 'short',
                 month: 'short',
                 day: 'numeric',
@@ -783,7 +791,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
           <div className="rounded-lg border border-[#282830] bg-[#121214] p-4 space-y-4">
             <div className="flex items-center justify-between border-b border-[#282830] pb-2">
               <span className="text-xs font-bold uppercase tracking-widest text-white">
-                {new Date(currentDateStr).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                {new Date(currentDateStr).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
               </span>
               <span className="text-[10px] font-bold text-blue-400 bg-blue-950/40 border border-blue-800/40 px-2 py-0.5 rounded-lg font-mono">
                 IST Timezone
@@ -943,7 +951,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-[11px] font-bold text-[#9e9ea7] uppercase tracking-wider">
-                      {new Date(currentDateStr).toLocaleDateString('en-US', {
+                      {new Date(currentDateStr).toLocaleDateString('en-GB', {
                         weekday: 'long',
                         month: 'long',
                         day: 'numeric',
@@ -1400,11 +1408,7 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
                     Selected Day: {logDate === new Date().toISOString().substring(0, 10) ? 'Today' : logDate}
                   </span>
                 </div>
-                <input
-                  type="date"
-                  required
-                  value={logDate}
-                  onChange={(e) => setLogDate(e.target.value)}
+                <DateInput required value={logDate} onChange={(e) => setLogDate(e.target.value)}
                   className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2 font-bold text-white outline-none focus:border-[var(--primary-blue)]"
                 />
 
@@ -1538,6 +1542,18 @@ export const GoogleCalendarTimesheet: React.FC<GoogleCalendarTimesheetProps> = (
             </form>
           </div>
         </div>
+      )}
+
+      {pendingDeleteEntryId && (
+        <ConfirmDialog
+          title="Delete this work log?"
+          description="This work log event will be removed. This cannot be undone."
+          confirmLabel="Delete work log"
+          busy={isSaving}
+          busyLabel="Deleting…"
+          onCancel={() => setPendingDeleteEntryId(null)}
+          onConfirm={() => void confirmDeleteEntry()}
+        />
       )}
 
       {/* DRAG AND DROP SUCCESS TOAST */}

@@ -19,7 +19,7 @@ function EmployeeOnboardingContent() {
 
 export default function EmployeeOnboardingPage() {
   return (
-    <Suspense fallback={<div className="h-screen w-full flex items-center justify-center bg-white text-slate-500 font-medium">Loading Onboarding...</div>}>
+    <Suspense fallback={<div className="h-screen w-full flex items-center justify-center bg-[#f3f5f7] text-[#5e6c7b] font-medium text-sm">Loading onboarding…</div>}>
       <EmployeeOnboardingContent />
     </Suspense>
   );

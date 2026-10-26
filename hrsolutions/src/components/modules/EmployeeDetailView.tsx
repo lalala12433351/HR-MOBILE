@@ -1,4 +1,7 @@
 'use client';
+import './people-attendance.css';
+import { EmployeeAttendanceCalendar } from './hrms/EmployeeAttendanceCalendar';
+import { DateInput } from '@/components/common/DateInput';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -27,7 +30,6 @@ import {
   Monitor,
   Smartphone,
   User,
-  Lock,
   LogIn,
   LogOut,
   CalendarDays,
@@ -140,6 +142,118 @@ const suggestIfscPrefix = (bankName: string) => {
   return '';
 };
 
+function localDateKey(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function ExitChecklist({
+  state,
+  earlyExitDate,
+  setEarlyExitDate,
+  exitInterviewDone,
+  setExitInterviewDone,
+  assetClearanceDone,
+  setAssetClearanceDone,
+  managerNocDone,
+  setManagerNocDone,
+  onCancel,
+  onConfirm,
+  showToast,
+}: {
+  state: AppState;
+  earlyExitDate: string;
+  setEarlyExitDate: (value: string) => void;
+  exitInterviewDone: boolean;
+  setExitInterviewDone: (value: boolean) => void;
+  assetClearanceDone: boolean;
+  setAssetClearanceDone: (value: boolean) => void;
+  managerNocDone: boolean;
+  setManagerNocDone: (value: boolean) => void;
+  onCancel: () => void;
+  onConfirm: (payload: Partial<Employee>) => void;
+  showToast: (message: string) => void;
+}) {
+  const noticeDays = Number(state.customOptions?.noticePeriodSettings?.days) || 30;
+  const allowBuyout = state.customOptions?.noticePeriodSettings?.allowBuyout !== false;
+  const offboard = state.customOptions?.offboardingSettings;
+  const today = new Date();
+  const noticeEnd = new Date(today);
+  noticeEnd.setDate(today.getDate() + noticeDays);
+  const noticeEndKey = localDateKey(noticeEnd);
+  const todayKey = localDateKey(today);
+  const items = [
+    { key: 'exit', label: 'Exit interview', required: offboard?.reqExitInterview !== false, checked: exitInterviewDone, set: setExitInterviewDone },
+    { key: 'assets', label: 'Asset clearance', required: offboard?.reqAssetClearance !== false, checked: assetClearanceDone, set: setAssetClearanceDone },
+    { key: 'noc', label: 'Manager sign-off', required: offboard?.reqManagerNOC !== false, checked: managerNocDone, set: setManagerNocDone },
+  ];
+
+  return (
+    <div className="space-y-2 rounded-[8px] border border-[#eadfdf] bg-[#fffafa] p-3 text-left">
+      <p className="text-[12px] font-semibold text-[#172234]">Notice ends {noticeEndKey}</p>
+      {allowBuyout && (
+        <label className="block text-[11px] text-[#5e6c7b]">
+          Earlier exit date
+          <input
+            type="date"
+            value={earlyExitDate}
+            max={noticeEndKey}
+            onChange={(event) => setEarlyExitDate(event.target.value)}
+            className="mt-1 w-full rounded border border-[#dde4e9] px-2 py-1 text-[12px]"
+          />
+        </label>
+      )}
+      {items.filter((item) => item.required).map((item) => (
+        <label key={item.key} className="flex items-center gap-2 text-[12px] text-[#172234]">
+          <input type="checkbox" checked={item.checked} onChange={(event) => item.set(event.target.checked)} />
+          {item.label}
+        </label>
+      ))}
+      <div className="flex gap-2">
+        <button type="button" onClick={onCancel} className="text-[12px] font-semibold text-[#5e6c7b]">
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="text-[12px] font-semibold text-[#8b3133]"
+          onClick={() => {
+            const exitKey = earlyExitDate || noticeEndKey;
+            if (!allowBuyout && exitKey < noticeEndKey) {
+              showToast('Notice buyout is off, so the exit date cannot be earlier than the notice period.');
+              return;
+            }
+            const checklist = {
+              exitInterview: exitInterviewDone,
+              assetClearance: assetClearanceDone,
+              managerNoc: managerNocDone,
+            };
+            const missing = items.filter((item) => item.required && !item.checked).map((item) => item.label);
+            if (missing.length > 0) {
+              showToast(`Complete ${missing.join(', ')} before terminating this employee.`);
+              return;
+            }
+            const fnf = new Date(`${exitKey}T00:00:00`);
+            fnf.setDate(fnf.getDate() + (Number(offboard?.fnfSettlementDays) || 30));
+            const revokeLater = offboard?.autoRevokeAccessOnLastDay !== false && exitKey > todayKey;
+            onConfirm({
+              status: 'Terminated',
+              exitDate: exitKey,
+              noticePeriodEndDate: noticeEndKey,
+              fnfDueDate: localDateKey(fnf),
+              offboardingChecklist: checklist,
+              accountStatus: revokeLater ? 'Active' : 'Terminated',
+              isDeactivated: !revokeLater,
+            });
+          }}
+        >
+          Confirm exit
+        </button>
+      </div>
+    </div>
+  );
+}
+
 interface EmployeeDetailViewProps {
   employee: Employee;
   allEmployees: Employee[];
@@ -152,6 +266,8 @@ interface EmployeeDetailViewProps {
 }
 
 import { isExecutiveOrAdmin, isDirectReport } from '../../utils/teamAccess';
+import { alignedDepartment, departmentImpliedByTeamName } from '@/utils/departmentTeam';
+import { ChangeLoginEmailDialog } from '@/components/modules/ChangeLoginEmailDialog';
 
 export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   employee,
@@ -185,6 +301,11 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
       (!!state.currentPersona.email &&
         employee.email?.toLowerCase() === state.currentPersona.email.toLowerCase()));
   const canEditPublicBio = canEdit || isSelfViewer;
+  const canChangeLoginEmail = canEdit || isSelfViewer;
+  const [changeEmailOpen, setChangeEmailOpen] = useState(false);
+  const orgAdminEmail = String(state.organization?.adminEmail || '').trim().toLowerCase();
+  const movesOrganizationEmail =
+    !!orgAdminEmail && orgAdminEmail === String(employee.email || '').trim().toLowerCase();
   const [bioDraft, setBioDraft] = useState(employee.bio || '');
   const [savingBio, setSavingBio] = useState(false);
 
@@ -204,6 +325,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   const [isEditingJobInfo, setIsEditingJobInfo] = useState(false);
   const [isCustomDesignation, setIsCustomDesignation] = useState(false);
   const [isCustomDepartment, setIsCustomDepartment] = useState(false);
+  const [isCustomTeam, setIsCustomTeam] = useState(false);
   const [isEditingAccountSettings, setIsEditingAccountSettings] = useState(false);
   const [isEditingPrivacy, setIsEditingPrivacy] = useState(false);
   const [isEditingPayroll, setIsEditingPayroll] = useState(false);
@@ -260,7 +382,6 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
   // Dropdowns & Modals
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
-  const [showActionDropdown, setShowActionDropdown] = useState(false);
   const [showAddJobTimelineModal, setShowAddJobTimelineModal] = useState(false);
   const [showAddContractModal, setShowAddContractModal] = useState(false);
   const [showAddPayslipModal, setShowAddPayslipModal] = useState(false);
@@ -282,6 +403,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   );
   const selfService = state.customOptions?.profileSelfServiceSettings;
   const canEditAddress = canEdit || Boolean(isCurrentPersona && (selfService?.allowSelfEditAddress ?? true));
+  const canEditBank = canEdit || Boolean(isCurrentPersona && selfService?.allowSelfEditBank);
+  const [showExitPanel, setShowExitPanel] = useState(false);
+  const [exitInterviewDone, setExitInterviewDone] = useState(false);
+  const [assetClearanceDone, setAssetClearanceDone] = useState(false);
+  const [managerNocDone, setManagerNocDone] = useState(false);
+  const [earlyExitDate, setEarlyExitDate] = useState('');
 
   const isSuperAdmin = employee.role === 'super_admin' || employee.employeeId === 'EMP001';
 
@@ -303,7 +430,6 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   const [formDOB, setFormDOB] = useState(normalizeDateForInput(employee.dateOfBirth));
   const [formNationality, setFormNationality] = useState(employee.nationality || '');
   const [formPhone, setFormPhone] = useState(employee.phone || '');
-  const [formEmail, setFormEmail] = useState(employee.email || '');
   const [formHealthCare, setFormHealthCare] = useState(employee.healthInsurance || '');
   const [formMaritalStatus, setFormMaritalStatus] = useState(employee.maritalStatus || '');
   const [formTaxId, setFormTaxId] = useState(employee.personalTaxId || '');
@@ -359,7 +485,11 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
   // Probation Form State
   const [formProbationStatus, setFormProbationStatus] = useState<'in_probation' | 'confirmed' | 'extended'>(
-    employee.probationStatus || 'in_probation'
+    employee.probationStatus === 'extended' || employee.probationStatus === 'in_probation'
+      ? employee.probationStatus
+      : employee.employmentStatus === 'on_probation'
+        ? 'in_probation'
+        : 'confirmed'
   );
   const [formProbationMonths, setFormProbationMonths] = useState<number>(
     employee.probationPeriodMonths ?? (state.customOptions?.probationSettings?.defaultDurationMonths || 3)
@@ -390,6 +520,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
   // Setting Tab State
   const [formTimezone, setFormTimezone] = useState(employee.timezone || '');
+  const [savingPreferences, setSavingPreferences] = useState(false);
   const [formBirthdayPrivacy, setFormBirthdayPrivacy] = useState<'Everyone' | 'Only Me' | 'Department' | 'Managers'>('Everyone');
 
   // Avatar-only upload (same path as Header / profile modal).
@@ -474,7 +605,6 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
     setFormDOB(normalizeDateForInput(employee.dateOfBirth));
     setFormNationality(employee.nationality || '');
     setFormPhone(employee.phone || '');
-    setFormEmail(employee.email || '');
     setFormHealthCare(employee.healthInsurance || '');
     setFormMaritalStatus(employee.maritalStatus || '');
     setFormTaxId(employee.personalTaxId || '');
@@ -491,7 +621,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
     setFormServiceYear(employee.serviceYear || '');
     setFormJoinDate(normalizeDateForInput(employee.joinDate || employee.joiningDate));
     setFormDesignation(employee.designation || '');
-    setFormDepartment(employee.department || '');
+    setFormDepartment(
+      alignedDepartment(employee.department, employee.team, state.customOptions?.departments || [])
+    );
     setFormTeam(employee.team || '');
     setFormOfficeName(employee.officeName || employee.location || '');
     const nextOffices =
@@ -593,7 +725,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
         })()
     );
     setShowStatusModal(true);
-    setShowActionDropdown(false);
+    setShowStatusDropdown(false);
   };
 
   const handleSaveStatusModal = (e: React.FormEvent) => {
@@ -735,7 +867,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
       const sessions = Array.isArray(a.sessions) && a.sessions.length > 1 ? a.sessions : null;
       return {
         date: a.date,
-        day: new Date(a.date).toLocaleDateString('en-US', { weekday: 'long' }),
+        day: new Date(a.date).toLocaleDateString('en-GB', { weekday: 'long' }),
         inTime: sessions ? sessions.map((s) => s.checkIn).join(' · ') : a.checkIn || '—',
         outTime: sessions ? sessions.map((s) => s.checkOut || '—').join(' · ') : a.checkOut || '—',
         hours: hoursDisplay,
@@ -785,6 +917,82 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
     return Array.from(set).filter(Boolean);
   }, [formDesignation, employee.designation, state.customOptions?.designations, state.employees]);
+
+  const departmentNames = state.customOptions?.departments || [];
+  const profileDepartment = alignedDepartment(employee.department, employee.team, departmentNames);
+  const teamRecords = ((state.customOptions as { teamRecords?: Array<{ name?: string; departmentName?: string }> })
+    ?.teamRecords || []);
+
+  const teamsForDepartment = (dept: string) => {
+    const key = dept.trim().toLowerCase();
+    const fromRecords = new Set<string>();
+    for (const rec of teamRecords) {
+      const recDept = String(rec.departmentName || '').trim().toLowerCase();
+      if (key && recDept && recDept !== key) continue;
+      if (key && !recDept) continue;
+      const name = String(rec.name || '').trim();
+      if (name) fromRecords.add(name);
+    }
+    if (fromRecords.size > 0) return Array.from(fromRecords);
+
+    const fromPeople = new Set<string>();
+    for (const person of state.employees || []) {
+      const personDept = alignedDepartment(person.department, person.team, departmentNames).trim().toLowerCase();
+      if (key && personDept !== key) continue;
+      const name = String(person.team || '').trim();
+      if (!name) continue;
+      const implied = departmentImpliedByTeamName(name, departmentNames);
+      if (key && implied && implied.toLowerCase() !== key) continue;
+      fromPeople.add(name);
+    }
+    return Array.from(fromPeople);
+  };
+
+  const teamBelongsToDepartment = (teamName: string, dept: string) => {
+    const key = dept.trim().toLowerCase();
+    const teamKey = teamName.trim().toLowerCase();
+    if (!teamKey || !key) return false;
+    const implied = departmentImpliedByTeamName(teamName, departmentNames);
+    if (implied) return implied.toLowerCase() === key;
+    const rec = teamRecords.find((row) => String(row.name || '').trim().toLowerCase() === teamKey);
+    if (rec?.departmentName) return rec.departmentName.trim().toLowerCase() === key;
+    if (rec) return teamsForDepartment(dept).some((name) => name.toLowerCase() === teamKey);
+    return true;
+  };
+
+  const handleDepartmentChange = (next: string) => {
+    setFormDepartment(next);
+    const options = teamsForDepartment(next);
+    const current = formTeam.trim();
+    if (current && teamBelongsToDepartment(current, next) && options.some((name) => name.toLowerCase() === current.toLowerCase())) {
+      return;
+    }
+    const exact = options.find((name) => name.toLowerCase() === next.trim().toLowerCase());
+    if (exact) {
+      setFormTeam(exact);
+      return;
+    }
+    if (options.length === 1) {
+      setFormTeam(options[0]);
+      return;
+    }
+    setFormTeam(next.trim() ? `${next.trim()} Team` : '');
+  };
+
+  const handleTeamChange = (next: string) => {
+    setFormTeam(next);
+    const implied = departmentImpliedByTeamName(next, departmentNames);
+    const rec = teamRecords.find(
+      (row) => String(row.name || '').trim().toLowerCase() === next.trim().toLowerCase()
+    );
+    const nextDept = implied || String(rec?.departmentName || '').trim();
+    if (nextDept) setFormDepartment(nextDept);
+  };
+
+  useEffect(() => {
+    if (isEditingJobInfo) return;
+    setFormDepartment(alignedDepartment(employee.department, employee.team, departmentNames));
+  }, [employee.id, employee.department, employee.team, departmentNames, isEditingJobInfo]);
 
   // Available offices (filtered so physical street addresses are not treated as office branch names)
   const availableOffices = useMemo(() => {
@@ -923,7 +1131,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
       dateOfBirth: formDOB.trim() || undefined,
       nationality: formNationality,
       phone: formPhone,
-      email: formEmail,
+      email: employee.email,
       healthInsurance: formHealthCare,
       maritalStatus: formMaritalStatus,
       personalTaxId: formTaxId,
@@ -941,7 +1149,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   };
 
   // Helper to save address
-  const handleSaveAddress = (e: React.FormEvent) => {
+  const handleSaveAddress = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEditAddress) {
       showToast('You do not have permission to edit this address.');
@@ -955,13 +1163,16 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
       city: formCity,
       postalCode: formPostCode,
     };
-    onUpdateEmployee(updated);
-    setIsEditingAddress(false);
-    showToast('Address updated successfully');
+    try {
+      await onUpdateEmployee(updated);
+      setIsEditingAddress(false);
+    } catch {
+      // Parent surfaces the error toast; stay in edit mode so the user can retry.
+    }
   };
 
   // Helper to save emergency contact
-  const handleSaveEmergency = (e: React.FormEvent) => {
+  const handleSaveEmergency = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit) {
       showToast('Permission denied. Only HR and Super Admin can edit employee records.');
@@ -975,13 +1186,16 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
         relation: formEmergencyRelation,
       },
     };
-    onUpdateEmployee(updated);
-    setIsEditingEmergency(false);
-    showToast('Emergency Contact updated successfully');
+    try {
+      await onUpdateEmployee(updated);
+      setIsEditingEmergency(false);
+    } catch {
+      // Parent surfaces the error toast; stay in edit mode so the user can retry.
+    }
   };
 
   // Helper to save job info
-  const handleSaveJobInfo = (e: React.FormEvent) => {
+  const handleSaveJobInfo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit) {
       showToast('Permission denied. Only HR and Super Admin can edit employee records.');
@@ -1008,8 +1222,32 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
       serviceYear: formServiceYear,
       joinDate: formJoinDate,
       designation: formDesignation.trim() || employee.designation,
-      department: (formDepartment as any) || employee.department,
-      team: formTeam.trim() || employee.team,
+      department: (() => {
+        const dept = formDepartment.trim();
+        const picked = formTeam.trim();
+        const implied = departmentImpliedByTeamName(picked, departmentNames);
+        const userPickedOtherDept =
+          !!dept &&
+          dept.toLowerCase() !== String(employee.department || '').trim().toLowerCase() &&
+          dept.toLowerCase() !== String(implied || '').toLowerCase();
+        if (implied && !userPickedOtherDept) return implied as any;
+        return (dept as any) || employee.department;
+      })(),
+      team: (() => {
+        const dept = formDepartment.trim();
+        const picked = formTeam.trim();
+        const implied = departmentImpliedByTeamName(picked, departmentNames);
+        const userPickedOtherDept =
+          !!dept &&
+          dept.toLowerCase() !== String(employee.department || '').trim().toLowerCase() &&
+          dept.toLowerCase() !== String(implied || '').toLowerCase();
+        if (userPickedOtherDept && picked && !teamBelongsToDepartment(picked, dept)) {
+          return teamsForDepartment(dept)[0] || `${dept} Team`;
+        }
+        if (picked) return picked;
+        const nextDept = implied || dept;
+        return nextDept ? `${nextDept} Team` : employee.team;
+      })(),
       officeName: primaryName || employee.officeName,
       location: primaryName || employee.location,
       officeId: primaryOfficeId,
@@ -1041,11 +1279,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
       probationPeriodMonths: formProbationStatus === 'confirmed' ? 0 : formProbationMonths,
       probationEndDate: formProbationStatus === 'confirmed' ? undefined : formProbationEndDate,
     };
-    onUpdateEmployee(updated);
-    setIsEditingJobInfo(false);
-    setIsCustomDesignation(false);
-    setIsCustomDepartment(false);
-    showToast('Employment & Organization details updated');
+    try {
+      await onUpdateEmployee(updated);
+      setIsEditingJobInfo(false);
+      setIsCustomDesignation(false);
+      setIsCustomDepartment(false);
+      setIsCustomTeam(false);
+    } catch {
+      // Parent surfaces the error toast; stay in edit mode so the user can retry.
+    }
   };
 
   const handleConfirmProbation = () => {
@@ -1318,13 +1560,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   };
 
   const handleOpenBankDetailsModal = () => {
-    if (!canEdit) return;
+    if (!canEditBank) return;
     hydrateBankForm();
     setShowBankDetailsModal(true);
   };
 
   const handleStartBankEdit = () => {
-    if (!canEdit) return;
+    if (!canEditBank) return;
     if (isEditingBankDetails) {
       setIsEditingBankDetails(false);
       return;
@@ -1335,8 +1577,8 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
   const handleSaveBankDetails = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEdit) {
-      showToast('Permission denied. Only HR and Super Admin can edit bank details.');
+    if (!canEditBank) {
+      showToast('Permission denied. Bank details can be edited by HR, or by you when self-service is on.');
       return;
     }
 
@@ -1380,15 +1622,27 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
     }
   };
 
+  const profileStatusLabel =
+    employee.accountStatus || (isActivated ? employee.status || 'Active' : 'Not Activated');
+  const profileStatusTone =
+    profileStatusLabel === 'Active' || employee.status === 'Active'
+      ? 'border-[#53886b]/30 bg-[#eaf1ee] text-[#3f6a52]'
+      : profileStatusLabel === 'Deactivated' ||
+          profileStatusLabel === 'Suspended' ||
+          profileStatusLabel === 'Terminated' ||
+          employee.status === 'Terminated'
+        ? 'border-[#8b3133]/25 bg-[#faeeee] text-[#8b3133]'
+        : 'border-[#d8e8f2] bg-[#f8fbfe] text-[#17324e]';
+
   // Read-only full detail for non-editors (self view). Edit controls stay gated by canEdit.
   // (Previously short-circuited to EmployeeProfileCardModal.)
 
   return (
-    <div className="space-y-6">
+    <div className="employee-profile-studio space-y-6" data-public-profile={activeTab === 'public_profile'}>
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-6 right-6 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-          <CheckCircle className="w-4 h-4 text-emerald-400" />
+        <div className="fixed top-6 right-6 z-50 bg-[#17324e] text-white px-4 py-2.5 rounded-[7px] shadow-xl text-[13px] font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+          <CheckCircle className="w-4 h-4 text-[#d7ebe0]" />
           <span>{toastMessage}</span>
         </div>
       )}
@@ -1398,38 +1652,31 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 text-xs font-bold text-[#5e6c7b] hover:text-[#172234] transition-all cursor-pointer group bg-white border border-[#dde4e9] px-3 py-1.5 rounded-[7px] shadow-2xs"
+            className="flex items-center gap-1.5 text-[13px] font-bold text-[#5e6c7b] hover:text-[#172234] transition-all cursor-pointer group bg-white border border-[#dde4e9] px-3 py-1.5 rounded-[7px]"
           >
             <ChevronLeft className="h-4 w-4 text-[#687789] group-hover:text-[#172234] transition-colors" />
             <span>Back to Employees</span>
           </button>
-          {!canEdit && (
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200/80 flex items-center gap-1">
-              <Lock className="w-3 h-3 text-slate-400" /> Read-Only Mode
-            </span>
-          )}
         </div>
       </div>
 
       {/* Main 2-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="employee-profile-grid grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* ========================================================= */}
         {/* LEFT COLUMN: Employee Profile Card                        */}
         {/* ========================================================= */}
-        <div className="lg:col-span-4 xl:col-span-3 w-full bg-white rounded-[12px] p-6 sm:p-7 shadow-xs space-y-5 text-[#172234] border border-[#dde4e9]">
-          {/* Avatar & Edit Photo Option */}
-          <div className="flex flex-col items-center text-center space-y-2">
-            <div className="relative group">
-              <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center text-slate-400 border-2 border-slate-200/80 shadow-2xs">
+        <div className="employee-profile-sidebar lg:col-span-4 xl:col-span-3 lg:sticky lg:top-4 w-full bg-white rounded-[12px] text-[#172234] border border-[#dde4e9]">
+          <div className="employee-profile-identity flex items-start gap-4 p-5">
+            <div className="relative shrink-0">
+              <div className="h-[72px] w-[72px] overflow-hidden rounded-full border border-[#dde4e9] bg-[#e8eef2]">
                 <UserAvatar
                   src={displayAvatar}
                   name={employee.name}
                   alt={employee.name}
-                  className="w-full h-full text-base"
-                  iconClassName="h-12 w-12"
+                  className="h-full w-full text-base"
+                  iconClassName="h-8 w-8"
                 />
               </div>
-
               {(canEdit || state.currentPersona?.id === employee.id || state.currentPersona?.name === employee.name) && (
                 <>
                   <input
@@ -1444,253 +1691,210 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     type="button"
                     onClick={() => avatarInputRef.current?.click()}
                     disabled={isUploadingAvatar}
-                    title={isUploadingAvatar ? 'Uploading…' : 'Change Profile Photo'}
-                    className="absolute bottom-0 right-0 p-2 rounded-full bg-[#17324e] hover:bg-[#285275] active:scale-95 text-white shadow-md border-2 border-white transition-all cursor-pointer flex items-center justify-center group-hover:scale-105 disabled:opacity-60 disabled:cursor-wait"
+                    title={isUploadingAvatar ? 'Uploading…' : 'Change profile photo'}
+                    className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#17324e] text-white hover:bg-[#285275] disabled:cursor-wait disabled:opacity-60"
                   >
-                    <Camera className={`w-3.5 h-3.5 ${isUploadingAvatar ? 'animate-pulse' : ''}`} />
+                    <Camera className={`h-3.5 w-3.5 ${isUploadingAvatar ? 'animate-pulse' : ''}`} />
                   </button>
                 </>
               )}
             </div>
-
-            <div className="pt-2">
-              <h2 className="text-xl font-bold text-[#172234] tracking-tight">{employee.name}</h2>
-              <p className="text-xs text-[#5e6c7b] font-semibold mt-0.5">{employee.designation || (isSuperAdmin ? 'Founder & CEO' : '—')}</p>
-            </div>
-
-            {/* Status Pill (Clickable for Admin/HR) */}
-            <div className="pt-1">
+            <div className="min-w-0 flex-1 pt-0.5">
+              <h2 className="truncate text-[20px] font-bold leading-tight tracking-[-0.02em] text-[#172234]">
+                {employee.name}
+              </h2>
+              <p className="mt-1 truncate text-[13px] font-medium text-[#5e6c7b]">
+                {employee.designation || (isSuperAdmin ? 'Founder & CEO' : '—')}
+              </p>
               <button
                 type="button"
                 disabled={!canEdit}
                 onClick={handleOpenStatusModal}
-                title={canEdit ? 'Click to change employment status' : undefined}
-                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[10px] font-bold tracking-wider uppercase border transition-all ${
-                  canEdit ? 'cursor-pointer hover:shadow-xs hover:scale-105 active:scale-95' : 'cursor-default'
-                } ${
-                  (employee.accountStatus === 'Active' || employee.status === 'Active')
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : (employee.accountStatus === 'In Probation' || employee.status === 'Probation' || employee.status === 'In Probation' || employee.probationStatus === 'in_probation')
-                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                    : (employee.accountStatus === 'Notice Period' || employee.status === 'Notice Period')
-                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                    : (employee.accountStatus === 'On Leave' || employee.status === 'On Leave')
-                    ? 'bg-purple-50 text-purple-700 border-purple-200'
-                    : (employee.accountStatus === 'Not Activated' || !isActivated)
-                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                    : 'bg-rose-50 text-rose-700 border-rose-200'
-                }`}
+                title={canEdit ? 'Change employment status' : undefined}
+                className={`mt-3 inline-flex h-7 items-center rounded-full border px-2.5 text-[12px] font-semibold ${
+                  canEdit ? 'cursor-pointer hover:brightness-[0.98]' : 'cursor-default'
+                } ${profileStatusTone}`}
               >
-                <span>
-                  {(employee.accountStatus || (isActivated ? employee.status || 'Active' : 'Not Activated')).toUpperCase()}
-                </span>
-                {canEdit && <Edit2 className="w-2.5 h-2.5 opacity-60 ml-0.5" />}
+                {profileStatusLabel}
               </button>
             </div>
+          </div>
 
-            {canEdit && (
+          <dl className="border-t border-[#dde4e9] px-5">
+            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
+              <dt className="text-[12px] font-semibold text-[#687789]">Email</dt>
+              <dd className="min-w-0 text-[13px] font-semibold text-[#172234]">
+                {employee.email ? (
+                  <a href={`mailto:${employee.email}`} className="hover:text-[#285275] hover:underline">
+                    {employee.email}
+                  </a>
+                ) : (
+                  '—'
+                )}
+                {canChangeLoginEmail && (
+                  <button
+                    type="button"
+                    onClick={() => setChangeEmailOpen(true)}
+                    className="mt-1 block cursor-pointer text-[12px] font-semibold text-[#2d628e] hover:text-[#17324e]"
+                  >
+                    Change login email
+                  </button>
+                )}
+              </dd>
+            </div>
+            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
+              <dt className="text-[12px] font-semibold text-[#687789]">Phone</dt>
+              <dd className="min-w-0 truncate text-[13px] font-semibold text-[#172234]">{employee.phone || '—'}</dd>
+            </div>
+            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
+              <dt className="text-[12px] font-semibold text-[#687789]">Department</dt>
+              <dd className="min-w-0 text-[13px] font-semibold text-[#172234]">
+                {profileDepartment && onOpenDepartment ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenDepartment(profileDepartment)}
+                    className="text-left text-[#17324e] hover:underline"
+                  >
+                    {profileDepartment}
+                  </button>
+                ) : (
+                  profileDepartment || '—'
+                )}
+              </dd>
+            </div>
+            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
+              <dt className="text-[12px] font-semibold text-[#687789]">Team</dt>
+              <dd className="min-w-0 text-[13px] font-semibold text-[#172234]">
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingJobInfo(true);
+                      setActiveTab('job');
+                    }}
+                    className="text-left text-[#17324e] hover:underline"
+                  >
+                    {employee.team || 'Add team'}
+                  </button>
+                ) : (
+                  employee.team || '—'
+                )}
+              </dd>
+            </div>
+            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
+              <dt className="text-[12px] font-semibold text-[#687789]">Office</dt>
+              <dd className="min-w-0 text-[13px] font-semibold text-[#172234]">
+                {employee.offices && employee.offices.length > 1
+                  ? employee.offices.map((o) => o.name).filter(Boolean).join(', ')
+                  : employee.officeName || employee.location || '—'}
+              </dd>
+            </div>
+            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-start gap-3 py-3">
+              <dt className="pt-0.5 text-[12px] font-semibold text-[#687789]">
+                {isInstitution ? 'Staff lead' : 'Manager'}
+              </dt>
+              <dd className="flex min-w-0 items-center gap-2 text-[13px] font-semibold text-[#172234]">
+                <UserAvatar
+                  src={managerDisplayAvatar && !managerDisplayAvatar.includes('dicebear') ? managerDisplayAvatar : undefined}
+                  name={managerDisplayName || undefined}
+                  className="h-6 w-6 text-[10px]"
+                />
+                <span className="truncate">{managerDisplayName || '—'}</span>
+              </dd>
+            </div>
+          </dl>
+
+          {canEdit && (
+            <div className="space-y-2 border-t border-[#dde4e9] p-5">
+              {!isActivated ? (
+                <button
+                  type="button"
+                  onClick={handleActivateManually}
+                  className="h-9 w-full rounded-[7px] bg-[#17324e] text-[13px] font-semibold text-white hover:bg-[#285275]"
+                >
+                  Activate account
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingJobInfo(true);
+                    setActiveTab('job');
+                  }}
+                  className="h-9 w-full rounded-[7px] bg-[#17324e] text-[13px] font-semibold text-white hover:bg-[#285275]"
+                >
+                  Edit job and team
+                </button>
+              )}
+              {!isActivated && (
+                <button
+                  type="button"
+                  onClick={handleResendInvite}
+                  className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white text-[13px] font-semibold text-[#17324e] hover:bg-[#f8fbfe]"
+                >
+                  Resend invite
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShowIdCard(true)}
-                className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-[7px] border border-[#dde4e9] bg-white px-3 py-2 text-xs font-semibold text-[#172234] hover:bg-[#f3f5f7] cursor-pointer"
+                className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border border-[#c5d0d8] bg-white text-[13px] font-semibold text-[#17324e] hover:bg-[#f8fbfe]"
               >
                 <CreditCard className="h-3.5 w-3.5 text-[#2d628e]" />
                 Print ID card
               </button>
-            )}
-          </div>
-
-          {/* Divider */}
-          <div className="border-t border-slate-100 my-4" />
-
-          {/* Contact Meta Details */}
-          <div className="space-y-3.5 text-xs">
-            <div className="flex items-center gap-3">
-              <Mail className="w-4 h-4 text-slate-400 shrink-0" strokeWidth={2} />
-              <a
-                href={`mailto:${employee.email}`}
-                className="font-semibold text-slate-800 hover:text-blue-600 transition-colors truncate"
-              >
-                {employee.email || '—'}
-              </a>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Phone className="w-4 h-4 text-slate-400 shrink-0" strokeWidth={2} />
-              <span className="font-semibold text-slate-800">
-                {employee.phone || '—'}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Globe className="w-4 h-4 text-slate-400 shrink-0" strokeWidth={2} />
-              <span className="font-semibold text-slate-800">
-                {employee.timezone || '—'}
-              </span>
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className="border-t border-slate-100 my-4" />
-
-          {/* Department & Management Hierarchy */}
-          <div className="space-y-4 text-xs">
-            {/* Department */}
-            <div>
-              <p className="text-[11px] font-semibold text-[#687789]">Department & Team</p>
-              {employee.department && onOpenDepartment ? (
+              {!isActivated && (
                 <button
                   type="button"
-                  onClick={() => onOpenDepartment(employee.department)}
-                  className="font-bold text-[#17324e] mt-0.5 hover:underline text-left cursor-pointer"
+                  onClick={handleCopyMagicLink}
+                  className="h-9 w-full rounded-[7px] text-[13px] font-semibold text-[#5e6c7b] hover:bg-[#f3f5f7] hover:text-[#172234]"
                 >
-                  {employee.department}
-                  {employee.team ? ` • ${employee.team}` : ''}
+                  Copy sign-in link
                 </button>
-              ) : (
-                <p className="font-bold text-[#172234] mt-0.5">
-                  {employee.department || '—'}
-                  {employee.team ? ` • ${employee.team}` : ''}
-                </p>
               )}
-            </div>
-
-            {/* Office */}
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400">Office Location</p>
-              <p className="font-bold text-slate-900 mt-0.5">
-                {employee.offices && employee.offices.length > 1
-                  ? `${employee.offices.map((o) => o.name).filter(Boolean).join(', ')}`
-                  : employee.officeName || employee.location || '—'}
-              </p>
-            </div>
-
-            {/* Line Manager / Staff Lead */}
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400">
-                {isInstitution ? 'Staff Lead / HOD' : 'Line Manager'}
-              </p>
-              <div className="flex items-center gap-2 mt-1">
-                {managerDisplayAvatar && !managerDisplayAvatar.includes('dicebear') && !managerDisplayAvatar.startsWith('data:image/svg+xml') ? (
-                  <img
-                    src={managerDisplayAvatar}
-                    alt=""
-                    className="w-5 h-5 rounded-full object-cover shrink-0 ring-1 ring-slate-200"
-                  />
-                ) : (
-                  <div className="w-5 h-5 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
-                    <User className="w-3 h-3 text-slate-400 stroke-[2]" />
-                  </div>
-                )}
-                <span className="font-bold text-slate-900">
-                  {managerDisplayName || '—'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Button (HR & Super Admin Only) */}
-          {canEdit && (
-            <div className="relative pt-3 border-t border-slate-100">
               <button
-                onClick={() => setShowActionDropdown(!showActionDropdown)}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-all shadow-xs active:scale-98 cursor-pointer"
+                type="button"
+                onClick={() => setShowExitPanel(true)}
+                className="h-9 w-full rounded-[7px] text-[13px] font-semibold text-[#8b3133] hover:bg-[#faeeee]"
               >
-                <span>Manage Profile</span>
-                <ChevronDown className="w-3.5 h-3.5 text-white ml-auto" strokeWidth={2.5} />
+                Deactivate record
               </button>
-
-              {showActionDropdown && (
-                <div className="absolute bottom-full mb-2 left-0 w-full bg-white border border-slate-200 rounded-2xl shadow-xl z-50 p-2 text-xs divide-y divide-slate-100 animate-in zoom-in-95">
-                  <div className="p-1 space-y-1 text-slate-700">
-                    {!isActivated && (
-                      <>
-                        <button
-                          onClick={() => {
-                            handleResendInvite();
-                            setShowActionDropdown(false);
-                          }}
-                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 text-amber-800 flex items-center gap-2 cursor-pointer font-bold text-xs transition-colors"
-                        >
-                          <Mail className="w-4 h-4 text-amber-600" />
-                          <span>Resend Invitation Email</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            handleCopyMagicLink();
-                            setShowActionDropdown(false);
-                          }}
-                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-blue-50 text-blue-700 flex items-center gap-2 cursor-pointer font-bold text-xs transition-colors"
-                        >
-                          <Globe className="w-4 h-4 text-blue-600" />
-                          <span>Copy Magic Sign-In Link</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            handleActivateManually();
-                            setShowActionDropdown(false);
-                          }}
-                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-50 text-emerald-700 flex items-center gap-2 cursor-pointer font-bold text-xs transition-colors"
-                        >
-                          <CheckCircle className="w-4 h-4 text-emerald-600" />
-                          <span>Activate Account Manually</span>
-                        </button>
-                      </>
-                    )}
-                    <button
-                      onClick={handleOpenStatusModal}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-blue-50 text-blue-700 flex items-center gap-2 cursor-pointer font-bold text-xs transition-colors"
-                    >
-                      <Clock className="w-4 h-4 text-blue-600" />
-                      <span>Change Employment Status</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsEditingPersonalInfo(true);
-                        setActiveTab('general');
-                        setShowActionDropdown(false);
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-50 flex items-center gap-2 cursor-pointer font-bold text-xs transition-colors"
-                    >
-                      <Edit2 className="w-4 h-4 text-slate-700" />
-                      <span>Edit Personal Information</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsEditingJobInfo(true);
-                        setActiveTab('job');
-                        setShowActionDropdown(false);
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-50 flex items-center gap-2 cursor-pointer font-bold text-xs transition-colors"
-                    >
-                      <Briefcase className="w-4 h-4 text-slate-700" />
-                      <span>Edit Job & Role</span>
-                    </button>
-                  </div>
-                  <div className="p-1 pt-1.5">
-                    <button
-                      onClick={() => {
-                        handleChangeStatus('Terminated');
-                        setShowActionDropdown(false);
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 text-rose-600 flex items-center gap-2 cursor-pointer font-bold text-xs transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span>Deactivate Record</span>
-                    </button>
-                  </div>
-                </div>
+              {showExitPanel && (
+                <ExitChecklist
+                  state={state}
+                  earlyExitDate={earlyExitDate}
+                  setEarlyExitDate={setEarlyExitDate}
+                  exitInterviewDone={exitInterviewDone}
+                  setExitInterviewDone={setExitInterviewDone}
+                  assetClearanceDone={assetClearanceDone}
+                  setAssetClearanceDone={setAssetClearanceDone}
+                  managerNocDone={managerNocDone}
+                  setManagerNocDone={setManagerNocDone}
+                  onCancel={() => setShowExitPanel(false)}
+                  onConfirm={(payload) => {
+                    onUpdateEmployee({ ...employee, ...payload });
+                    setShowExitPanel(false);
+                    setShowStatusDropdown(false);
+                    showToast(payload.accountStatus === 'Terminated' ? 'Access ends today' : `Exit date set to ${payload.exitDate}`);
+                  }}
+                  showToast={showToast}
+                />
+              )}
+              {employee.buddyName && (
+                <p className="text-[12px] text-[#5e6c7b]">Buddy: {employee.buddyName}</p>
+              )}
+              {employee.fnfDueDate && (
+                <p className="text-[12px] text-[#5e6c7b]">Full and final due {employee.fnfDueDate}</p>
               )}
             </div>
           )}
         </div>
 
-        {/* ========================================================= */}
         {/* RIGHT COLUMN: Tabbed Detail Area                          */}
         {/* ========================================================= */}
-        <div className="lg:col-span-8 xl:col-span-9 space-y-6">
+        <div className="employee-profile-content lg:col-span-8 xl:col-span-9 space-y-6">
           {/* Top Tab Bar */}
-          <div className="flex items-center gap-6 sm:gap-8 border-b border-[#dde4e9] overflow-x-auto scrollbar-none pb-0 bg-white px-6 pt-3 rounded-[12px] shadow-xs">
+          <div role="tablist" aria-label="Employee details" className="employee-profile-tabs flex items-center gap-6 overflow-x-auto rounded-[12px] border border-[#dde4e9] bg-white px-5 pt-2 scrollbar-none sm:gap-8 sm:px-6">
             {(
               [
                 { id: 'general' as const, label: 'General' },
@@ -1706,8 +1910,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               return (
                 <button
                   key={tab.id}
+                  role="tab"
+                  aria-selected={isActive}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`border-b-2 px-1 pb-3 text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                  className={`-mb-px border-b-2 px-1 pb-3 text-[13px] font-bold tracking-[-0.01em] whitespace-nowrap cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2] ${
                     isActive
                       ? 'border-[#17324e] text-[#17324e]'
                       : 'border-transparent text-[#687789] hover:text-[#172234]'
@@ -1724,11 +1930,8 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {/* ===================================================== */}
           {activeTab === 'public_profile' && (
             <div className="space-y-4">
-              <div className="bg-[#f4f7fa] border border-[#dde4e9] rounded-[12px] px-4 py-3 text-xs text-[#5e6c7b]">
-                This is what coworkers see in Directory and Org Chart. Personal, payroll, and document
-                details stay private.
-              </div>
-              <div className="max-w-3xl overflow-hidden rounded-[12px] border border-[#dde4e9] bg-white shadow-[0_8px_24px_-16px_rgba(23,34,52,0.2)]">
+              <div className="public-profile-visibility"><strong>Visible to coworkers in Directory and Org Chart</strong><p>Only this public profile is shared. Personal records, payroll and documents stay private.</p></div>
+              <div className="public-profile-record max-w-3xl overflow-hidden rounded-[12px] border border-[#dde4e9] bg-white shadow-[0_8px_24px_-16px_rgba(23,34,52,0.2)]">
                 <EmployeePublicProfilePanel
                   employee={{ ...employee, bio: bioDraft }}
                   allEmployees={allEmployees}
@@ -1736,38 +1939,42 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   bioEditable={canEditPublicBio}
                   bioDraft={bioDraft}
                   onBioDraftChange={setBioDraft}
+                  bioActions={canEditPublicBio ? (
+                    <div className="public-profile-bio-actions">
+                      <button
+                        type="button"
+                        disabled={savingBio || bioDraft === (employee.bio || '')}
+                        onClick={() => setBioDraft(employee.bio || '')}
+                        className="h-9 rounded-[7px] border border-[#c5d0d8] bg-white px-3.5 text-[13px] font-semibold text-[#17324e] transition-colors hover:bg-[#f8fbfe] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingBio || bioDraft === (employee.bio || '')}
+                        onClick={async () => {
+                          const nextBio = bioDraft.trim();
+                          setSavingBio(true);
+                          try {
+                            await onUpdateEmployee({ ...employee, bio: nextBio || undefined });
+                          } catch (err) {
+                            showToast(err instanceof Error ? err.message : 'Failed to save bio');
+                          } finally {
+                            setSavingBio(false);
+                          }
+                        }}
+                        className="h-9 rounded-[7px] bg-[#17324e] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#285275] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                      >
+                        {savingBio ? 'Saving…' : 'Save bio'}
+                      </button>
+                    </div>
+                  ) : null}
+                  showAvatarEdit={canEdit || state.currentPersona?.id === employee.id || state.currentPersona?.name === employee.name}
+                  onAvatarFileChange={handleAvatarChange}
+                  isUploadingAvatar={isUploadingAvatar}
                   variant="page"
                 />
-                {canEditPublicBio && (
-                  <div className="flex items-center justify-end gap-2 border-t border-[#dde4e9] px-6 py-4 sm:px-10">
-                    <button
-                      type="button"
-                      disabled={savingBio || bioDraft === (employee.bio || '')}
-                      onClick={() => setBioDraft(employee.bio || '')}
-                      className="h-9 rounded-[7px] border border-[#c5d0d8] bg-white px-3.5 text-[13px] font-semibold text-[#17324e] transition-colors hover:bg-[#f8fbfe] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-                    >
-                      Reset
-                    </button>
-                    <button
-                      type="button"
-                      disabled={savingBio || bioDraft === (employee.bio || '')}
-                      onClick={async () => {
-                        const nextBio = bioDraft.trim();
-                        setSavingBio(true);
-                        try {
-                          await onUpdateEmployee({ ...employee, bio: nextBio || undefined });
-                        } catch (err) {
-                          showToast(err instanceof Error ? err.message : 'Failed to save bio');
-                        } finally {
-                          setSavingBio(false);
-                        }
-                      }}
-                      className="h-9 rounded-[7px] bg-[#17324e] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#285275] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-                    >
-                      {savingBio ? 'Saving…' : 'Save bio'}
-                    </button>
-                  </div>
-                )}
+
               </div>
             </div>
           )}
@@ -1779,14 +1986,14 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
             <div className="space-y-6">
               {/* Account Not Activated Alert Banner */}
               {!isActivated && (
-                <div className="bg-[#fbf6ea] border border-[#ead9a8] rounded-[12px] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 shadow-xs animate-in fade-in">
+                <div className="bg-[#fbf6ea] border border-[#ead9a8] rounded-[12px] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[13px] text-[#172234] animate-in fade-in">
                   <div className="flex items-start sm:items-center gap-3">
-                    <div className="h-9 w-9 rounded-2xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-700 shrink-0">
+                    <div className="h-9 w-9 rounded-[7px] bg-[#e8eef2] border border-[#d8e8f2] flex items-center justify-center text-[#17324e] shrink-0">
                       <AlertTriangle className="h-4.5 w-4.5" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-amber-950 text-sm">Account Is Not Activated</h4>
-                      <p className="text-amber-800/90 text-xs mt-0.5">
+                      <h4 className="font-bold text-[#172234] text-sm">Account Is Not Activated</h4>
+                      <p className="text-[#17324e]/90 text-[13px] mt-0.5">
                         This employee has not yet logged in or activated their workspace credentials.
                       </p>
                     </div>
@@ -1796,15 +2003,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       <button
                         type="button"
                         onClick={handleCopyMagicLink}
-                        className="px-3 py-1.5 rounded-xl border border-amber-300 bg-white hover:bg-amber-100/60 text-amber-900 font-bold transition-all cursor-pointer flex items-center gap-1.5 text-xs shadow-2xs"
+                        className="px-3 py-1.5 rounded-[7px] border border-[#c5d0d8] bg-white hover:bg-[#e8eef2] text-[#172234] font-bold transition-all cursor-pointer flex items-center gap-1.5 text-[13px]"
                       >
-                        <Globe className="w-3.5 h-3.5 text-amber-700" />
+                        <Globe className="w-3.5 h-3.5 text-[#17324e]" />
                         <span>Copy Link</span>
                       </button>
                       <button
                         type="button"
                         onClick={handleActivateManually}
-                        className="px-3.5 py-1.5 rounded-[7px] bg-[#53886b] hover:bg-[#46725a] text-white font-bold transition-all cursor-pointer flex items-center gap-1.5 text-xs shadow-2xs"
+                        className="px-3.5 py-1.5 rounded-[7px] bg-[#53886b] hover:bg-[#46725a] text-white font-bold transition-all cursor-pointer flex items-center gap-1.5 text-[13px]"
                       >
                         <CheckCircle className="w-3.5 h-3.5" />
                         <span>Activate Now</span>
@@ -1815,13 +2022,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               )}
 
               {/* Section 1: Personal Info Card */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 shadow-xs text-[#172234] space-y-4">
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-[#f3f5f7]">
                   <h3 className="text-[15px] font-bold text-[#172234] tracking-tight">Personal Information</h3>
                   {canEdit && (
                     <button
                       onClick={() => setIsEditingPersonalInfo(!isEditingPersonalInfo)}
-                      className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
+                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
                       title={isEditingPersonalInfo ? 'Cancel' : 'Edit Personal Info'}
                     >
                       <Edit2 className="w-4 h-4" strokeWidth={1.75} />
@@ -1830,40 +2037,40 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 {!isEditingPersonalInfo ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 pt-1 text-xs">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 pt-1 text-[13px]">
                     {/* Left Column */}
                     <div className="space-y-3.5">
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Full Name</span>
-                        <span className="font-bold text-slate-900 truncate">
+                        <span className="text-[#687789] font-semibold">Full Name</span>
+                        <span className="font-bold text-[#172234] truncate">
                           {employee.fullName || employee.name || '—'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Date of Birth</span>
-                        <span className="font-bold text-slate-900 truncate">
+                        <span className="text-[#687789] font-semibold">Date of Birth</span>
+                        <span className="font-bold text-[#172234] truncate">
                           {employee.dateOfBirth
                             ? !isNaN(Date.parse(employee.dateOfBirth))
-                              ? new Date(employee.dateOfBirth).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+                              ? new Date(employee.dateOfBirth).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
                               : employee.dateOfBirth
                             : '—'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Nationality</span>
-                        <span className="font-bold text-slate-900 truncate">
+                        <span className="text-[#687789] font-semibold">Nationality</span>
+                        <span className="font-bold text-[#172234] truncate">
                           {employee.nationality || '—'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Email Address</span>
-                        <span className="font-bold text-slate-900 truncate">
+                        <span className="text-[#687789] font-semibold">Email Address</span>
+                        <span className="font-bold text-[#172234] truncate">
                           {employee.email || '—'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Health Insurance</span>
-                        <span className="font-bold text-slate-900 truncate">
+                        <span className="text-[#687789] font-semibold">Health Insurance</span>
+                        <span className="font-bold text-[#172234] truncate">
                           {employee.healthInsurance || '—'}
                         </span>
                       </div>
@@ -1872,32 +2079,32 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     {/* Right Column */}
                     <div className="space-y-3.5">
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Gender</span>
-                        <span className="font-bold text-slate-900">
+                        <span className="text-[#687789] font-semibold">Gender</span>
+                        <span className="font-bold text-[#172234]">
                           {employee.gender && employee.gender !== '—' ? employee.gender : 'None'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Marital Status</span>
-                        <span className="font-bold text-slate-900">
+                        <span className="text-[#687789] font-semibold">Marital Status</span>
+                        <span className="font-bold text-[#172234]">
                           {employee.maritalStatus || '—'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Phone</span>
-                        <span className="font-bold text-slate-900 font-mono">
+                        <span className="text-[#687789] font-semibold">Phone</span>
+                        <span className="font-bold text-[#172234] font-mono">
                           {employee.phone || '—'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Personal Tax ID</span>
-                        <span className="font-bold text-slate-900 font-mono">
+                        <span className="text-[#687789] font-semibold">Personal Tax ID</span>
+                        <span className="font-bold text-[#172234] font-mono">
                           {employee.personalTaxId || '—'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-slate-400 font-semibold">Social Insurance / PF</span>
-                        <span className="font-bold text-slate-900 font-mono">
+                        <span className="text-[#687789] font-semibold">Social Insurance / PF</span>
+                        <span className="font-bold text-[#172234] font-mono">
                           {employee.socialInsurance || '—'}
                         </span>
                       </div>
@@ -1905,25 +2112,25 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   </div>
                 ) : (
                   /* Edit View (HR / Admin only) */
-                  <form onSubmit={handleSavePersonalInfo} className="pt-2 space-y-4 text-xs">
+                  <form onSubmit={handleSavePersonalInfo} className="pt-2 space-y-4 text-[13px]">
                     <div>
-                      <label className="block text-slate-700 font-bold mb-1">Full Name *</label>
+                      <label className="block text-[#172234] font-bold mb-1">Full Name *</label>
                       <input
                         type="text"
                         required
                         value={formFullName}
                         onChange={(e) => setFormFullName(e.target.value)}
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                        className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                       />
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Gender</label>
+                        <label className="block text-[#172234] font-bold mb-1">Gender</label>
                         <select
                           value={formGender || 'None'}
                           onChange={(e) => setFormGender(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs cursor-pointer"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
                         >
                           <option value="None">None</option>
                           <option value="Male">Male</option>
@@ -1935,24 +2142,20 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
 
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Date of Birth</label>
-                        <input
-                          type="date"
-                          max={new Date().toISOString().split('T')[0]}
-                          value={formDOB}
-                          onChange={(e) => setFormDOB(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs cursor-pointer"
+                        <label className="block text-[#172234] font-bold mb-1">Date of Birth</label>
+                        <DateInput max={new Date().toISOString().split('T')[0]} value={formDOB} onChange={(e) => setFormDOB(e.target.value)}
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
                         />
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Marital Status</label>
+                        <label className="block text-[#172234] font-bold mb-1">Marital Status</label>
                         <select
                           value={formMaritalStatus}
                           onChange={(e) => setFormMaritalStatus(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs cursor-pointer"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
                         >
                           <option value="">Select status</option>
                           <option value="Single">Single</option>
@@ -1966,11 +2169,11 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Nationality</label>
+                        <label className="block text-[#172234] font-bold mb-1">Nationality</label>
                         <select
                           value={formNationality}
                           onChange={(e) => setFormNationality(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs cursor-pointer"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
                         >
                           <option value="">Select Nationality</option>
                           {WORLD_NATIONALITIES.map((nat) => (
@@ -1980,43 +2183,52 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
 
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Phone Number (Max 10 Digits)</label>
+                        <label className="block text-[#172234] font-bold mb-1">Phone Number (Max 10 Digits)</label>
                         <input
                           type="tel"
                           maxLength={10}
                           placeholder="e.g. 9845012345"
                           value={formPhone}
                           onChange={(e) => setFormPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                         />
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Email Address</label>
+                        <label className="block text-[#172234] font-bold mb-1">Email Address</label>
                         <input
                           type="email"
-                          value={formEmail}
-                          onChange={(e) => setFormEmail(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                          value={employee.email || ''}
+                          readOnly
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-[#f6f8fa] px-3 text-[13px] font-semibold text-[#172234] outline-none"
                         />
+                        {canChangeLoginEmail && (
+                          <button
+                            type="button"
+                            onClick={() => setChangeEmailOpen(true)}
+                            className="mt-2 cursor-pointer text-[12px] font-semibold text-[#2d628e] hover:text-[#17324e]"
+                          >
+                            Change login email
+                          </button>
+                        )}
                       </div>
 
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Health Care Provider</label>
+                        <label className="block text-[#172234] font-bold mb-1">Health Care Provider</label>
                         <input
                           type="text"
                           value={formHealthCare}
                           onChange={(e) => setFormHealthCare(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                         />
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Personal Tax ID</label>
+                        <label className="block text-[#172234] font-bold mb-1">Personal Tax ID</label>
                         <input
                           type="text"
                           maxLength={10}
@@ -2024,12 +2236,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           onChange={(e) =>
                             setFormTaxId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))
                           }
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs font-mono"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] font-mono"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Social Insurance / PF</label>
+                        <label className="block text-[#172234] font-bold mb-1">Social Insurance / PF</label>
                         <input
                           type="text"
                           maxLength={12}
@@ -2037,24 +2249,24 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           onChange={(e) =>
                             setFormSocialInsurance(e.target.value.replace(/\D/g, '').slice(0, 12))
                           }
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs font-mono"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] font-mono"
                         />
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#dde4e9]">
                       <button
                         type="button"
                         onClick={() => setIsEditingPersonalInfo(false)}
                         disabled={savingPersonalInfo}
-                        className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-bold cursor-pointer transition-colors text-xs disabled:opacity-60"
+                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] bg-white text-[#172234] hover:bg-[#f8fbfe] font-bold cursor-pointer transition-colors text-[13px] disabled:opacity-60"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
                         disabled={savingPersonalInfo}
-                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold cursor-pointer transition-all shadow-xs text-xs disabled:opacity-60"
+                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold cursor-pointer transition-all text-[13px] disabled:opacity-60"
                       >
                         {savingPersonalInfo ? 'Saving…' : 'Save Changes'}
                       </button>
@@ -2064,10 +2276,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 1b: Bank Details */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 shadow-xs text-[#172234] space-y-4">
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-[#f3f5f7]">
                   <h3 className="text-[15px] font-bold text-[#172234] tracking-tight">Bank Details</h3>
-                  {canEdit && (
+                  {canEditBank && (
                     <button
                       type="button"
                       onClick={handleStartBankEdit}
@@ -2080,7 +2292,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 {!isEditingBankDetails ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 pt-1 text-xs">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 pt-1 text-[13px]">
                     <div className="space-y-3.5">
                       <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
                         <span className="text-[#687789] font-semibold">Account holder</span>
@@ -2114,7 +2326,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <form onSubmit={handleSaveBankDetails} className="space-y-3.5 text-xs pt-1">
+                  <form onSubmit={handleSaveBankDetails} className="space-y-3.5 text-[13px] pt-1">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div>
                         <label className="block text-[#5e6c7b] font-bold mb-1">Account holder name</label>
@@ -2123,7 +2335,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           required
                           value={formAccountHolderName}
                           onChange={(e) => setFormAccountHolderName(e.target.value)}
-                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs"
+                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                         />
                       </div>
                       <div>
@@ -2143,7 +2355,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               }
                             }
                           }}
-                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs cursor-pointer"
+                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px] cursor-pointer"
                         >
                           <option value="">Select bank...</option>
                           {MAJOR_BANKS.map((bank) => (
@@ -2158,7 +2370,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             value={formBankName}
                             onChange={(e) => setFormBankName(e.target.value)}
                             placeholder="Specify bank name..."
-                            className="w-full mt-1.5 rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs"
+                            className="w-full mt-1.5 rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                           />
                         )}
                       </div>
@@ -2172,7 +2384,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           maxLength={18}
                           value={formAccountNumber}
                           onChange={(e) => setFormAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 18))}
-                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs font-mono"
+                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px] font-mono"
                         />
                       </div>
                       <div>
@@ -2185,7 +2397,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           onChange={(e) =>
                             setFormIfscCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11))
                           }
-                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-xs uppercase font-mono"
+                          className="w-full rounded-[7px] border border-[#c5d0d8] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px] uppercase font-mono"
                         />
                       </div>
                     </div>
@@ -2194,14 +2406,14 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         type="button"
                         disabled={savingBankDetails}
                         onClick={() => setIsEditingBankDetails(false)}
-                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] font-bold text-[#17324e] hover:bg-[#f3f5f7] cursor-pointer text-xs disabled:opacity-50"
+                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] font-bold text-[#17324e] hover:bg-[#f3f5f7] cursor-pointer text-[13px] disabled:opacity-50"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
                         disabled={savingBankDetails}
-                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold shadow-xs cursor-pointer text-xs disabled:opacity-50"
+                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold cursor-pointer text-[13px] disabled:opacity-50"
                       >
                         {savingBankDetails ? 'Saving…' : 'Save bank details'}
                       </button>
@@ -2211,13 +2423,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 2: Address Card */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Residential Address</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Residential Address</h3>
                   {canEditAddress && (
                     <button
                       onClick={() => setIsEditingAddress(!isEditingAddress)}
-                      className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
+                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
                       title={isEditingAddress ? 'Cancel' : 'Edit Address'}
                     >
                       <Edit2 className="w-4 h-4" strokeWidth={1.75} />
@@ -2226,17 +2438,17 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 {!isEditingAddress ? (
-                  <div className="space-y-3 pt-1 text-xs">
+                  <div className="space-y-3 pt-1 text-[13px]">
                     <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-slate-400 font-semibold">Primary Address</span>
-                      <span className="font-bold text-slate-900">
+                      <span className="text-[#687789] font-semibold">Primary Address</span>
+                      <span className="font-bold text-[#172234]">
                         {employee.primaryAddress || '—'}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-slate-400 font-semibold">City & State</span>
-                      <span className="font-bold text-slate-900">
+                      <span className="text-[#687789] font-semibold">City & State</span>
+                      <span className="font-bold text-[#172234]">
                         {employee.city || employee.stateProvince
                           ? `${employee.city || ''}${employee.city && employee.stateProvince ? ', ' : ''}${employee.stateProvince || ''}`
                           : '—'}
@@ -2244,8 +2456,8 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </div>
 
                     <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-slate-400 font-semibold">Country & Postal Code</span>
-                      <span className="font-bold text-slate-900">
+                      <span className="text-[#687789] font-semibold">Country & Postal Code</span>
+                      <span className="font-bold text-[#172234]">
                         {employee.country || employee.postalCode
                           ? `${employee.country || ''}${employee.country && employee.postalCode ? ' — ' : ''}${employee.postalCode || ''}`
                           : '—'}
@@ -2253,42 +2465,42 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <form onSubmit={handleSaveAddress} className="pt-2 space-y-4 text-xs">
+                  <form onSubmit={handleSaveAddress} className="pt-2 space-y-4 text-[13px]">
                     <div>
-                      <label className="block text-slate-700 font-bold mb-1">Primary Address</label>
+                      <label className="block text-[#172234] font-bold mb-1">Primary Address</label>
                       <input
                         type="text"
                         value={formPrimaryAddress}
                         onChange={(e) => setFormPrimaryAddress(e.target.value)}
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                        className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                       />
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">City</label>
+                        <label className="block text-[#172234] font-bold mb-1">City</label>
                         <input
                           type="text"
                           value={formCity}
                           onChange={(e) => setFormCity(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">State / Province</label>
+                        <label className="block text-[#172234] font-bold mb-1">State / Province</label>
                         <input
                           type="text"
                           value={formStateProvince}
                           onChange={(e) => setFormStateProvince(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Country</label>
+                        <label className="block text-[#172234] font-bold mb-1">Country</label>
                         <select
                           value={formCountry}
                           onChange={(e) => setFormCountry(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs cursor-pointer"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
                         >
                           <option value="">Select Country</option>
                           {WORLD_COUNTRIES.map((c) => (
@@ -2297,7 +2509,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         </select>
                       </div>
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Postal Code</label>
+                        <label className="block text-[#172234] font-bold mb-1">Postal Code</label>
                         <input
                           type="text"
                           maxLength={10}
@@ -2305,22 +2517,22 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           onChange={(e) =>
                             setFormPostCode(e.target.value.toUpperCase().replace(/[^A-Z0-9\s-]/g, '').slice(0, 10))
                           }
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                         />
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#dde4e9]">
                       <button
                         type="button"
                         onClick={() => setIsEditingAddress(false)}
-                        className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-bold text-xs"
+                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] bg-white text-[#172234] hover:bg-[#f8fbfe] font-bold text-[13px]"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs text-xs"
+                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px]"
                       >
                         Save Address
                       </button>
@@ -2330,13 +2542,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 3: Emergency Contact Card */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Emergency Contact</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Emergency Contact</h3>
                   {canEdit && (
                     <button
                       onClick={() => setIsEditingEmergency(!isEditingEmergency)}
-                      className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
+                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
                       title={isEditingEmergency ? 'Cancel' : 'Edit Emergency Contact'}
                     >
                       <Edit2 className="w-4 h-4" strokeWidth={1.75} />
@@ -2345,73 +2557,73 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 {!isEditingEmergency ? (
-                  <div className="space-y-3 pt-1 text-xs">
+                  <div className="space-y-3 pt-1 text-[13px]">
                     <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-slate-400 font-semibold">Contact Name</span>
-                      <span className="font-bold text-slate-900">
+                      <span className="text-[#687789] font-semibold">Contact Name</span>
+                      <span className="font-bold text-[#172234]">
                         {(!isDummyEmergency && employee.emergencyContact?.name) || '—'}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-slate-400 font-semibold">Relationship</span>
-                      <span className="font-bold text-slate-900">
+                      <span className="text-[#687789] font-semibold">Relationship</span>
+                      <span className="font-bold text-[#172234]">
                         {(!isDummyEmergency && employee.emergencyContact?.relation) || '—'}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-slate-400 font-semibold">Emergency Phone</span>
-                      <span className="font-bold text-slate-900">
+                      <span className="text-[#687789] font-semibold">Emergency Phone</span>
+                      <span className="font-bold text-[#172234]">
                         {(!isDummyEmergency && employee.emergencyContact?.phone) || '—'}
                       </span>
                     </div>
                   </div>
                 ) : (
-                  <form onSubmit={handleSaveEmergency} className="pt-2 space-y-4 text-xs">
+                  <form onSubmit={handleSaveEmergency} className="pt-2 space-y-4 text-[13px]">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Contact Name</label>
+                        <label className="block text-[#172234] font-bold mb-1">Contact Name</label>
                         <input
                           type="text"
                           value={formEmergencyName}
                           onChange={(e) => setFormEmergencyName(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Relationship</label>
+                        <label className="block text-[#172234] font-bold mb-1">Relationship</label>
                         <input
                           type="text"
                           value={formEmergencyRelation}
                           onChange={(e) => setFormEmergencyRelation(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Emergency Phone (Max 10 Digits)</label>
+                        <label className="block text-[#172234] font-bold mb-1">Emergency Phone (Max 10 Digits)</label>
                         <input
                           type="tel"
                           maxLength={10}
                           placeholder="e.g. 9845099887"
                           value={formEmergencyPhone}
                           onChange={(e) => setFormEmergencyPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                         />
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#dde4e9]">
                       <button
                         type="button"
                         onClick={() => setIsEditingEmergency(false)}
-                        className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-bold text-xs"
+                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] bg-white text-[#172234] hover:bg-[#f8fbfe] font-bold text-[13px]"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs text-xs"
+                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px]"
                       >
                         Save Contact
                       </button>
@@ -2426,15 +2638,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {/* TAB 2: JOB & ROLE                                     */}
           {/* ===================================================== */}
           {activeTab === 'job' && (
-            <div className="space-y-6">
+            <div className="employee-detail-section employee-detail-job space-y-6">
               {/* Section 1: Employment Information */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Employment & Role Details</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Employment & Role Details</h3>
                   {canEdit && (
                     <button
                       onClick={() => setIsEditingJobInfo(!isEditingJobInfo)}
-                      className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
+                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
                       title="Edit Job Information"
                     >
                       <Edit2 className="w-4 h-4" strokeWidth={1.75} />
@@ -2443,116 +2655,123 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 {!isEditingJobInfo ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-1 text-xs">
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Employee ID</span>
-                      <span className="font-bold text-slate-900 mt-1 block font-mono text-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-1 text-[13px]">
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Employee ID</span>
+                      <span className="font-bold text-[#172234] mt-1 block font-mono text-sm">
                         {employee.employeeId || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Job Role</span>
-                      <span className="font-bold text-slate-900 mt-1 block truncate">
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Job Role</span>
+                      <span className="font-bold text-[#172234] mt-1 block truncate">
                         {employee.designation || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Department</span>
-                      <span className="font-bold text-blue-600 mt-1 block">
-                        {employee.department || '—'}
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Department</span>
+                      <span className="font-bold text-[#17324e] mt-1 block">
+                        {profileDepartment || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Office Location</span>
-                      <span className="font-bold text-slate-900 mt-1 block">
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Team</span>
+                      <span className="font-bold text-[#172234] mt-1 block">
+                        {employee.team || '—'}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Office Location</span>
+                      <span className="font-bold text-[#172234] mt-1 block">
                         {employee.offices && employee.offices.length > 1
                           ? employee.offices.map((o) => o.name).filter(Boolean).join(', ')
                           : employee.officeName || employee.location || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">
                         {isInstitution ? 'Staff Lead / Department Head' : 'Reporting Manager'}
                       </span>
-                      <span className="font-bold text-emerald-600 mt-1 block truncate">
+                      <span className="font-bold text-[#53886b] mt-1 block truncate">
                         {managerDisplayName || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Service Duration</span>
-                      <span className="font-bold text-slate-900 mt-1 block">
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Service Duration</span>
+                      <span className="font-bold text-[#172234] mt-1 block">
                         {employee.serviceYear || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Joining Date</span>
-                      <span className="font-bold text-slate-900 mt-1 block">
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Joining Date</span>
+                      <span className="font-bold text-[#172234] mt-1 block">
                         {employee.joinDate || employee.joiningDate || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Employment Status</span>
-                      <span className="font-bold text-slate-900 mt-1 block">
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Employment Status</span>
+                      <span className="font-bold text-[#172234] mt-1 block">
                         {employee.status || 'Active'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Account Status</span>
-                      <span className={`font-bold text-xs mt-1 inline-flex items-center ${
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Account Status</span>
+                      <span className={`font-bold text-[13px] mt-1 inline-flex items-center ${
                         (employee.accountStatus === 'Active' || employee.accountStatus === 'In Probation')
-                          ? 'text-emerald-700'
+                          ? 'text-[#3f6a52]'
                           : employee.accountStatus === 'On Leave'
-                          ? 'text-purple-700'
+                          ? 'text-[#17324e]'
                           : (employee.accountStatus === 'Deactivated' || employee.accountStatus === 'Suspended')
-                          ? 'text-rose-700'
-                          : 'text-amber-700'
+                          ? 'text-[#8b3133]'
+                          : 'text-[#17324e]'
                       }`}>
                         {employee.accountStatus || (!isActivated ? 'Not Activated' : 'Active')}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                      <span className="text-[11px] text-slate-400 font-semibold block">Probation Status</span>
-                      <span className="font-bold text-slate-900 mt-1 block">
-                        {(employee.probationStatus || 'in_probation') === 'confirmed'
+                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Probation Status</span>
+                      <span className="font-bold text-[#172234] mt-1 block">
+                        {!effectiveQuotas.inProbation
                           ? 'Confirmed Permanent'
-                          : (employee.probationStatus || 'in_probation') === 'extended'
+                          : employee.probationStatus === 'extended'
                           ? `Extended (${employee.probationEndDate || 'Active'})`
                           : `In Probation (${employee.probationEndDate ? 'Ends ' + employee.probationEndDate : (employee.probationPeriodMonths || 3) + 'm'})`}
                       </span>
                     </div>
                   </div>
                 ) : (
-                  <form onSubmit={handleSaveJobInfo} className="pt-2 space-y-4 text-xs">
+                  <form onSubmit={handleSaveJobInfo} className="pt-2 space-y-4 text-[13px]">
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Employee ID</label>
+                        <label className="block text-[#172234] font-bold mb-1">Employee ID</label>
                         <input
                           type="text"
                           value={formEmployeeId}
                           onChange={(e) => setFormEmployeeId(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs font-mono"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] font-mono"
                         />
                       </div>
 
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="block text-slate-700 font-bold">Job Designation</label>
+                          <label className="block text-[#172234] font-bold">Job Designation</label>
                           <button
                             type="button"
                             onClick={() => {
                               setIsCustomDesignation(!isCustomDesignation);
                               if (!isCustomDesignation) setFormDesignation('');
                             }}
-                            className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold cursor-pointer"
+                            className="text-[12px] text-[#17324e] hover:text-[#285275] font-semibold cursor-pointer"
                           >
                             {isCustomDesignation ? 'Choose Preset' : '+ Custom'}
                           </button>
@@ -2563,7 +2782,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             value={formDesignation}
                             onChange={(e) => setFormDesignation(e.target.value)}
                             placeholder="Enter custom designation..."
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                            className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                             required
                             autoFocus
                           />
@@ -2578,7 +2797,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                 setFormDesignation(e.target.value);
                               }
                             }}
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs cursor-pointer"
+                            className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
                             required
                           >
                             {!formDesignation && (
@@ -2589,7 +2808,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                 {d}
                               </option>
                             ))}
-                            <option value="__custom__" className="text-blue-600 font-semibold">
+                            <option value="__custom__" className="text-[#17324e] font-semibold">
                               + Enter Custom Designation...
                             </option>
                           </select>
@@ -2598,14 +2817,14 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="block text-slate-700 font-bold">Department</label>
+                          <label className="block text-[#172234] font-bold">Department</label>
                           <button
                             type="button"
                             onClick={() => {
                               setIsCustomDepartment(!isCustomDepartment);
                               if (!isCustomDepartment) setFormDepartment('');
                             }}
-                            className="text-[10px] text-blue-600 hover:text-blue-700 font-semibold cursor-pointer"
+                            className="text-[12px] text-[#17324e] hover:text-[#285275] font-semibold cursor-pointer"
                           >
                             {isCustomDepartment ? 'Choose Preset' : '+ Custom'}
                           </button>
@@ -2614,9 +2833,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           <input
                             type="text"
                             value={formDepartment}
-                            onChange={(e) => setFormDepartment(e.target.value)}
+                            onChange={(e) => handleDepartmentChange(e.target.value)}
                             placeholder="Enter custom department..."
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                            className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                             required
                             autoFocus
                           />
@@ -2626,12 +2845,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             onChange={(e) => {
                               if (e.target.value === '__custom__') {
                                 setIsCustomDepartment(true);
-                                setFormDepartment('');
+                                handleDepartmentChange('');
                               } else {
-                                setFormDepartment(e.target.value);
+                                handleDepartmentChange(e.target.value);
                               }
                             }}
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs cursor-pointer"
+                            className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
                             required
                           >
                             {!formDepartment && (
@@ -2642,7 +2861,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                 {dept}
                               </option>
                             ))}
-                            <option value="__custom__" className="text-blue-600 font-semibold">
+                            <option value="__custom__" className="text-[#17324e] font-semibold">
                               + Enter Custom Department...
                             </option>
                           </select>
@@ -2650,13 +2869,72 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
 
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[#172234] font-bold">Team</label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCustomTeam(!isCustomTeam);
+                              if (!isCustomTeam) setFormTeam('');
+                            }}
+                            className="text-[12px] text-[#17324e] hover:text-[#285275] font-semibold cursor-pointer"
+                          >
+                            {isCustomTeam ? 'Choose Preset' : '+ Custom'}
+                          </button>
+                        </div>
+                        {isCustomTeam ? (
+                          <input
+                            type="text"
+                            value={formTeam}
+                            onChange={(e) => setFormTeam(e.target.value)}
+                            placeholder="Enter team name..."
+                            className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
+                            autoFocus
+                          />
+                        ) : (
+                          <select
+                            value={formTeam}
+                            onChange={(e) => {
+                              if (e.target.value === '__custom__') {
+                                setIsCustomTeam(true);
+                                setFormTeam('');
+                              } else {
+                                handleTeamChange(e.target.value);
+                              }
+                            }}
+                            className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
+                          >
+                            <option value="">Select team</option>
+                            {(() => {
+                              const options = teamsForDepartment(formDepartment);
+                              if (
+                                formTeam.trim() &&
+                                teamBelongsToDepartment(formTeam, formDepartment) &&
+                                !options.some((name) => name.toLowerCase() === formTeam.trim().toLowerCase())
+                              ) {
+                                options.unshift(formTeam.trim());
+                              }
+                              return options.map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ));
+                            })()}
+                            <option value="__custom__" className="text-[#17324e] font-semibold">
+                              + Enter Custom Team...
+                            </option>
+                          </select>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-[#172234] font-bold mb-1">
                           {isInstitution ? 'Reporting Staff Lead / HOD' : 'Reporting Line Manager'}
                         </label>
                         <select
                           value={formManagerId}
                           onChange={(e) => setFormManagerId(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs cursor-pointer"
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2] cursor-pointer"
                         >
                           <option value="">(None - Top Level Executive)</option>
                           {allEmployees
@@ -2670,19 +2948,19 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
 
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">
+                        <label className="block text-[#172234] font-bold mb-1">
                           Office Location{availableOffices.length > 1 ? 's' : ''}
                         </label>
                         {availableOffices.length === 0 ? (
-                          <p className="text-xs text-slate-500 py-2">(No offices configured)</p>
+                          <p className="text-[13px] text-[#5e6c7b] py-2">(No offices configured)</p>
                         ) : (
-                          <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 space-y-2 max-h-40 overflow-y-auto">
+                          <div className="rounded-[7px] border border-[#dde4e9] bg-white px-3 py-2.5 space-y-2 max-h-40 overflow-y-auto">
                             {availableOffices.map((o) => {
                               const checked = formOfficeNames.includes(o);
                               return (
                                 <label
                                   key={o}
-                                  className="flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer"
+                                  className="flex items-center gap-2 text-[13px] font-semibold text-[#172234] cursor-pointer"
                                 >
                                   <input
                                     type="checkbox"
@@ -2703,7 +2981,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                         return next;
                                       });
                                     }}
-                                    className="rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                                    className="rounded border-slate-300 text-[#172234] focus:ring-slate-400"
                                   />
                                   <span className="flex-1">{o}</span>
                                   {checked && (
@@ -2714,10 +2992,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                         setFormPrimaryOfficeName(o);
                                         setFormOfficeName(o);
                                       }}
-                                      className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                      className={`text-[12px] px-1.5 py-0.5 rounded ${
                                         formPrimaryOfficeName === o
-                                          ? 'bg-slate-900 text-white'
-                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                          ? 'bg-[#17324e] text-white'
+                                          : 'bg-[#e8eef2] text-[#5e6c7b] hover:bg-[#e8eef2]'
                                       }`}
                                     >
                                       {formPrimaryOfficeName === o ? 'Primary' : 'Set primary'}
@@ -2729,7 +3007,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           </div>
                         )}
                         {formOfficeNames.length > 0 && (
-                          <p className="text-[11px] text-slate-500 mt-1.5">
+                          <p className="text-[12px] text-[#5e6c7b] mt-1.5">
                             Primary: {formPrimaryOfficeName || formOfficeNames[0]}
                             {formOfficeNames.length > 1
                               ? ` · ${formOfficeNames.length} offices assigned`
@@ -2739,17 +3017,14 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
 
                       <div>
-                        <label className="block text-slate-700 font-bold mb-1">Join Date</label>
-                        <input
-                          type="date"
-                          value={formJoinDate}
-                          onChange={(e) => setFormJoinDate(e.target.value)}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 text-xs"
+                        <label className="block text-[#172234] font-bold mb-1">Join Date</label>
+                        <DateInput value={formJoinDate} onChange={(e) => setFormJoinDate(e.target.value)}
+                          className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white px-3 text-[13px] font-semibold text-[#172234] outline-none focus:border-[#17324e] focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                         />
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#dde4e9]">
                       <button
                         type="button"
                         onClick={() => {
@@ -2757,15 +3032,19 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           setIsCustomDesignation(false);
                           setIsCustomDepartment(false);
                           setFormDesignation(employee.designation || '');
-                          setFormDepartment(employee.department || '');
+                          setFormDepartment(
+                            alignedDepartment(employee.department, employee.team, departmentNames)
+                          );
+                          setFormTeam(employee.team || '');
+                          setIsCustomTeam(false);
                         }}
-                        className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-bold text-xs"
+                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] bg-white text-[#172234] hover:bg-[#f8fbfe] font-bold text-[13px]"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs text-xs"
+                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px]"
                       >
                         Save Organization Details
                       </button>
@@ -2775,13 +3054,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 2: Job Timeline */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Job Progression Timeline</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Job Progression Timeline</h3>
                   {canEdit && (
                     <button
                       onClick={() => setShowAddJobTimelineModal(true)}
-                      className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                      className="px-3.5 py-1.5 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px] transition-colors cursor-pointer flex items-center gap-1.5"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Add Milestone</span>
@@ -2790,9 +3069,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 <div className="overflow-x-auto pt-1">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-left text-[13px] border-collapse">
                     <thead>
-                      <tr className="font-bold text-slate-400 bg-slate-50 border-b border-slate-100">
+                      <tr className="font-bold text-[#687789] bg-[#f8fbfe] border-b border-[#dde4e9]">
                         <th className="p-3 rounded-l-xl">Effective Date</th>
                         <th className="p-3">Job Title</th>
                         <th className="p-3">Position Type</th>
@@ -2803,17 +3082,17 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     <tbody className="divide-y divide-slate-100">
                       {(employee.jobTimeline && employee.jobTimeline.length > 0 ? (
                         employee.jobTimeline.map((item) => (
-                          <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 font-semibold text-slate-800">{item.effectiveDate}</td>
-                            <td className="p-3 font-bold text-slate-900">{item.jobTitle}</td>
-                            <td className="p-3 text-slate-600">{item.positionType || '-'}</td>
-                            <td className="p-3 text-slate-800">{item.employmentType}</td>
-                            <td className="p-3 text-blue-600 font-semibold">{item.lineManager}</td>
+                          <tr key={item.id} className="hover:bg-[#f8fbfe] transition-colors">
+                            <td className="p-3 font-semibold text-[#172234]">{item.effectiveDate}</td>
+                            <td className="p-3 font-bold text-[#172234]">{item.jobTitle}</td>
+                            <td className="p-3 text-[#5e6c7b]">{item.positionType || '-'}</td>
+                            <td className="p-3 text-[#172234]">{item.employmentType}</td>
+                            <td className="p-3 text-[#17324e] font-semibold">{item.lineManager}</td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={5} className="p-6 text-center text-slate-400 font-medium">
+                          <td colSpan={5} className="p-6 text-center text-[#687789] font-medium">
                             No job progression milestones recorded.
                           </td>
                         </tr>
@@ -2824,13 +3103,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 3: Contract Timeline */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Contract Records</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Contract Records</h3>
                   {canEdit && (
                     <button
                       onClick={() => setShowAddContractModal(true)}
-                      className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                      className="px-3.5 py-1.5 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px] transition-colors cursor-pointer flex items-center gap-1.5"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Add Contract</span>
@@ -2839,9 +3118,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 <div className="overflow-x-auto pt-1">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-left text-[13px] border-collapse">
                     <thead>
-                      <tr className="font-bold text-slate-400 bg-slate-50 border-b border-slate-100">
+                      <tr className="font-bold text-[#687789] bg-[#f8fbfe] border-b border-[#dde4e9]">
                         <th className="p-3 rounded-l-xl">Contract #</th>
                         <th className="p-3">Contract Name</th>
                         <th className="p-3">Type</th>
@@ -2852,17 +3131,17 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     <tbody className="divide-y divide-slate-100">
                       {(employee.contractTimeline && employee.contractTimeline.length > 0 ? (
                         employee.contractTimeline.map((item) => (
-                          <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 font-mono font-bold text-slate-900">{item.contractNumber}</td>
-                            <td className="p-3 font-semibold text-slate-900">{item.contractName}</td>
-                            <td className="p-3 text-slate-600">{item.contractType}</td>
-                            <td className="p-3 text-slate-800">{item.startDate}</td>
-                            <td className="p-3 text-slate-500">{item.endDate || 'Indefinite'}</td>
+                          <tr key={item.id} className="hover:bg-[#f8fbfe] transition-colors">
+                            <td className="p-3 font-mono font-bold text-[#172234]">{item.contractNumber}</td>
+                            <td className="p-3 font-semibold text-[#172234]">{item.contractName}</td>
+                            <td className="p-3 text-[#5e6c7b]">{item.contractType}</td>
+                            <td className="p-3 text-[#172234]">{item.startDate}</td>
+                            <td className="p-3 text-[#5e6c7b]">{item.endDate || 'Indefinite'}</td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={5} className="p-6 text-center text-slate-400 font-medium">
+                          <td colSpan={5} className="p-6 text-center text-[#687789] font-medium">
                             No contract records found.
                           </td>
                         </tr>
@@ -2878,36 +3157,38 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {/* TAB: ATTENDANCE & LEAVES (DEDICATED EMPLOYEE RECORD)  */}
           {/* ===================================================== */}
           {activeTab === 'attendance_leave' && (
-            <div className="space-y-6">
+            <div className="space-y-6 employee-attendance-tab">
+              <EmployeeAttendanceCalendar logs={employeeAttendanceLogs} leaves={employeeLeaveRecords} holidays={state.customOptions?.holidays} workingDays={state.customOptions?.attendanceSettings?.workingDays} />
+              <details className="employee-attendance-history"><summary>All punch records</summary><div className="space-y-5">
               {/* Header Card / Profile Identity */}
-              <div className="bg-white dark:bg-[#151518] border border-slate-200/80 dark:border-[#282830] rounded-xl p-5 shadow-2xs text-slate-900 dark:text-white">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-slate-100 dark:border-[#282830]">
+              <div className="bg-white dark:bg-[#151518] border border-[#dde4e9] dark:border-[#282830] rounded-[7px] p-5 text-[#172234] dark:text-white">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-[#dde4e9] dark:border-[#282830]">
                   <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                    <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234] dark:text-white">
                       {isInstitution ? 'Staff Attendance & Leave Profile' : 'Attendance & Leave Profile'}
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {employee.designation || employee.name} ({employee.employeeId || 'EMP-ID'}) &bull; {employee.department}
+                    <p className="text-[13px] text-[#687789] mt-0.5">
+                      {employee.designation || employee.name} ({employee.employeeId || 'EMP-ID'}) &bull; {profileDepartment}
                     </p>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
                     {(employee.officeName || employee.location) && (
-                      <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 dark:bg-[#1f1f26] text-slate-600 dark:text-slate-300">
+                      <span className="px-2.5 py-1 rounded-[8px] text-[13px] font-semibold bg-[#e8eef2] dark:bg-[#1f1f26] text-[#5e6c7b] dark:text-slate-300">
                         {employee.officeName || employee.location}
                       </span>
                     )}
                     <span
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                      className={`px-2.5 py-1 rounded-[8px] text-[13px] font-bold ${
                         (employee.status || 'Active') === 'Active'
-                          ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50'
+                          ? 'bg-[#eaf1ee] dark:bg-emerald-950/40 text-[#3f6a52] dark:text-emerald-300 border border-[#53886b]/30 dark:border-emerald-800/50'
                           : (employee.status || '').includes('Probation') || (employee.status || '') === 'Not Activated'
-                          ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50'
+                          ? 'bg-[#f8fbfe] dark:bg-amber-950/40 text-[#17324e] dark:text-amber-300 border border-[#d8e8f2] dark:border-amber-800/50'
                           : (employee.status || '') === 'On Leave'
-                          ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50'
+                          ? 'bg-[#f8fbfe] dark:bg-purple-950/40 text-[#17324e] dark:text-purple-300 border border-purple-200 dark:border-purple-800/50'
                           : (employee.status || '') === 'Notice Period'
                           ? 'bg-orange-50 dark:bg-orange-950/40 text-orange-800 dark:text-orange-300 border border-orange-200 dark:border-orange-800/50'
-                          : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/50'
+                          : 'bg-[#faeeee] dark:bg-rose-950/40 text-[#8b3133] dark:text-rose-300 border border-[#8b3133]/25 dark:border-rose-800/50'
                       }`}
                     >
                       {employee.status || 'Active'}
@@ -2918,42 +3199,42 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 {/* 4 Clean Minimalist Metric Cards */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3.5">
                   {/* Present Days */}
-                  <div className="p-3.5 sm:p-4 rounded-lg bg-slate-50/70 dark:bg-[#18181d] border border-slate-100 dark:border-[#282830]">
-                    <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+                  <div className="p-3.5 sm:p-4 rounded-[8px] bg-[#f8fbfe]/70 dark:bg-[#18181d] border border-[#dde4e9] dark:border-[#282830]">
+                    <span className="text-[12px] font-bold text-[#687789] dark:text-[#5e6c7b] uppercase tracking-wider block">
                       Present Days
                     </span>
-                    <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">
+                    <p className="text-xl sm:text-2xl font-bold text-[#172234] dark:text-white mt-1 tabular-nums">
                       {presentDaysCount}{' '}
-                      <span className="text-xs font-normal text-slate-400">/ {employeeAttendanceLogs.length}</span>
+                      <span className="text-[13px] font-normal text-[#687789]">/ {employeeAttendanceLogs.length}</span>
                     </p>
                   </div>
 
                   {/* On-Time Rate */}
-                  <div className="p-3.5 sm:p-4 rounded-lg bg-slate-50/70 dark:bg-[#18181d] border border-slate-100 dark:border-[#282830]">
-                    <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+                  <div className="p-3.5 sm:p-4 rounded-[8px] bg-[#f8fbfe]/70 dark:bg-[#18181d] border border-[#dde4e9] dark:border-[#282830]">
+                    <span className="text-[12px] font-bold text-[#687789] dark:text-[#5e6c7b] uppercase tracking-wider block">
                       On-Time Rate
                     </span>
-                    <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">
+                    <p className="text-xl sm:text-2xl font-bold text-[#172234] dark:text-white mt-1 tabular-nums">
                       {employeeAttendanceLogs.length > 0 ? `${onTimePercent}%` : '—'}
                     </p>
                   </div>
 
                   {/* Avg Log-In */}
-                  <div className="p-3.5 sm:p-4 rounded-lg bg-slate-50/70 dark:bg-[#18181d] border border-slate-100 dark:border-[#282830]">
-                    <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+                  <div className="p-3.5 sm:p-4 rounded-[8px] bg-[#f8fbfe]/70 dark:bg-[#18181d] border border-[#dde4e9] dark:border-[#282830]">
+                    <span className="text-[12px] font-bold text-[#687789] dark:text-[#5e6c7b] uppercase tracking-wider block">
                       Avg Log-In
                     </span>
-                    <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mt-1 font-mono">
+                    <p className="text-xl sm:text-2xl font-bold text-[#172234] dark:text-white mt-1 font-mono">
                       {avgLogInStr}
                     </p>
                   </div>
 
                   {/* Avg Hours */}
-                  <div className="p-3.5 sm:p-4 rounded-lg bg-slate-50/70 dark:bg-[#18181d] border border-slate-100 dark:border-[#282830]">
-                    <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
+                  <div className="p-3.5 sm:p-4 rounded-[8px] bg-[#f8fbfe]/70 dark:bg-[#18181d] border border-[#dde4e9] dark:border-[#282830]">
+                    <span className="text-[12px] font-bold text-[#687789] dark:text-[#5e6c7b] uppercase tracking-wider block">
                       Avg Hours
                     </span>
-                    <p className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white mt-1 font-mono">
+                    <p className="text-xl sm:text-2xl font-bold text-[#172234] dark:text-white mt-1 font-mono">
                       {avgHoursStr}
                     </p>
                   </div>
@@ -2961,19 +3242,19 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* SECTION 1: DAILY ATTENDANCE & PUNCH-IN RECORDS */}
-              <div className="bg-white dark:bg-[#151518] border border-slate-200/80 dark:border-[#282830] rounded-xl p-5 sm:p-6 shadow-2xs text-slate-900 dark:text-white space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-[#282830]">
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+              <div className="bg-white dark:bg-[#151518] border border-[#dde4e9] dark:border-[#282830] rounded-[7px] p-5 sm:p-6 text-[#172234] dark:text-white space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#dde4e9] dark:border-[#282830]">
+                  <h4 className="text-sm font-bold text-[#172234] dark:text-white">
                     {isInstitution ? 'Staff Attendance Logs & Daily Punch-In Record' : 'Attendance & Shift Punch Records'}
                   </h4>
 
                   {/* Filter Dropdown */}
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400 font-medium">Status:</span>
+                    <span className="text-[13px] text-[#687789] font-medium">Status:</span>
                     <select
                       value={attStatusFilter}
                       onChange={(e) => setAttStatusFilter(e.target.value)}
-                      className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-[#282830] bg-slate-50 dark:bg-[#18181d] text-slate-700 dark:text-slate-300 outline-none focus:border-blue-500 cursor-pointer"
+                      className="px-2.5 py-1 text-[13px] font-semibold rounded-[8px] border border-[#dde4e9] dark:border-[#282830] bg-[#f8fbfe] dark:bg-[#18181d] text-[#172234] dark:text-slate-300 outline-none focus:border-[#17324e] cursor-pointer"
                     >
                       <option value="All">All Statuses</option>
                       <option value="Present">Present</option>
@@ -2987,9 +3268,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
                 {/* Attendance Table */}
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-left text-[13px] border-collapse">
                     <thead>
-                      <tr className="font-bold text-slate-400 dark:text-slate-500 bg-slate-50/70 dark:bg-[#18181d] border-b border-slate-100 dark:border-[#282830]">
+                      <tr className="font-bold text-[#687789] dark:text-[#5e6c7b] bg-[#f8fbfe]/70 dark:bg-[#18181d] border-b border-[#dde4e9] dark:border-[#282830]">
                         <th className="p-3 pl-4 rounded-l-lg">Date & Day</th>
                         <th className="p-3">Punch In</th>
                         <th className="p-3">Punch Out</th>
@@ -3002,34 +3283,34 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     <tbody className="divide-y divide-slate-100 dark:divide-[#282830]">
                       {employeeAttendanceLogs
                         .filter((log) => attStatusFilter === 'All' || log.status === attStatusFilter)
-                        .slice(0, 15)
+
                         .map((log, idx) => (
-                          <tr key={`${log.date}-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-[#18181d]/50 transition-colors">
+                          <tr key={`${log.date}-${idx}`} className="hover:bg-[#f8fbfe]/50 dark:hover:bg-[#18181d]/50 transition-colors">
                             <td className="p-3 pl-4 whitespace-nowrap">
-                              <span className="font-bold text-slate-900 dark:text-white font-mono">{log.date}</span>
-                              <span className="ml-2 text-slate-400 text-[11px] font-medium">{log.day}</span>
+                              <span className="font-bold text-[#172234] dark:text-white font-mono">{log.date}</span>
+                              <span className="ml-2 text-[#687789] text-[12px] font-medium">{log.day}</span>
                             </td>
                             <td className="p-3 whitespace-nowrap">
-                              <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">{log.inTime}</span>
+                              <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">{log.inTime}</span>
                             </td>
                             <td className="p-3 whitespace-nowrap">
-                              <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">{log.outTime}</span>
+                              <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">{log.outTime}</span>
                             </td>
                             <td className="p-3 whitespace-nowrap">
-                              <span className="font-bold text-slate-900 dark:text-white font-mono">{log.hours}</span>
+                              <span className="font-bold text-[#172234] dark:text-white font-mono">{log.hours}</span>
                             </td>
-                            <td className="p-3 text-slate-500 font-mono">{log.breakH}</td>
-                            <td className="p-3 text-slate-600 dark:text-slate-300 max-w-xs truncate">{log.loc}</td>
+                            <td className="p-3 text-[#5e6c7b] font-mono">{log.breakH}</td>
+                            <td className="p-3 text-[#5e6c7b] dark:text-slate-300 max-w-xs truncate">{log.loc}</td>
                             <td className="p-3 pr-4 text-right whitespace-nowrap">
                               <span
-                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] font-bold ${
                                   log.status === 'Present'
-                                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/40'
+                                    ? 'bg-[#eaf1ee] dark:bg-emerald-950/40 text-[#3f6a52] dark:text-emerald-300 border border-[#53886b]/30/80 dark:border-emerald-800/40'
                                     : log.status === 'Work From Home'
-                                    ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/40'
+                                    ? 'bg-[#f8fbfe] dark:bg-blue-950/40 text-[#17324e] dark:text-blue-300 border border-[#d8e8f2]/80 dark:border-blue-800/40'
                                     : log.status === 'Late' || log.status === 'Half Day'
-                                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/40'
-                                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200/80 dark:border-rose-800/40'
+                                    ? 'bg-[#f8fbfe] dark:bg-amber-950/40 text-[#17324e] dark:text-amber-300 border border-[#d8e8f2]/80 dark:border-amber-800/40'
+                                    : 'bg-[#faeeee] dark:bg-rose-950/40 text-[#8b3133] dark:text-rose-300 border border-[#8b3133]/25/80 dark:border-rose-800/40'
                                 }`}
                               >
                                 {log.status}
@@ -3039,7 +3320,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         ))}
                       {employeeAttendanceLogs.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="py-8 text-center text-slate-400 font-medium text-xs">
+                          <td colSpan={7} className="py-8 text-center text-[#687789] font-medium text-[13px]">
                             No attendance logs recorded for this employee.
                           </td>
                         </tr>
@@ -3049,14 +3330,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
               </div>
 
+                            </div></details>
               {/* SECTION 2: LEAVE BALANCE & ENTITLEMENTS */}
-              <div className="bg-white dark:bg-[#151518] border border-slate-200/80 dark:border-[#282830] rounded-xl p-5 sm:p-6 shadow-2xs text-slate-900 dark:text-white space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-[#282830]">
+              <div className="bg-white dark:bg-[#151518] border border-[#dde4e9] dark:border-[#282830] rounded-[7px] p-5 sm:p-6 text-[#172234] dark:text-white space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#dde4e9] dark:border-[#282830]">
                   <div>
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    <h4 className="text-sm font-bold text-[#172234] dark:text-white">
                       Leave Balances & Accrual Entitlements
                     </h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
+                    <p className="text-[13px] text-[#687789] mt-0.5">
                       {effectiveQuotas.isMonthlyCycle
                         ? effectiveQuotas.enableMonthlyRollover
                           ? `Monthly grant with unused rollover (month ${effectiveQuotas.monthsElapsed} of 12 in ${new Date().getFullYear()})`
@@ -3065,17 +3347,17 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </p>
                   </div>
 
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-[#1f1f26] text-slate-600 dark:text-slate-300">
+                  <span className="text-[13px] font-semibold px-2.5 py-1 rounded-[8px] bg-[#e8eef2] dark:bg-[#1f1f26] text-[#5e6c7b] dark:text-slate-300">
                     Policy: {effectiveQuotas.roleKey.toUpperCase()}
                   </span>
                 </div>
 
                 {/* Probation Warning Banner */}
                 {effectiveQuotas.inProbation && (
-                  <div className="p-3 rounded-lg bg-slate-50 dark:bg-[#18181d] border-l-4 border-amber-400 dark:border-amber-500 flex items-start gap-2.5 text-slate-600 dark:text-slate-300 text-xs">
-                    <Info className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="flex items-start gap-2.5 rounded-[8px] border border-[#d8e8f2] bg-[#f8fbfe] p-3 text-[13px] text-[#5e6c7b] dark:border-[#282830] dark:bg-[#18181d] dark:text-slate-300">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#2d628e]" />
                     <div>
-                      <strong className="font-semibold text-slate-800 dark:text-slate-200">Probation Active: </strong>
+                      <strong className="font-semibold text-[#172234] dark:text-slate-200">Probation Active: </strong>
                       {effectiveQuotas.probationPolicyNotice ||
                         'Paid leaves (Earned, Casual, Sick) are restricted during probation. Absences are recorded as Loss of Pay (LOP / Unpaid).'}
                     </div>
@@ -3083,51 +3365,51 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 )}
 
                 {/* 4 Leave Balance Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                <div className="employee-leave-balance-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                   {/* Paid / Privilege Leave (Earned Leave) */}
-                  <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-[#18181d] border border-slate-100 dark:border-[#282830] flex flex-col justify-between space-y-3">
+                  <div className="p-4 rounded-[7px] bg-[#f8fbfe]/70 dark:bg-[#18181d] border border-[#dde4e9] dark:border-[#282830] flex flex-col justify-between space-y-3">
                     <div>
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                      <span className="text-[13px] font-bold text-[#172234] dark:text-slate-200">
                         Paid / Privilege Leave (PL)
                       </span>
                       <div className="mt-2.5 flex items-baseline gap-1.5">
-                        <span className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums font-mono">
+                        <span className="text-2xl font-bold text-[#172234] dark:text-white tabular-nums font-mono">
                           {earnedLeft}
                         </span>
-                        <span className="text-xs font-medium text-slate-400">days available</span>
+                        <span className="text-[13px] font-medium text-[#687789]">days available</span>
                       </div>
                     </div>
 
-                    <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-[#282830] text-[11px]">
+                    <div className="space-y-1.5 pt-2 border-t border-[#dde4e9] dark:border-[#282830] text-[12px]">
                       {effectiveQuotas.isMonthlyCycle ? (
                         <>
-                          <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                          <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                             <span>Accrued to Date:</span>
-                            <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                            <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                               {effectiveQuotas.accruedThisCycle.earnedLeave} d ({effectiveQuotas.monthlyRates.earnedLeave} d/mo)
                             </span>
                           </div>
-                          <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                          <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                             <span>Annual Total:</span>
-                            <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                            <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                               {effectiveQuotas.annualQuotas.earnedLeave} d / year
                             </span>
                           </div>
                         </>
                       ) : (
-                        <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                        <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                           <span>Annual Quota:</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                          <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                             {effectiveQuotas.annualQuotas.earnedLeave} d / year
                           </span>
                         </div>
                       )}
-                      <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                      <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                         <span>Used / Approved:</span>
-                        <span className="font-semibold text-rose-600 dark:text-rose-400 font-mono">{earnedUsed} d</span>
+                        <span className="font-semibold text-[#8b3133] dark:text-rose-400 font-mono">{earnedUsed} d</span>
                       </div>
                       {effectiveQuotas.carryOver.earnedLeave > 0 && (
-                        <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium">
+                        <div className="flex justify-between text-[#53886b] dark:text-[#d7ebe0] font-medium">
                           <span>Carry-Over:</span>
                           <span className="font-mono">+{effectiveQuotas.carryOver.earnedLeave} d</span>
                         </div>
@@ -3136,49 +3418,49 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   </div>
 
                   {/* Casual Leave (CL) */}
-                  <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-[#18181d] border border-slate-100 dark:border-[#282830] flex flex-col justify-between space-y-3">
+                  <div className="p-4 rounded-[7px] bg-[#f8fbfe]/70 dark:bg-[#18181d] border border-[#dde4e9] dark:border-[#282830] flex flex-col justify-between space-y-3">
                     <div>
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                      <span className="text-[13px] font-bold text-[#172234] dark:text-slate-200">
                         Casual Leave (CL)
                       </span>
                       <div className="mt-2.5 flex items-baseline gap-1.5">
-                        <span className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums font-mono">
+                        <span className="text-2xl font-bold text-[#172234] dark:text-white tabular-nums font-mono">
                           {casualLeft}
                         </span>
-                        <span className="text-xs font-medium text-slate-400">days available</span>
+                        <span className="text-[13px] font-medium text-[#687789]">days available</span>
                       </div>
                     </div>
 
-                    <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-[#282830] text-[11px]">
+                    <div className="space-y-1.5 pt-2 border-t border-[#dde4e9] dark:border-[#282830] text-[12px]">
                       {effectiveQuotas.isMonthlyCycle ? (
                         <>
-                          <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                          <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                             <span>Accrued to Date:</span>
-                            <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                            <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                               {effectiveQuotas.accruedThisCycle.casualLeave} d ({effectiveQuotas.monthlyRates.casualLeave} d/mo)
                             </span>
                           </div>
-                          <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                          <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                             <span>Annual Total:</span>
-                            <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                            <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                               {effectiveQuotas.annualQuotas.casualLeave} d / year
                             </span>
                           </div>
                         </>
                       ) : (
-                        <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                        <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                           <span>Annual Quota:</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                          <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                             {effectiveQuotas.annualQuotas.casualLeave} d / year
                           </span>
                         </div>
                       )}
-                      <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                      <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                         <span>Used / Approved:</span>
-                        <span className="font-semibold text-rose-600 dark:text-rose-400 font-mono">{casualUsed} d</span>
+                        <span className="font-semibold text-[#8b3133] dark:text-rose-400 font-mono">{casualUsed} d</span>
                       </div>
                       {effectiveQuotas.carryOver.casualLeave > 0 && (
-                        <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium">
+                        <div className="flex justify-between text-[#53886b] dark:text-[#d7ebe0] font-medium">
                           <span>Carry-Over:</span>
                           <span className="font-mono">+{effectiveQuotas.carryOver.casualLeave} d</span>
                         </div>
@@ -3187,49 +3469,49 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   </div>
 
                   {/* Sick Leave (SL) */}
-                  <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-[#18181d] border border-slate-100 dark:border-[#282830] flex flex-col justify-between space-y-3">
+                  <div className="p-4 rounded-[7px] bg-[#f8fbfe]/70 dark:bg-[#18181d] border border-[#dde4e9] dark:border-[#282830] flex flex-col justify-between space-y-3">
                     <div>
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                      <span className="text-[13px] font-bold text-[#172234] dark:text-slate-200">
                         Sick Leave (SL)
                       </span>
                       <div className="mt-2.5 flex items-baseline gap-1.5">
-                        <span className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums font-mono">
+                        <span className="text-2xl font-bold text-[#172234] dark:text-white tabular-nums font-mono">
                           {sickLeft}
                         </span>
-                        <span className="text-xs font-medium text-slate-400">days available</span>
+                        <span className="text-[13px] font-medium text-[#687789]">days available</span>
                       </div>
                     </div>
 
-                    <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-[#282830] text-[11px]">
+                    <div className="space-y-1.5 pt-2 border-t border-[#dde4e9] dark:border-[#282830] text-[12px]">
                       {effectiveQuotas.isMonthlyCycle ? (
                         <>
-                          <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                          <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                             <span>Accrued to Date:</span>
-                            <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                            <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                               {effectiveQuotas.accruedThisCycle.sickLeave} d ({effectiveQuotas.monthlyRates.sickLeave} d/mo)
                             </span>
                           </div>
-                          <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                          <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                             <span>Annual Total:</span>
-                            <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                            <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                               {effectiveQuotas.annualQuotas.sickLeave} d / year
                             </span>
                           </div>
                         </>
                       ) : (
-                        <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                        <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                           <span>Annual Quota:</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                          <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                             {effectiveQuotas.annualQuotas.sickLeave} d / year
                           </span>
                         </div>
                       )}
-                      <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                      <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                         <span>Used / Approved:</span>
-                        <span className="font-semibold text-rose-600 dark:text-rose-400 font-mono">{sickUsed} d</span>
+                        <span className="font-semibold text-[#8b3133] dark:text-rose-400 font-mono">{sickUsed} d</span>
                       </div>
                       {effectiveQuotas.carryOver.sickLeave > 0 && (
-                        <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium">
+                        <div className="flex justify-between text-[#53886b] dark:text-[#d7ebe0] font-medium">
                           <span>Carry-Over:</span>
                           <span className="font-mono">+{effectiveQuotas.carryOver.sickLeave} d</span>
                         </div>
@@ -3238,33 +3520,33 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   </div>
 
                   {/* Comp-Off / Work From Home */}
-                  <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-[#18181d] border border-slate-100 dark:border-[#282830] flex flex-col justify-between space-y-3">
+                  <div className="p-4 rounded-[7px] bg-[#f8fbfe]/70 dark:bg-[#18181d] border border-[#dde4e9] dark:border-[#282830] flex flex-col justify-between space-y-3">
                     <div>
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                      <span className="text-[13px] font-bold text-[#172234] dark:text-slate-200">
                         Comp-Off / WFH
                       </span>
                       <div className="mt-2.5 flex items-baseline gap-1.5">
-                        <span className="text-2xl font-bold text-slate-900 dark:text-white tabular-nums font-mono">
+                        <span className="text-2xl font-bold text-[#172234] dark:text-white tabular-nums font-mono">
                           {wfhLeft}
                         </span>
-                        <span className="text-xs font-medium text-slate-400">days available</span>
+                        <span className="text-[13px] font-medium text-[#687789]">days available</span>
                       </div>
                     </div>
 
-                    <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-[#282830] text-[11px]">
-                      <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                    <div className="space-y-1.5 pt-2 border-t border-[#dde4e9] dark:border-[#282830] text-[12px]">
+                      <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                         <span>Allowance Quota:</span>
-                        <span className="font-semibold text-slate-700 dark:text-slate-300 font-mono">
+                        <span className="font-semibold text-[#172234] dark:text-slate-300 font-mono">
                           {totalWfh} d / year
                         </span>
                       </div>
-                      <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                      <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                         <span>Used / Taken:</span>
-                        <span className="font-semibold text-rose-600 dark:text-rose-400 font-mono">{wfhUsed} d</span>
+                        <span className="font-semibold text-[#8b3133] dark:text-rose-400 font-mono">{wfhUsed} d</span>
                       </div>
-                      <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                      <div className="flex justify-between text-[#5e6c7b] dark:text-[#687789]">
                         <span>Authorization:</span>
-                        <span className="font-semibold text-slate-600 dark:text-slate-300">Manager Approval</span>
+                        <span className="font-semibold text-[#5e6c7b] dark:text-slate-300">Manager Approval</span>
                       </div>
                     </div>
                   </div>
@@ -3272,18 +3554,18 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* SECTION 3: LEAVE APPLICATION HISTORY */}
-              <div className="bg-white dark:bg-[#151518] border border-slate-200/80 dark:border-[#282830] rounded-xl p-5 sm:p-6 shadow-2xs text-slate-900 dark:text-white space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-[#282830]">
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+              <div className="bg-white dark:bg-[#151518] border border-[#dde4e9] dark:border-[#282830] rounded-[7px] p-5 sm:p-6 text-[#172234] dark:text-white space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#dde4e9] dark:border-[#282830]">
+                  <h4 className="text-sm font-bold text-[#172234] dark:text-white">
                     Leave Application History
                   </h4>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400 font-medium">Status:</span>
+                    <span className="text-[13px] text-[#687789] font-medium">Status:</span>
                     <select
                       value={leaveStatusFilter}
                       onChange={(e) => setLeaveStatusFilter(e.target.value)}
-                      className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-[#282830] bg-slate-50 dark:bg-[#18181d] text-slate-700 dark:text-slate-300 outline-none focus:border-blue-500 cursor-pointer"
+                      className="px-2.5 py-1 text-[13px] font-semibold rounded-[8px] border border-[#dde4e9] dark:border-[#282830] bg-[#f8fbfe] dark:bg-[#18181d] text-[#172234] dark:text-slate-300 outline-none focus:border-[#17324e] cursor-pointer"
                     >
                       <option value="All">All Statuses</option>
                       <option value="Approved">Approved</option>
@@ -3294,9 +3576,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-left text-[13px] border-collapse">
                     <thead>
-                      <tr className="font-bold text-slate-400 dark:text-slate-500 bg-slate-50/70 dark:bg-[#18181d] border-b border-slate-100 dark:border-[#282830]">
+                      <tr className="font-bold text-[#687789] dark:text-[#5e6c7b] bg-[#f8fbfe]/70 dark:bg-[#18181d] border-b border-[#dde4e9] dark:border-[#282830]">
                         <th className="p-3 pl-4 rounded-l-lg">Leave Type</th>
                         <th className="p-3">Date Range & Duration</th>
                         <th className="p-3">Reason</th>
@@ -3309,35 +3591,35 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       {employeeLeaveRecords
                         .filter((l) => leaveStatusFilter === 'All' || l.status === leaveStatusFilter)
                         .map((l) => (
-                          <tr key={l.id} className="hover:bg-slate-50/50 dark:hover:bg-[#18181d]/50 transition-colors">
+                          <tr key={l.id} className="hover:bg-[#f8fbfe]/50 dark:hover:bg-[#18181d]/50 transition-colors">
                             <td className="p-3 pl-4 whitespace-nowrap">
-                              <span className="font-bold text-slate-900 dark:text-white">{l.leaveType}</span>
+                              <span className="font-bold text-[#172234] dark:text-white">{l.leaveType}</span>
                             </td>
                             <td className="p-3 whitespace-nowrap">
-                              <span className="font-bold text-slate-900 dark:text-white font-mono">
+                              <span className="font-bold text-[#172234] dark:text-white font-mono">
                                 {l.startDate} to {l.endDate}
                               </span>
-                              <span className="ml-1.5 text-blue-600 dark:text-blue-400 font-bold text-[11px]">
+                              <span className="ml-1.5 text-[#17324e] dark:text-blue-400 font-bold text-[12px]">
                                 ({l.daysCount}d)
                               </span>
                             </td>
-                            <td className="p-3 text-slate-600 dark:text-slate-300 max-w-xs truncate" title={l.reason}>
+                            <td className="p-3 text-[#5e6c7b] dark:text-slate-300 max-w-xs truncate" title={l.reason}>
                               {l.reason}
                             </td>
-                            <td className="p-3 text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap font-mono">
+                            <td className="p-3 text-[#5e6c7b] dark:text-[#687789] text-[12px] whitespace-nowrap font-mono">
                               {l.appliedOn || l.startDate || new Date().toISOString().substring(0, 10)}
                             </td>
-                            <td className="p-3 text-slate-600 dark:text-slate-300 text-[11px] whitespace-nowrap">
+                            <td className="p-3 text-[#5e6c7b] dark:text-slate-300 text-[12px] whitespace-nowrap">
                               {l.approvedBy || (isInstitution ? 'Staff Lead / Academic Dean' : 'Line Manager')}
                             </td>
                             <td className="p-3 pr-4 text-right whitespace-nowrap">
                               <span
-                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] font-bold ${
                                   l.status === 'Approved'
-                                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/40'
+                                    ? 'bg-[#eaf1ee] dark:bg-emerald-950/40 text-[#3f6a52] dark:text-emerald-300 border border-[#53886b]/30/80 dark:border-emerald-800/40'
                                     : l.status === 'Pending'
-                                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/40'
-                                    : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200/80 dark:border-rose-800/40'
+                                    ? 'bg-[#f8fbfe] dark:bg-amber-950/40 text-[#17324e] dark:text-amber-300 border border-[#d8e8f2]/80 dark:border-amber-800/40'
+                                    : 'bg-[#faeeee] dark:bg-rose-950/40 text-[#8b3133] dark:text-rose-300 border border-[#8b3133]/25/80 dark:border-rose-800/40'
                                 }`}
                               >
                                 {l.status}
@@ -3347,7 +3629,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         ))}
                       {employeeLeaveRecords.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="py-8 text-center text-slate-400 font-medium text-xs">
+                          <td colSpan={6} className="py-8 text-center text-[#687789] font-medium text-[13px]">
                             No leave applications filed for this employee.
                           </td>
                         </tr>
@@ -3363,14 +3645,14 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {/* TAB 3: PAYROLL & SALARY GROUP STRUCTURE               */}
           {/* ===================================================== */}
           {activeTab === 'payroll' && canEdit && (
-            <div className="space-y-6">
+            <div className="employee-detail-section employee-detail-payroll space-y-6">
               {/* Header with Edit Action */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">
+                  <h3 className="text-sm font-bold text-[#172234]">
                     Salary Structure & Compensation
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="text-[13px] text-[#5e6c7b] mt-0.5">
                     Manage employee compensation model, allowances, statutory deductions, and tax compliance.
                   </p>
                 </div>
@@ -3405,7 +3687,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             setFormPfUan(employee.pfUanNumber || '');
                             setFormEsiNumber(employee.esiNumber || '');
                           }}
-                          className="px-3.5 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                          className="px-3.5 py-1.5 rounded-[7px] border border-[#dde4e9] text-[13px] font-semibold text-[#5e6c7b] hover:bg-[#f8fbfe] cursor-pointer"
                         >
                           Cancel
                         </button>
@@ -3512,7 +3794,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               onUpdateEmployee(updated);
                               setIsEditingPayroll(false);
                           }}
-                          className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-xs font-semibold text-white shadow-xs cursor-pointer"
+                          className="px-4 py-1.5 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-[13px] font-semibold text-white cursor-pointer"
                         >
                           Save Changes
                         </button>
@@ -3543,7 +3825,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           setFormEsiNumber(employee.esiNumber || '');
                           setIsEditingPayroll(true);
                         }}
-                        className="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:text-blue-600 hover:border-blue-300 hover:bg-slate-50 transition-colors cursor-pointer"
+                        className="px-3.5 py-1.5 rounded-[7px] border border-[#dde4e9] bg-white text-[13px] font-semibold text-[#172234] hover:text-[#285275] hover:border-blue-300 hover:bg-[#f8fbfe] transition-colors cursor-pointer"
                       >
                         Edit Payroll Structure
                       </button>
@@ -3554,11 +3836,11 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
               {/* Edit Mode Panel: Interactive Salary & Allowance Builder */}
               {isEditingPayroll ? (
-                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
+                <div className="bg-white border border-[#dde4e9] rounded-[7px] p-6 space-y-6">
                   {/* Group & Classification */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-4 border-b border-slate-100">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-4 border-b border-[#dde4e9]">
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                      <label className="block text-[13px] font-bold text-[#172234] mb-1">
                         Assigned Payroll Group
                       </label>
                       <select
@@ -3571,7 +3853,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             setFormSalaryType(grp.salaryType);
                           }
                         }}
-                        className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
+                        className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-semibold"
                       >
                         <option value="">-- Direct Individual Structure (No Group) --</option>
                         {(state.customOptions?.payrollGroups || []).map((grp) => (
@@ -3583,13 +3865,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                      <label className="block text-[13px] font-bold text-[#172234] mb-1">
                         Salary Type *
                       </label>
                       <select
                         value={formSalaryType}
                         onChange={(e) => setFormSalaryType(e.target.value as SalaryType)}
-                        className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold"
+                        className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-bold"
                       >
                         <option value="monthly">Monthly Fixed CTC</option>
                         <option value="hourly">Hourly Timesheet Wage</option>
@@ -3607,13 +3889,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     const groupCustomFields = matchedGroup.customFields || [];
 
                     return (
-                      <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                      <div className="p-4 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9] space-y-3">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                           <div>
-                            <span className="font-bold text-slate-900 text-xs block">
+                            <span className="font-bold text-[#172234] text-[13px] block">
                               Group Defaults Available: {matchedGroup.name}
                             </span>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
+                            <p className="text-[12px] text-[#5e6c7b] mt-0.5">
                               {matchedGroup.baseSalaryDefault ? `Default Base ₹${matchedGroup.baseSalaryDefault.toLocaleString('en-IN')}` : ''}
                               {matchedGroup.hraDefault ? ` • HRA ₹${matchedGroup.hraDefault.toLocaleString('en-IN')}` : ''}
                               {groupAllowancesCount > 0 ? ` • ${groupAllowancesCount} Custom Allowances` : ''}
@@ -3638,7 +3920,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               }
                               showToast(`Applied default allowances & structure from "${matchedGroup.name}"`);
                             }}
-                            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs cursor-pointer shadow-xs whitespace-nowrap self-start sm:self-auto"
+                            className="px-3 py-1.5 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-semibold text-[13px] cursor-pointer whitespace-nowrap self-start sm:self-auto"
                           >
                             Apply Group Defaults
                           </button>
@@ -3646,14 +3928,14 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
                         {/* Group Custom Fields */}
                         {groupCustomFields.length > 0 && (
-                          <div className="pt-3 border-t border-slate-200">
-                            <span className="text-[11px] font-bold text-slate-800 uppercase tracking-wide block mb-2">
+                          <div className="pt-3 border-t border-[#dde4e9]">
+                            <span className="text-[12px] font-bold text-[#172234] uppercase tracking-wide block mb-2">
                               Group Custom Fields & Metadata
                             </span>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               {groupCustomFields.map((field) => (
                                 <div key={field.id} className="space-y-1">
-                                  <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
+                                  <label className="text-[12px] font-semibold text-[#172234] flex items-center gap-1">
                                     <span>{field.label}</span>
                                     {field.required && <span className="text-rose-500">*</span>}
                                   </label>
@@ -3666,7 +3948,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                           [field.id]: e.target.value,
                                         })
                                       }
-                                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl outline-none"
+                                      className="w-full px-3 py-1.5 text-[13px] bg-white border border-[#dde4e9] rounded-[7px] outline-none"
                                     >
                                       <option value="">-- Select {field.label} --</option>
                                       {(field.options || []).map((opt) => (
@@ -3686,7 +3968,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                           [field.id]: e.target.value,
                                         })
                                       }
-                                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl outline-none"
+                                      className="w-full px-3 py-1.5 text-[13px] bg-white border border-[#dde4e9] rounded-[7px] outline-none"
                                     />
                                   )}
                                 </div>
@@ -3701,7 +3983,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   {formSalaryType === 'hourly' ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                        <label className="block text-[13px] font-bold text-[#172234] mb-1">
                           Hourly Wage Rate (₹ / hr) *
                         </label>
                         <input
@@ -3710,13 +3992,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           value={moneyInputValue(formHourlyRate)}
                           onChange={(e) => setFormHourlyRate(parseMoneyInput(e.target.value))}
                           placeholder="0"
-                          className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold"
+                          className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-bold"
                         />
                       </div>
-                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-start gap-2.5 text-xs text-slate-700">
+                      <div className="p-3 bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] flex items-start gap-2.5 text-[13px] text-[#172234]">
                         <div>
                           <span className="font-bold">Hourly Tracking Active:</span>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
+                          <p className="text-[12px] text-[#5e6c7b] mt-0.5">
                             Standard monthly computation assumes 160 hrs @ ₹{formHourlyRate}/hr = ₹{(formHourlyRate * 160).toLocaleString('en-IN')}/mo with timesheet overtime calculation.
                           </p>
                         </div>
@@ -3727,10 +4009,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       {/* 1. EARNINGS & ALLOWANCES BUILDER */}
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
-                          <h4 className="text-xs font-bold text-slate-900">
+                          <h4 className="text-[13px] font-bold text-[#172234]">
                             1. Base Pay & Allowances (Earnings)
                           </h4>
-                          <span className="text-[11px] text-slate-400">
+                          <span className="text-[12px] text-[#687789]">
                             Customizable allowances per company policy
                           </span>
                         </div>
@@ -3739,10 +4021,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           {/* Basic Salary */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-700">
+                              <label className="text-[13px] font-semibold text-[#172234]">
                                 Basic Salary (₹) *
                               </label>
-                              <span className="text-[10px] text-slate-400">Core Pay</span>
+                              <span className="text-[12px] text-[#687789]">Core Pay</span>
                             </div>
                             <input
                               type="number"
@@ -3750,21 +4032,21 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               value={moneyInputValue(formBaseSalary)}
                               onChange={(e) => setFormBaseSalary(parseMoneyInput(e.target.value))}
                               placeholder="0"
-                              className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold"
+                              className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-bold"
                             />
                           </div>
 
                           {/* House Rent Allowance (HRA) */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-700">
+                              <label className="text-[13px] font-semibold text-[#172234]">
                                 House Rent Allowance (HRA ₹)
                               </label>
                               <div className="flex gap-1">
                                 <button
                                   type="button"
                                   onClick={() => setFormHra(Math.round(formBaseSalary * 0.4))}
-                                  className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 cursor-pointer"
+                                  className="text-[12px] px-1.5 py-0.5 rounded bg-[#e8eef2] text-[#172234] font-bold hover:bg-[#e8eef2] cursor-pointer"
                                   title="Set to 40% of Basic (Non-Metro)"
                                 >
                                   40%
@@ -3772,7 +4054,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => setFormHra(Math.round(formBaseSalary * 0.5))}
-                                  className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 cursor-pointer"
+                                  className="text-[12px] px-1.5 py-0.5 rounded bg-[#e8eef2] text-[#172234] font-bold hover:bg-[#e8eef2] cursor-pointer"
                                   title="Set to 50% of Basic (Metro)"
                                 >
                                   50%
@@ -3785,17 +4067,17 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               value={moneyInputValue(formHra)}
                               onChange={(e) => setFormHra(parseMoneyInput(e.target.value))}
                               placeholder="0"
-                              className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
+                              className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-semibold"
                             />
                           </div>
 
                           {/* Special Allowance */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-700">
+                              <label className="text-[13px] font-semibold text-[#172234]">
                                 Special Allowance (₹)
                               </label>
-                              <span className="text-[10px] text-slate-400">Balancing Pay</span>
+                              <span className="text-[12px] text-[#687789]">Balancing Pay</span>
                             </div>
                             <input
                               type="number"
@@ -3803,20 +4085,20 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               value={moneyInputValue(formSpecialAllowance)}
                               onChange={(e) => setFormSpecialAllowance(parseMoneyInput(e.target.value))}
                               placeholder="0"
-                              className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
+                              className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-semibold"
                             />
                           </div>
 
                           {/* Conveyance Allowance */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-700">
+                              <label className="text-[13px] font-semibold text-[#172234]">
                                 Conveyance Allowance (₹)
                               </label>
                               <button
                                 type="button"
                                 onClick={() => setFormConveyanceAllowance(1600)}
-                                className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 cursor-pointer"
+                                className="text-[12px] px-1.5 py-0.5 rounded bg-[#e8eef2] text-[#172234] font-bold hover:bg-[#e8eef2] cursor-pointer"
                               >
                                 ₹1.6k Std
                               </button>
@@ -3827,20 +4109,20 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               value={moneyInputValue(formConveyanceAllowance)}
                               onChange={(e) => setFormConveyanceAllowance(parseMoneyInput(e.target.value))}
                               placeholder="0"
-                              className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
+                              className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-semibold"
                             />
                           </div>
 
                           {/* Medical Allowance */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-700">
+                              <label className="text-[13px] font-semibold text-[#172234]">
                                 Medical Reimbursement (₹)
                               </label>
                               <button
                                 type="button"
                                 onClick={() => setFormMedicalAllowance(1250)}
-                                className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 cursor-pointer"
+                                className="text-[12px] px-1.5 py-0.5 rounded bg-[#e8eef2] text-[#172234] font-bold hover:bg-[#e8eef2] cursor-pointer"
                               >
                                 ₹1.25k Std
                               </button>
@@ -3851,17 +4133,17 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               value={moneyInputValue(formMedicalAllowance)}
                               onChange={(e) => setFormMedicalAllowance(parseMoneyInput(e.target.value))}
                               placeholder="0"
-                              className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
+                              className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-semibold"
                             />
                           </div>
 
                           {/* Other Allowances */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-700">
+                              <label className="text-[13px] font-semibold text-[#172234]">
                                 Other Fixed Allowance (₹)
                               </label>
-                              <span className="text-[10px] text-slate-400">General</span>
+                              <span className="text-[12px] text-[#687789]">General</span>
                             </div>
                             <input
                               type="number"
@@ -3869,7 +4151,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               value={moneyInputValue(formOtherAllowances)}
                               onChange={(e) => setFormOtherAllowances(parseMoneyInput(e.target.value))}
                               placeholder="0"
-                              className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
+                              className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-semibold"
                             />
                           </div>
                         </div>
@@ -3877,7 +4159,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         {/* Dynamic Custom Allowances */}
                         <div className="pt-2">
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-[11px] font-bold text-slate-700">
+                            <span className="text-[12px] font-bold text-[#172234]">
                               Custom & Flexible Allowances
                             </span>
                             <button
@@ -3888,14 +4170,14 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                   { id: `alw_${Date.now()}`, name: 'Remote Work Allowance', amount: 3000 },
                                 ]);
                               }}
-                              className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
+                              className="text-[12px] font-semibold text-[#17324e] hover:text-[#285275] cursor-pointer"
                             >
                               + Add Custom Allowance
                             </button>
                           </div>
 
                           {formCustomAllowances.length === 0 ? (
-                            <div className="p-3 border border-dashed border-slate-200 rounded-xl text-center text-xs text-slate-400">
+                            <div className="p-3 border border-dashed border-[#dde4e9] rounded-[7px] text-center text-[13px] text-[#687789]">
                               No custom allowances added. Click "+ Add Custom Allowance" to add allowances like Remote Work, Food, Shift, or Travel.
                             </div>
                           ) : (
@@ -3903,7 +4185,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               {formCustomAllowances.map((alw, index) => (
                                 <div
                                   key={alw.id || `form_alw_${index}`}
-                                  className="flex items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                                  className="flex items-center gap-2 p-2.5 bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px]"
                                 >
                                   <input
                                     type="text"
@@ -3914,10 +4196,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                       updated[index].name = e.target.value;
                                       setFormCustomAllowances(updated);
                                     }}
-                                    className="flex-1 px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none font-semibold text-slate-900"
+                                    className="flex-1 px-3 py-1.5 text-[13px] bg-white border border-[#dde4e9] rounded-[8px] outline-none font-semibold text-[#172234]"
                                   />
                                   <div className="relative w-36">
-                                    <span className="absolute left-2.5 top-1.5 text-slate-400 text-xs">₹</span>
+                                    <span className="absolute left-2.5 top-1.5 text-[#687789] text-[13px]">₹</span>
                                     <input
                                       type="number"
                                       min={0}
@@ -3928,7 +4210,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                         setFormCustomAllowances(updated);
                                       }}
                                       placeholder="0"
-                                      className="w-full pl-6 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg outline-none font-bold text-slate-900"
+                                      className="w-full pl-6 pr-3 py-1.5 text-[13px] bg-white border border-[#dde4e9] rounded-[8px] outline-none font-bold text-[#172234]"
                                     />
                                   </div>
                                   <button
@@ -3936,7 +4218,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                     onClick={() => {
                                       setFormCustomAllowances(formCustomAllowances.filter((_, i) => i !== index));
                                     }}
-                                    className="px-2 py-1 text-xs text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                                    className="px-2 py-1 text-[13px] text-[#687789] hover:text-[#8b3133] rounded-[8px] transition-colors cursor-pointer"
                                     title="Remove Allowance"
                                   >
                                     Remove
@@ -3949,12 +4231,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
 
                       {/* 2. DEDUCTIONS BUILDER */}
-                      <div className="space-y-3 pt-4 border-t border-slate-100">
+                      <div className="space-y-3 pt-4 border-t border-[#dde4e9]">
                         <div className="flex items-center justify-between">
-                          <h4 className="text-xs font-bold text-slate-900">
+                          <h4 className="text-[13px] font-bold text-[#172234]">
                             2. Statutory & Tax Deductions
                           </h4>
-                          <span className="text-[11px] text-slate-400">
+                          <span className="text-[12px] text-[#687789]">
                             Automatic formulas and statutory ceilings
                           </span>
                         </div>
@@ -3963,13 +4245,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           {/* PF Deduction */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-700">
+                              <label className="text-[13px] font-semibold text-[#172234]">
                                 Employee PF / EPF (₹)
                               </label>
                               <button
                                 type="button"
                                 onClick={() => setFormPfDeduction(Math.round(Math.min(formBaseSalary, 15000) * 0.12))}
-                                className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 cursor-pointer"
+                                className="text-[12px] px-1.5 py-0.5 rounded bg-[#e8eef2] text-[#172234] font-bold hover:bg-[#e8eef2] cursor-pointer"
                               >
                                 Auto 12%
                               </button>
@@ -3980,20 +4262,20 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               value={moneyInputValue(formPfDeduction)}
                               onChange={(e) => setFormPfDeduction(parseMoneyInput(e.target.value))}
                               placeholder="0"
-                              className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
+                              className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-semibold"
                             />
                           </div>
 
                           {/* Professional Tax */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-700">
+                              <label className="text-[13px] font-semibold text-[#172234]">
                                 Professional Tax (PT ₹)
                               </label>
                               <button
                                 type="button"
                                 onClick={() => setFormProfessionalTax(200)}
-                                className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 cursor-pointer"
+                                className="text-[12px] px-1.5 py-0.5 rounded bg-[#e8eef2] text-[#172234] font-bold hover:bg-[#e8eef2] cursor-pointer"
                               >
                                 ₹200 Std
                               </button>
@@ -4004,20 +4286,20 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               value={moneyInputValue(formProfessionalTax)}
                               onChange={(e) => setFormProfessionalTax(parseMoneyInput(e.target.value))}
                               placeholder="0"
-                              className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
+                              className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-semibold"
                             />
                           </div>
 
                           {/* Income Tax / TDS */}
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-semibold text-slate-700">
+                              <label className="text-[13px] font-semibold text-[#172234]">
                                 Tax Withholding (TDS ₹)
                               </label>
                               <button
                                 type="button"
                                 onClick={() => setFormTaxDeduction(Math.round(formBaseSalary * 0.08))}
-                                className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 cursor-pointer"
+                                className="text-[12px] px-1.5 py-0.5 rounded bg-[#e8eef2] text-[#172234] font-bold hover:bg-[#e8eef2] cursor-pointer"
                               >
                                 Auto 8%
                               </button>
@@ -4028,7 +4310,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               value={moneyInputValue(formTaxDeduction)}
                               onChange={(e) => setFormTaxDeduction(parseMoneyInput(e.target.value))}
                               placeholder="0"
-                              className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-semibold"
+                              className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e] font-semibold"
                             />
                           </div>
                         </div>
@@ -4037,13 +4319,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   )}
 
                   {/* 3. STATUTORY IDENTIFIERS */}
-                  <div className="pt-4 border-t border-slate-100">
-                    <h4 className="text-xs font-bold text-slate-900 mb-3">
+                  <div className="pt-4 border-t border-[#dde4e9]">
+                    <h4 className="text-[13px] font-bold text-[#172234] mb-3">
                       3. Statutory Identifiers & Tax Codes
                     </h4>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                       <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        <label className="block text-[13px] font-semibold text-[#172234] mb-1">
                           PAN / Tax ID
                         </label>
                         <input
@@ -4054,11 +4336,11 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           onChange={(e) =>
                             setFormPanNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))
                           }
-                          className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                          className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e]"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        <label className="block text-[13px] font-semibold text-[#172234] mb-1">
                           PF Universal Account (UAN)
                         </label>
                         <input
@@ -4067,11 +4349,11 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           placeholder="e.g. 100918273645"
                           value={formPfUan}
                           onChange={(e) => setFormPfUan(e.target.value.replace(/\D/g, '').slice(0, 12))}
-                          className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                          className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e]"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        <label className="block text-[13px] font-semibold text-[#172234] mb-1">
                           ESIC Insurance Number
                         </label>
                         <input
@@ -4080,7 +4362,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           placeholder="e.g. 31000889210001"
                           value={formEsiNumber}
                           onChange={(e) => setFormEsiNumber(e.target.value.replace(/\D/g, '').slice(0, 17))}
-                          className="w-full px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                          className="w-full px-3.5 py-2 text-[13px] bg-[#f8fbfe] border border-[#dde4e9] rounded-[7px] outline-none focus:border-[#17324e]"
                         />
                       </div>
                     </div>
@@ -4103,28 +4385,28 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     const net = Math.max(0, gross - deductions);
 
                     return (
-                      <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div className="p-4 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9] grid grid-cols-2 sm:grid-cols-4 gap-3 text-[13px]">
                         <div>
-                          <span className="text-slate-400 block text-[11px]">Monthly Gross</span>
-                          <span className="text-base font-bold text-slate-900">
+                          <span className="text-[#687789] block text-[12px]">Monthly Gross</span>
+                          <span className="text-base font-bold text-[#172234]">
                             ₹{gross.toLocaleString('en-IN')}
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-400 block text-[11px]">Monthly Deductions</span>
-                          <span className="text-base font-bold text-slate-700">
+                          <span className="text-[#687789] block text-[12px]">Monthly Deductions</span>
+                          <span className="text-base font-bold text-[#172234]">
                             -₹{deductions.toLocaleString('en-IN')}
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-400 block text-[11px]">Net Take-Home</span>
-                          <span className="text-base font-bold text-blue-600">
+                          <span className="text-[#687789] block text-[12px]">Net Take-Home</span>
+                          <span className="text-base font-bold text-[#17324e]">
                             ₹{net.toLocaleString('en-IN')} / mo
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-400 block text-[11px]">Annualized CTC</span>
-                          <span className="text-base font-bold text-slate-900">
+                          <span className="text-[#687789] block text-[12px]">Annualized CTC</span>
+                          <span className="text-base font-bold text-[#172234]">
                             ₹{(gross * 12).toLocaleString('en-IN')} / yr
                           </span>
                         </div>
@@ -4140,12 +4422,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
                     if (!hasSalaryConfig) {
                       return (
-                        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-3">
-                          <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
+                        <div className="bg-white border border-[#dde4e9] rounded-[7px] p-8 text-center space-y-3">
+                          <div className="w-12 h-12 rounded-full bg-[#e8eef2] flex items-center justify-center mx-auto text-[#687789]">
                             <CreditCard className="w-6 h-6" />
                           </div>
-                          <h4 className="text-sm font-bold text-slate-900">Salary Structure Not Configured</h4>
-                          <p className="text-xs text-slate-500 max-w-md mx-auto">
+                          <h4 className="text-sm font-bold text-[#172234]">Salary Structure Not Configured</h4>
+                          <p className="text-[13px] text-[#5e6c7b] max-w-md mx-auto">
                             No salary structure, fixed CTC, or hourly wage has been configured for this employee yet. Click "Edit Payroll Structure" above to define their compensation package.
                           </p>
                         </div>
@@ -4175,12 +4457,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     return (
                       <div className="space-y-6">
                         {/* Top Compensation Metrics Card */}
-                        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
-                          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                            <h4 className="text-xs font-bold text-slate-900">
+                        <div className="bg-white border border-[#dde4e9] rounded-[7px] p-5">
+                          <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                            <h4 className="text-[13px] font-bold text-[#172234]">
                               Compensation Overview
                             </h4>
-                            <span className="text-xs text-slate-400 font-normal">
+                            <span className="text-[13px] text-[#687789] font-normal">
                               {employee.salaryType === 'hourly'
                                 ? 'Hourly Timesheet • Bi-weekly cycle'
                                 : employee.salaryType === 'compliance'
@@ -4191,40 +4473,40 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
                           <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 pt-4">
                             <div>
-                              <span className="text-xs font-medium text-slate-500 block">Net Take-Home Pay</span>
-                              <div className="text-2xl font-bold text-blue-600 tracking-tight mt-1 flex items-baseline">
+                              <span className="text-[13px] font-medium text-[#5e6c7b] block">Net Take-Home Pay</span>
+                              <div className="text-2xl font-bold text-[#17324e] tracking-tight mt-1 flex items-baseline">
                                 <span>
                                   {employee.salaryType === 'hourly'
                                     ? `₹${(employee.hourlyRate || 650).toLocaleString('en-IN')}`
                                     : `₹${net.toLocaleString('en-IN')}`}
                                 </span>
-                                <span className="text-xs font-normal text-slate-400 ml-1">
+                                <span className="text-[13px] font-normal text-[#687789] ml-1">
                                   {employee.salaryType === 'hourly' ? '/ hr' : '/ mo'}
                                 </span>
                               </div>
                             </div>
 
                             <div>
-                              <span className="text-xs font-medium text-slate-500 block">Gross Remuneration</span>
-                              <div className="text-2xl font-bold text-slate-900 tracking-tight mt-1 flex items-baseline">
+                              <span className="text-[13px] font-medium text-[#5e6c7b] block">Gross Remuneration</span>
+                              <div className="text-2xl font-bold text-[#172234] tracking-tight mt-1 flex items-baseline">
                                 <span>₹{gross.toLocaleString('en-IN')}</span>
-                                <span className="text-xs font-normal text-slate-400 ml-1">/ mo</span>
+                                <span className="text-[13px] font-normal text-[#687789] ml-1">/ mo</span>
                               </div>
                             </div>
 
                             <div>
-                              <span className="text-xs font-medium text-slate-500 block">Monthly Deductions</span>
-                              <div className="text-2xl font-bold text-slate-700 tracking-tight mt-1 flex items-baseline">
+                              <span className="text-[13px] font-medium text-[#5e6c7b] block">Monthly Deductions</span>
+                              <div className="text-2xl font-bold text-[#172234] tracking-tight mt-1 flex items-baseline">
                                 <span>-₹{deductions.toLocaleString('en-IN')}</span>
-                                <span className="text-xs font-normal text-slate-400 ml-1">/ mo</span>
+                                <span className="text-[13px] font-normal text-[#687789] ml-1">/ mo</span>
                               </div>
                             </div>
 
                             <div>
-                              <span className="text-xs font-medium text-slate-500 block">Annualized Gross CTC</span>
-                              <div className="text-2xl font-bold text-slate-900 tracking-tight mt-1 flex items-baseline">
+                              <span className="text-[13px] font-medium text-[#5e6c7b] block">Annualized Gross CTC</span>
+                              <div className="text-2xl font-bold text-[#172234] tracking-tight mt-1 flex items-baseline">
                                 <span>₹{(gross * 12).toLocaleString('en-IN')}</span>
-                                <span className="text-xs font-normal text-slate-400 ml-1">/ yr</span>
+                                <span className="text-[13px] font-normal text-[#687789] ml-1">/ yr</span>
                               </div>
                             </div>
                           </div>
@@ -4233,125 +4515,125 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         {/* Detailed Remuneration Breakdown: Earnings vs Deductions */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                           {/* 1. Earnings & Allowances Card */}
-                          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs flex flex-col justify-between">
+                          <div className="bg-white border border-[#dde4e9] rounded-[7px] overflow-hidden flex flex-col justify-between">
                             <div>
-                              <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
-                                <h4 className="font-bold text-xs text-slate-900">
+                              <div className="px-5 py-3.5 border-b border-[#dde4e9] flex items-center justify-between">
+                                <h4 className="font-bold text-[13px] text-[#172234]">
                                   Earnings & Allowances
                                 </h4>
-                                <span className="text-[11px] font-medium text-slate-400">Monthly (₹)</span>
+                                <span className="text-[12px] font-medium text-[#687789]">Monthly (₹)</span>
                               </div>
-                              <div className="divide-y divide-slate-100 text-xs">
-                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                                  <span className="text-slate-600 font-medium">Basic Salary</span>
-                                  <span className="font-semibold text-slate-900">
+                              <div className="divide-y divide-slate-100 text-[13px]">
+                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
+                                  <span className="text-[#5e6c7b] font-medium">Basic Salary</span>
+                                  <span className="font-semibold text-[#172234]">
                                     ₹{basic.toLocaleString('en-IN')}
                                   </span>
                                 </div>
-                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                                  <span className="text-slate-600 font-medium">House Rent Allowance (HRA)</span>
-                                  <span className="font-medium text-slate-900">
+                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
+                                  <span className="text-[#5e6c7b] font-medium">House Rent Allowance (HRA)</span>
+                                  <span className="font-medium text-[#172234]">
                                     ₹{hra.toLocaleString('en-IN')}
                                   </span>
                                 </div>
-                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                                  <span className="text-slate-600 font-medium">Special Allowance</span>
-                                  <span className="font-medium text-slate-900">
+                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
+                                  <span className="text-[#5e6c7b] font-medium">Special Allowance</span>
+                                  <span className="font-medium text-[#172234]">
                                     ₹{special.toLocaleString('en-IN')}
                                   </span>
                                 </div>
                                 {conv > 0 && (
-                                  <div className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                                    <span className="text-slate-600 font-medium">Conveyance Allowance</span>
-                                    <span className="font-medium text-slate-900">
+                                  <div className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
+                                    <span className="text-[#5e6c7b] font-medium">Conveyance Allowance</span>
+                                    <span className="font-medium text-[#172234]">
                                       ₹{conv.toLocaleString('en-IN')}
                                     </span>
                                   </div>
                                 )}
                                 {med > 0 && (
-                                  <div className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                                    <span className="text-slate-600 font-medium">Medical Reimbursement</span>
-                                    <span className="font-medium text-slate-900">
+                                  <div className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
+                                    <span className="text-[#5e6c7b] font-medium">Medical Reimbursement</span>
+                                    <span className="font-medium text-[#172234]">
                                       ₹{med.toLocaleString('en-IN')}
                                     </span>
                                   </div>
                                 )}
                                 {other > 0 && (
-                                  <div className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                                    <span className="text-slate-600 font-medium">Other Allowances</span>
-                                    <span className="font-medium text-slate-900">
+                                  <div className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
+                                    <span className="text-[#5e6c7b] font-medium">Other Allowances</span>
+                                    <span className="font-medium text-[#172234]">
                                       ₹{other.toLocaleString('en-IN')}
                                     </span>
                                   </div>
                                 )}
                                 {customItems.map((alw, idx) => (
-                                  <div key={alw.id || `alw_${idx}_${alw.name}`} className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                                    <span className="text-slate-600 font-medium">
+                                  <div key={alw.id || `alw_${idx}_${alw.name}`} className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
+                                    <span className="text-[#5e6c7b] font-medium">
                                       {alw.name}
                                     </span>
-                                    <span className="font-medium text-slate-900">
+                                    <span className="font-medium text-[#172234]">
                                       ₹{Number(alw.amount).toLocaleString('en-IN')}
                                     </span>
                                   </div>
                                 ))}
                               </div>
                             </div>
-                            <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/60 flex items-center justify-between font-bold text-xs">
-                              <span className="text-slate-900">Gross Remuneration (A)</span>
-                              <span className="text-slate-900 text-sm font-bold">
+                            <div className="px-5 py-3 border-t border-[#dde4e9] bg-[#f8fbfe]/60 flex items-center justify-between font-bold text-[13px]">
+                              <span className="text-[#172234]">Gross Remuneration (A)</span>
+                              <span className="text-[#172234] text-sm font-bold">
                                 ₹{gross.toLocaleString('en-IN')}
                               </span>
                             </div>
                           </div>
 
                           {/* 2. Deductions Card */}
-                          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs flex flex-col justify-between">
+                          <div className="bg-white border border-[#dde4e9] rounded-[7px] overflow-hidden flex flex-col justify-between">
                             <div>
-                              <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
-                                <h4 className="font-bold text-xs text-slate-900">
+                              <div className="px-5 py-3.5 border-b border-[#dde4e9] flex items-center justify-between">
+                                <h4 className="font-bold text-[13px] text-[#172234]">
                                   Statutory & Tax Deductions
                                 </h4>
-                                <span className="text-[11px] font-medium text-slate-400">Monthly (₹)</span>
+                                <span className="text-[12px] font-medium text-[#687789]">Monthly (₹)</span>
                               </div>
-                              <div className="divide-y divide-slate-100 text-xs">
-                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
+                              <div className="divide-y divide-slate-100 text-[13px]">
+                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
                                   <div>
-                                    <span className="text-slate-600 font-medium block">
+                                    <span className="text-[#5e6c7b] font-medium block">
                                       Employees' Provident Fund (EPF)
                                     </span>
-                                    <span className="text-[10px] text-slate-400">12% on statutory basic</span>
+                                    <span className="text-[12px] text-[#687789]">12% on statutory basic</span>
                                   </div>
-                                  <span className="font-semibold text-slate-900">
+                                  <span className="font-semibold text-[#172234]">
                                     ₹{pf.toLocaleString('en-IN')}
                                   </span>
                                 </div>
-                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
+                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
                                   <div>
-                                    <span className="text-slate-600 font-medium block">
+                                    <span className="text-[#5e6c7b] font-medium block">
                                       Professional Tax (PT)
                                     </span>
-                                    <span className="text-[10px] text-slate-400">State employment tax</span>
+                                    <span className="text-[12px] text-[#687789]">State employment tax</span>
                                   </div>
-                                  <span className="font-medium text-slate-900">
+                                  <span className="font-medium text-[#172234]">
                                     ₹{pt.toLocaleString('en-IN')}
                                   </span>
                                 </div>
-                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
+                                <div className="px-5 py-2.5 flex items-center justify-between hover:bg-[#f8fbfe]/50 transition-colors">
                                   <div>
-                                    <span className="text-slate-600 font-medium block">
+                                    <span className="text-[#5e6c7b] font-medium block">
                                       Tax Deducted at Source (TDS)
                                     </span>
-                                    <span className="text-[10px] text-slate-400">Income tax withholding</span>
+                                    <span className="text-[12px] text-[#687789]">Income tax withholding</span>
                                   </div>
-                                  <span className="font-medium text-slate-900">
+                                  <span className="font-medium text-[#172234]">
                                     ₹{tax.toLocaleString('en-IN')}
                                   </span>
                                 </div>
                               </div>
                             </div>
-                            <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/60 flex items-center justify-between font-bold text-xs">
-                              <span className="text-slate-900">Total Deductions (B)</span>
-                              <span className="text-slate-900 text-sm font-bold">
+                            <div className="px-5 py-3 border-t border-[#dde4e9] bg-[#f8fbfe]/60 flex items-center justify-between font-bold text-[13px]">
+                              <span className="text-[#172234]">Total Deductions (B)</span>
+                              <span className="text-[#172234] text-sm font-bold">
                                 -₹{deductions.toLocaleString('en-IN')}
                               </span>
                             </div>
@@ -4359,43 +4641,43 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         </div>
 
                         {/* Statutory Identifiers Card */}
-                        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
+                        <div className="bg-white border border-[#dde4e9] rounded-[7px] p-5">
                           <div className="flex items-center justify-between mb-3">
-                            <h4 className="text-xs font-bold text-slate-900">
+                            <h4 className="text-[13px] font-bold text-[#172234]">
                               Statutory & Account Identifiers
                             </h4>
-                            {canEdit && (
+                            {canEditBank && (
                               <button
                                 type="button"
                                 onClick={handleOpenBankDetailsModal}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
+                                className="p-1.5 rounded-[8px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
                                 title="Edit bank details"
                               >
                                 <Edit2 className="w-3.5 h-3.5" strokeWidth={1.75} />
                               </button>
                             )}
                           </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-[13px]">
                             <div>
-                              <span className="text-slate-400 block text-[11px]">PAN / Tax ID</span>
-                              <span className="font-medium text-slate-800">
+                              <span className="text-[#687789] block text-[12px]">PAN / Tax ID</span>
+                              <span className="font-medium text-[#172234]">
                                 {employee.panNumber || employee.personalTaxId || '—'}
                               </span>
                             </div>
                             <div>
-                              <span className="text-slate-400 block text-[11px]">PF UAN Number</span>
-                              <span className="font-medium text-slate-800">
+                              <span className="text-[#687789] block text-[12px]">PF UAN Number</span>
+                              <span className="font-medium text-[#172234]">
                                 {employee.pfUanNumber || '—'}
                               </span>
                             </div>
                             <div>
-                              <span className="text-slate-400 block text-[11px]">ESIC Insurance No</span>
-                              <span className="font-medium text-slate-800">
+                              <span className="text-[#687789] block text-[12px]">ESIC Insurance No</span>
+                              <span className="font-medium text-[#172234]">
                                 {employee.esiNumber || '—'}
                               </span>
                             </div>
                             <div>
-                              <span className="text-slate-400 block text-[11px]">Salary Bank Account</span>
+                              <span className="text-[#687789] block text-[12px]">Salary Bank Account</span>
                               {(() => {
                                 const accountNumber = blankBankValue(employee.bankDetails?.accountNumber);
                                 const bankName = blankBankValue(employee.bankDetails?.bankName) || 'Bank';
@@ -4406,12 +4688,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                                   <button
                                     type="button"
                                     onClick={handleOpenBankDetailsModal}
-                                    className="font-medium text-slate-800 hover:text-blue-700 text-left cursor-pointer underline-offset-2 hover:underline"
+                                    className="font-medium text-[#172234] hover:text-[#285275] text-left cursor-pointer underline-offset-2 hover:underline"
                                   >
                                     {masked}
                                   </button>
                                 ) : (
-                                  <span className="font-medium text-slate-800">{masked}</span>
+                                  <span className="font-medium text-[#172234]">{masked}</span>
                                 );
                               })()}
                             </div>
@@ -4427,12 +4709,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           const customFieldVals = employee.customFieldValues || {};
 
                           return (
-                            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3">
-                              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                                <h4 className="text-xs font-bold text-slate-900">
+                            <div className="bg-white border border-[#dde4e9] rounded-[7px] p-5 space-y-3">
+                              <div className="flex items-center justify-between border-b border-[#dde4e9] pb-2.5">
+                                <h4 className="text-[13px] font-bold text-[#172234]">
                                   Assigned Pay Group
                                 </h4>
-                                <span className="text-xs font-semibold text-slate-700">
+                                <span className="text-[13px] font-semibold text-[#172234]">
                                   {assignedPg?.name || 'Direct Individual Structure'}
                                 </span>
                               </div>
@@ -4440,18 +4722,18 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               {customFields.length > 0 ? (
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                                   {customFields.map((f, fIdx) => (
-                                    <div key={f.id || `cf_${fIdx}`} className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
-                                      <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                                    <div key={f.id || `cf_${fIdx}`} className="p-3 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]/60">
+                                      <span className="text-[12px] uppercase font-bold text-[#687789] block">
                                         {f.label}
                                       </span>
-                                      <span className="font-semibold text-xs text-slate-800 block mt-0.5">
+                                      <span className="font-semibold text-[13px] text-[#172234] block mt-0.5">
                                         {customFieldVals[f.id] || f.defaultValue || '—'}
                                       </span>
                                     </div>
                                   ))}
                                 </div>
                               ) : (
-                                <p className="text-xs text-slate-400">
+                                <p className="text-[13px] text-[#687789]">
                                   {assignedPg
                                     ? `Assigned to ${assignedPg.name} (${assignedPg.salaryType.toUpperCase()}) with ${assignedPg.defaultAllowances?.length || 0} group allowances.`
                                     : 'No group-specific custom metadata fields configured.'}
@@ -4471,15 +4753,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {/* TAB 4: DOCUMENTS                                      */}
           {/* ===================================================== */}
           {activeTab === 'documents' && (
-            <div className="space-y-6">
+            <div className="employee-detail-section employee-detail-documents space-y-6">
               {/* Section 1: Upload Dropzone (HR/Admin) or Document list */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Personal & Verified Documents</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Personal & Verified Documents</h3>
                   {canEdit && (
                     <button
                       onClick={() => fileInputRef.current?.click()}
-                      className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                      className="px-3.5 py-1.5 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px] transition-colors cursor-pointer flex items-center gap-1.5"
                     >
                       <Upload className="w-3.5 h-3.5" />
                       <span>Upload Document</span>
@@ -4489,12 +4771,16 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
 
                 {canEdit && (
                   <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Upload employee document"
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); fileInputRef.current?.click(); } }}
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
                     onClick={() => fileInputRef.current?.click()}
-                    className={`border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
-                      isDragging ? 'border-blue-500 bg-blue-50/50' : 'border-slate-200 hover:border-slate-300 bg-slate-50/60'
+                    className={`border-2 border-dashed rounded-[7px] p-6 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
+                      isDragging ? 'border-blue-500 bg-[#f8fbfe]/50' : 'border-[#dde4e9] hover:border-slate-300 bg-[#f8fbfe]/60'
                     }`}
                   >
                     <input
@@ -4504,9 +4790,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       className="hidden"
                       accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
                     />
-                    <Upload className="w-8 h-8 text-slate-400 mb-2" />
-                    <p className="text-xs font-bold text-slate-800">Drag & drop files here to upload, or click to browse</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Supports PDF, DOCX, JPG, PNG up to 25MB</p>
+                    <Upload className="w-8 h-8 text-[#687789] mb-2" />
+                    <p className="text-[13px] font-bold text-[#172234]">Drag & drop files here to upload, or click to browse</p>
+                    <p className="text-[12px] text-[#687789] mt-0.5">Supports PDF, DOCX, JPG, PNG up to 25MB</p>
                   </div>
                 )}
 
@@ -4516,15 +4802,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     employee.personalDocuments.map((doc) => (
                       <div
                         key={doc.id}
-                        className="flex items-center justify-between p-3.5 rounded-2xl border border-slate-100 bg-slate-50 hover:bg-slate-100/80 transition-colors"
+                        className="flex items-center justify-between p-3.5 rounded-[7px] border border-[#dde4e9] bg-[#f8fbfe] hover:bg-[#e8eef2]/80 transition-colors"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-white text-blue-600 border border-slate-200/80 flex items-center justify-center font-bold text-xs shadow-2xs">
+                          <div className="w-9 h-9 rounded-[7px] bg-white text-[#17324e] border border-[#dde4e9] flex items-center justify-center font-bold text-[13px]">
                             <FileText className="w-4 h-4" />
                           </div>
                           <div>
-                            <p className="font-bold text-xs text-slate-900">{doc.name}</p>
-                            <p className="text-[11px] text-slate-400">
+                            <p className="font-bold text-[13px] text-[#172234]">{doc.name}</p>
+                            <p className="text-[12px] text-[#687789]">
                               {doc.size} • Uploaded {doc.uploadDate}
                             </p>
                           </div>
@@ -4540,7 +4826,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                               a.download = doc.name;
                               a.click();
                             }}
-                            className="p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-white transition-colors cursor-pointer"
+                            className="p-2 rounded-[7px] text-[#5e6c7b] hover:text-[#172234] hover:bg-white transition-colors cursor-pointer"
                             title="Download Document"
                           >
                             <Download className="w-4 h-4" />
@@ -4548,7 +4834,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           {canEdit && (
                             <button
                               onClick={() => handleDeletePersonalDoc(doc.id)}
-                              className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              className="p-2 rounded-[7px] text-[#687789] hover:text-[#8b3133] hover:bg-[#faeeee] transition-colors cursor-pointer"
                               title="Delete"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -4558,7 +4844,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
                     ))
                   ) : (
-                    <div className="py-6 text-center text-slate-400 text-xs font-medium">
+                    <div className="py-6 text-center text-[#687789] text-[13px] font-medium">
                       No personal documents uploaded yet.
                     </div>
                   )}
@@ -4566,13 +4852,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 2: Payslips Table */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Issued Payslips</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Issued Payslips</h3>
                   {canEdit && (
                     <button
                       onClick={() => setShowAddPayslipModal(true)}
-                      className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                      className="px-3.5 py-1.5 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px] transition-colors cursor-pointer flex items-center gap-1.5"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Issue Payslip</span>
@@ -4581,9 +4867,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-left text-[13px] border-collapse">
                     <thead>
-                      <tr className="font-bold text-slate-400 bg-slate-50 border-b border-slate-100">
+                      <tr className="font-bold text-[#687789] bg-[#f8fbfe] border-b border-[#dde4e9]">
                         <th className="p-3 rounded-l-xl">Pay Period</th>
                         <th className="p-3">File Name</th>
                         <th className="p-3">Net Disbursed</th>
@@ -4593,28 +4879,28 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     <tbody className="divide-y divide-slate-100">
                       {(employee.payslipDocuments || []).length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="p-4 text-center text-xs text-slate-400 font-medium">
+                          <td colSpan={4} className="p-4 text-center text-[13px] text-[#687789] font-medium">
                             No payslip documents issued yet.
                           </td>
                         </tr>
                       ) : (
                         (employee.payslipDocuments || []).map((ps) => (
-                          <tr key={ps.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="p-3 font-bold text-slate-900">{ps.period}</td>
-                            <td className="p-3 font-mono text-slate-600">{ps.name}</td>
-                            <td className="p-3 font-mono font-bold text-emerald-600">{ps.amount}</td>
+                          <tr key={ps.id} className="hover:bg-[#f8fbfe] transition-colors">
+                            <td className="p-3 font-bold text-[#172234]">{ps.period}</td>
+                            <td className="p-3 font-mono text-[#5e6c7b]">{ps.name}</td>
+                            <td className="p-3 font-mono font-bold text-[#53886b]">{ps.amount}</td>
                             <td className="p-3 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 <button
                                   onClick={() => setPayslipToPrint(ps)}
-                                  className="px-3 py-1 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold transition-colors cursor-pointer"
+                                  className="px-3 py-1 rounded-[7px] bg-[#f8fbfe] text-[#17324e] hover:bg-blue-100 font-bold transition-colors cursor-pointer"
                                 >
                                   Print
                                 </button>
                                 {canEdit && (
                                   <button
                                     onClick={() => handleDeletePayslip(ps.id)}
-                                    className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                    className="p-1.5 rounded-[7px] text-[#687789] hover:text-[#8b3133] hover:bg-[#faeeee] transition-colors cursor-pointer"
                                     title="Delete Payslip"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -4631,37 +4917,37 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 3: Assigned Assets */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Assigned Hardware & Assets</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Assigned Hardware & Assets</h3>
                 </div>
 
                 <div className="space-y-2.5 pt-1">
                   {(employee.assignedAssets || []).length === 0 ? (
-                    <div className="p-4 text-center text-xs text-slate-400 font-medium border border-dashed border-slate-200 rounded-2xl">
+                    <div className="p-4 text-center text-[13px] text-[#687789] font-medium border border-dashed border-[#dde4e9] rounded-[7px]">
                       No hardware assets assigned yet.
                     </div>
                   ) : (
                     (employee.assignedAssets || []).map((asset) => (
                     <div
                       key={asset.id}
-                      className="flex items-center justify-between p-3.5 rounded-2xl border border-slate-100 bg-slate-50"
+                      className="flex items-center justify-between p-3.5 rounded-[7px] border border-[#dde4e9] bg-[#f8fbfe]"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xs">
+                        <div className="w-9 h-9 rounded-[7px] bg-[#eaf1ee] text-[#53886b] flex items-center justify-center font-bold text-[13px]">
                           {asset.type === 'laptop' && <Laptop className="w-4 h-4" />}
                           {asset.type === 'monitor' && <Monitor className="w-4 h-4" />}
                           {asset.type === 'smartphone' && <Smartphone className="w-4 h-4" />}
                         </div>
                         <div>
-                          <p className="font-bold text-xs text-slate-900">{asset.name}</p>
-                          <p className="text-[11px] text-slate-400">
+                          <p className="font-bold text-[13px] text-[#172234]">{asset.name}</p>
+                          <p className="text-[12px] text-[#687789]">
                             S/N: {asset.serial} • Allocated on {asset.assignedDate}
                           </p>
                         </div>
                       </div>
 
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[12px] font-bold">
                         Active
                       </span>
                     </div>
@@ -4676,15 +4962,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {/* TAB 5: SETTING                                        */}
           {/* ===================================================== */}
           {activeTab === 'setting' && (
-            <div className="space-y-6">
+            <div className="employee-detail-section employee-detail-setting space-y-6">
               {/* Account Settings */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Account Preferences</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Account Preferences</h3>
                   {canEdit && (
                     <button
                       onClick={() => setIsEditingAccountSettings(!isEditingAccountSettings)}
-                      className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
+                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
                     >
                       <Edit2 className="w-4 h-4" strokeWidth={1.75} />
                     </button>
@@ -4692,18 +4978,19 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 </div>
 
                 {!isEditingAccountSettings ? (
-                  <div className="flex items-center justify-between text-xs py-2">
-                    <span className="text-slate-400 font-semibold">Configured Timezone</span>
-                    <span className="font-bold text-slate-900">{formTimezone || '—'}</span>
+                  <div className="flex items-center justify-between text-[13px] py-2">
+                    <span className="text-[#687789] font-semibold">Configured Timezone</span>
+                    <span className="font-bold text-[#172234]">{formTimezone || '—'}</span>
                   </div>
                 ) : (
-                  <div className="space-y-3 text-xs pt-1">
-                    <label className="block text-slate-700 font-bold">Timezone</label>
+                  <div className="space-y-3 text-[13px] pt-1">
+                    <label className="block text-[#172234] font-bold">Timezone</label>
                     <select
                       value={formTimezone}
                       onChange={(e) => setFormTimezone(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-900 font-semibold outline-none focus:border-slate-900 cursor-pointer text-xs"
+                      className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 text-[#172234] font-semibold outline-none focus:border-[#17324e] cursor-pointer text-[13px]"
                     >
+                      <option value="">Select timezone</option>
                       <option value="Asia/Kolkata (IST)">Asia/Kolkata (IST) GMT +05:30</option>
                       <option value="America/New_York (EST)">America/New_York (EST) GMT -05:00</option>
                       <option value="Europe/London (BST)">Europe/London (BST) GMT +00:00</option>
@@ -4711,19 +4998,24 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </select>
                     <div className="flex justify-end gap-2.5 pt-2">
                       <button
-                        onClick={() => setIsEditingAccountSettings(false)}
-                        className="px-4 py-2 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 cursor-pointer text-xs"
+                        onClick={() => { setFormTimezone(employee.timezone || ''); setIsEditingAccountSettings(false); }}
+                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] bg-white font-bold text-[#172234] hover:bg-[#f8fbfe] cursor-pointer text-[13px]"
                       >
                         Cancel
                       </button>
                       <button
+                        disabled={savingPreferences}
                         onClick={() => {
-                          setIsEditingAccountSettings(false);
-                          showToast('Timezone preference updated');
+                          if (!canEdit || savingPreferences) return;
+                          setSavingPreferences(true);
+                          void Promise.resolve(onUpdateEmployee({ ...employee, timezone: formTimezone })).then(() => {
+                            setIsEditingAccountSettings(false);
+                            showToast('Timezone preference updated');
+                          }).catch(() => {}).finally(() => setSavingPreferences(false));
                         }}
-                        className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer text-xs shadow-xs"
+                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold cursor-pointer text-[13px]"
                       >
-                        Save Preferences
+                        {savingPreferences ? 'Saving...' : 'Save Preferences'}
                       </button>
                     </div>
                   </div>
@@ -4731,13 +5023,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Privacy */}
-              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 shadow-xs text-slate-900 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="text-base font-bold text-slate-900 tracking-tight">Calendar & Privacy</h3>
+              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
+                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Calendar & Privacy</h3>
                 </div>
 
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs pt-1">
-                  <span className="text-slate-700 font-bold">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[13px] pt-1">
+                  <span className="text-[#172234] font-bold">
                     Who can see this employee's birthday on the workspace calendar?
                   </span>
                   <div className="relative w-full sm:w-48">
@@ -4748,14 +5040,14 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         setFormBirthdayPrivacy(e.target.value as any);
                         showToast(`Birthday privacy set to ${e.target.value}`);
                       }}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-slate-900 font-semibold outline-none focus:border-slate-900 cursor-pointer appearance-none shadow-2xs text-xs disabled:bg-slate-50 disabled:cursor-not-allowed"
+                      className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-3.5 py-2 text-[#172234] font-semibold outline-none focus:border-[#17324e] cursor-pointer appearance-none text-[13px] disabled:bg-[#f8fbfe] disabled:cursor-not-allowed"
                     >
                       <option value="Everyone">Everyone</option>
                       <option value="Department">Department Only</option>
                       <option value="Managers">Managers Only</option>
                       <option value="Only Me">Only Me</option>
                     </select>
-                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+                    <ChevronDown className="w-3.5 h-3.5 text-[#687789] absolute right-3 top-2.5 pointer-events-none" />
                   </div>
                 </div>
               </div>
@@ -4769,7 +5061,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
       {/* ========================================================= */}
 
       {/* Bank Details Modal */}
-      {showBankDetailsModal && canEdit && (
+      {showBankDetailsModal && canEditBank && (
         <SlideOverDrawer
           title="Salary Bank Details"
           onClose={() => !savingBankDetails && setShowBankDetailsModal(false)}
@@ -4777,18 +5069,18 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
             <form onSubmit={handleSaveBankDetails} className="flex-1 flex flex-col justify-between overflow-hidden">
               <div className={slideOverBodyClass}>
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Account holder name</label>
+                <label className="block text-[#172234] font-bold mb-1">Account holder name</label>
                 <input
                   type="text"
                   required
                   value={formAccountHolderName}
                   onChange={(e) => setFormAccountHolderName(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Bank name</label>
+                <label className="block text-[#172234] font-bold mb-1">Bank name</label>
                 <select
                   required
                   value={MAJOR_BANKS.includes(formBankName) ? formBankName : formBankName ? 'Other Bank' : ''}
@@ -4804,7 +5096,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       }
                     }
                   }}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs cursor-pointer"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px] cursor-pointer"
                 >
                   <option value="">Select bank...</option>
                   {MAJOR_BANKS.map((bank) => (
@@ -4819,13 +5111,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     value={formBankName}
                     onChange={(e) => setFormBankName(e.target.value)}
                     placeholder="Specify bank name..."
-                    className="w-full mt-1.5 rounded-2xl border border-slate-200 bg-white px-4 py-2 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                    className="w-full mt-1.5 rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                   />
                 )}
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Account number</label>
+                <label className="block text-[#172234] font-bold mb-1">Account number</label>
                 <input
                   type="text"
                   required
@@ -4835,12 +5127,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   value={formAccountNumber}
                   onChange={(e) => setFormAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 18))}
                   placeholder="e.g. 50100234567890"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">IFSC / routing code</label>
+                <label className="block text-[#172234] font-bold mb-1">IFSC / routing code</label>
                 <input
                   type="text"
                   required
@@ -4850,7 +5142,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     setFormIfscCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11))
                   }
                   placeholder="e.g. HDFC0001234"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs uppercase"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px] uppercase"
                 />
               </div>
 
@@ -4878,55 +5170,51 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
             <form onSubmit={handleAddJobTimeline} className="flex-1 flex flex-col justify-between overflow-hidden">
               <div className={slideOverBodyClass}>
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Effective Date</label>
-                <input
-                  type="date"
-                  required
-                  value={newJtEffectiveDate}
-                  onChange={(e) => setNewJtEffectiveDate(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                <label className="block text-[#172234] font-bold mb-1">Effective Date</label>
+                <DateInput required value={newJtEffectiveDate} onChange={(e) => setNewJtEffectiveDate(e.target.value)}
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Job Title</label>
+                <label className="block text-[#172234] font-bold mb-1">Job Title</label>
                 <input
                   type="text"
                   required
                   value={newJtJobTitle}
                   onChange={(e) => setNewJtJobTitle(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Position Type</label>
+                  <label className="block text-[#172234] font-bold mb-1">Position Type</label>
                   <input
                     type="text"
                     value={newJtPositionType}
                     onChange={(e) => setNewJtPositionType(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                    className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Employment Type</label>
+                  <label className="block text-[#172234] font-bold mb-1">Employment Type</label>
                   <input
                     type="text"
                     value={newJtEmploymentType}
                     onChange={(e) => setNewJtEmploymentType(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                    className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Reporting Lead / Manager</label>
+                <label className="block text-[#172234] font-bold mb-1">Reporting Lead / Manager</label>
                 <input
                   type="text"
                   value={newJtLineManager}
                   onChange={(e) => setNewJtLineManager(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                 />
               </div>
 
@@ -4950,57 +5238,53 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               <div className={slideOverBodyClass}>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Contract #</label>
+                  <label className="block text-[#172234] font-bold mb-1">Contract #</label>
                   <input
                     type="text"
                     required
                     value={newCtNumber}
                     onChange={(e) => setNewCtNumber(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-mono font-medium text-slate-900 text-xs"
+                    className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-mono font-medium text-[#172234] text-[13px]"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Contract Type</label>
+                  <label className="block text-[#172234] font-bold mb-1">Contract Type</label>
                   <input
                     type="text"
                     required
                     value={newCtType}
                     onChange={(e) => setNewCtType(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                    className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Contract Name</label>
+                <label className="block text-[#172234] font-bold mb-1">Contract Name</label>
                 <input
                   type="text"
                   required
                   value={newCtName}
                   onChange={(e) => setNewCtName(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={newCtStartDate}
-                    onChange={(e) => setNewCtStartDate(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                  <label className="block text-[#172234] font-bold mb-1">Start Date</label>
+                  <DateInput required value={newCtStartDate} onChange={(e) => setNewCtStartDate(e.target.value)}
+                    className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">End Date</label>
+                  <label className="block text-[#172234] font-bold mb-1">End Date</label>
                   <input
                     type="text"
                     value={newCtEndDate}
                     onChange={(e) => setNewCtEndDate(e.target.value)}
                     placeholder="Indefinite"
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                    className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                   />
                 </div>
               </div>
@@ -5024,46 +5308,46 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
             <form onSubmit={handleAddPayslip} className="flex-1 flex flex-col justify-between overflow-hidden">
               <div className={slideOverBodyClass}>
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Document File Name</label>
+                <label className="block text-[#172234] font-bold mb-1">Document File Name</label>
                 <input
                   type="text"
                   required
                   value={newPsName}
                   onChange={(e) => setNewPsName(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-mono font-medium text-slate-900 text-xs"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-mono font-medium text-[#172234] text-[13px]"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Pay Period</label>
+                  <label className="block text-[#172234] font-bold mb-1">Pay Period</label>
                   <input
                     type="text"
                     required
                     value={newPsPeriod}
                     onChange={(e) => setNewPsPeriod(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                    className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Payment Amount</label>
+                  <label className="block text-[#172234] font-bold mb-1">Payment Amount</label>
                   <input
                     type="text"
                     required
                     value={newPsAmount}
                     onChange={(e) => setNewPsAmount(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-mono font-medium text-slate-900 text-xs"
+                    className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-mono font-medium text-[#172234] text-[13px]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Disbursed Date</label>
+                <label className="block text-[#172234] font-bold mb-1">Disbursed Date</label>
                 <input
                   type="text"
                   value={newPsDate}
                   onChange={(e) => setNewPsDate(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 outline-none focus:border-slate-900 font-medium text-slate-900 text-xs"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-4 py-2.5 outline-none focus:border-[#17324e] font-medium text-[#172234] text-[13px]"
                 />
               </div>
 
@@ -5109,11 +5393,11 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
             <form onSubmit={handleSaveStatusModal} className="flex-1 flex flex-col justify-between overflow-hidden">
               <div className={slideOverBodyClass}>
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Employment Status</label>
+                <label className="block text-[13px] font-semibold text-[#172234] mb-1.5">Employment Status</label>
                 <select
                   value={statusChoice}
                   onChange={(e) => setStatusChoice(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-900 font-semibold outline-none focus:border-slate-400 cursor-pointer"
+                  className="w-full rounded-[7px] border border-[#dde4e9] bg-white px-3.5 py-2.5 text-[13px] text-[#172234] font-semibold outline-none focus:border-slate-400 cursor-pointer"
                 >
                   <option value="Not Activated">Not Activated (Pending First Login)</option>
                   <option value="Active">Active (Permanent / Confirmed)</option>
@@ -5126,9 +5410,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {statusChoice === 'Notice Period' && (
-                <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-3 text-xs">
+                <div className="p-3.5 rounded-[7px] border border-[#dde4e9] bg-[#f8fbfe]/60 space-y-3 text-[13px]">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Notice Duration</label>
+                    <label className="block text-[13px] font-semibold text-[#172234] mb-1">Notice Duration</label>
                     <select
                       value={statusNoticeDays}
                       onChange={(e) => {
@@ -5138,7 +5422,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         d.setDate(d.getDate() + days);
                         setStatusNoticeEndDate(d.toISOString().split('T')[0]);
                       }}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 font-medium cursor-pointer"
+                      className="w-full rounded-[8px] border border-[#dde4e9] bg-white px-3 py-2 text-[13px] text-[#172234] font-medium cursor-pointer"
                     >
                       <option value={15}>15 Days</option>
                       <option value={30}>30 Days (Standard 1 Month)</option>
@@ -5147,21 +5431,18 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Last Working Day / End Date</label>
-                    <input
-                      type="date"
-                      value={statusNoticeEndDate}
-                      onChange={(e) => setStatusNoticeEndDate(e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 font-medium cursor-pointer"
+                    <label className="block text-[13px] font-semibold text-[#172234] mb-1">Last Working Day / End Date</label>
+                    <DateInput value={statusNoticeEndDate} onChange={(e) => setStatusNoticeEndDate(e.target.value)}
+                      className="w-full rounded-[8px] border border-[#dde4e9] bg-white px-3 py-2 text-[13px] text-[#172234] font-medium cursor-pointer"
                     />
                   </div>
                 </div>
               )}
 
               {statusChoice === 'Probation' && (
-                <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-3 text-xs">
+                <div className="p-3.5 rounded-[7px] border border-[#dde4e9] bg-[#f8fbfe]/60 space-y-3 text-[13px]">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Probation Duration</label>
+                    <label className="block text-[13px] font-semibold text-[#172234] mb-1">Probation Duration</label>
                     <select
                       value={statusProbationMonths}
                       onChange={(e) => {
@@ -5171,7 +5452,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         d.setMonth(d.getMonth() + m);
                         setStatusProbationEndDate(d.toISOString().split('T')[0]);
                       }}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 font-medium cursor-pointer"
+                      className="w-full rounded-[8px] border border-[#dde4e9] bg-white px-3 py-2 text-[13px] text-[#172234] font-medium cursor-pointer"
                     >
                       <option value={1}>1 Month</option>
                       <option value={2}>2 Months</option>
@@ -5181,12 +5462,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Probation Review Date</label>
-                    <input
-                      type="date"
-                      value={statusProbationEndDate}
-                      onChange={(e) => setStatusProbationEndDate(e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 font-medium cursor-pointer"
+                    <label className="block text-[13px] font-semibold text-[#172234] mb-1">Probation Review Date</label>
+                    <DateInput value={statusProbationEndDate} onChange={(e) => setStatusProbationEndDate(e.target.value)}
+                      className="w-full rounded-[8px] border border-[#dde4e9] bg-white px-3 py-2 text-[13px] text-[#172234] font-medium cursor-pointer"
                     />
                   </div>
                 </div>
@@ -5203,6 +5481,18 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
             </form>
         </SlideOverDrawer>
+      )}
+      {changeEmailOpen && (
+        <ChangeLoginEmailDialog
+          employeeId={employee.id}
+          currentEmail={employee.email || ''}
+          mode={isSelfViewer ? 'self' : 'admin'}
+          movesOrganizationEmail={movesOrganizationEmail}
+          onClose={() => setChangeEmailOpen(false)}
+          onEmailChanged={(email) => {
+            void onUpdateEmployee({ ...employee, email });
+          }}
+        />
       )}
     </div>
   );

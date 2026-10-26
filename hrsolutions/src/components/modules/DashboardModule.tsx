@@ -1,6 +1,9 @@
 'use client';
 
 import React from 'react';
+import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileDashboard } from '@/components/mobile/MobileDashboard';
+import './dashboard/dashboard.css';
 import { useApp } from '@/context/AppContext';
 import { DashboardDataProvider, useDashboardContext } from './dashboard/DashboardDataContext';
 import { DashboardPageSkeleton } from '@/components/skeletons';
@@ -35,11 +38,11 @@ function AdminDashboardContent() {
       <div className="dash-board">
         <AttendanceHeatmap className="dash-span-8" />
         <CalendarWidget className="dash-span-4" />
-        <OnLeaveTodayCard className="dash-span-6" scope="org" limit={6} />
-        <UpcomingHolidaysCard className="dash-span-6" manageHref />
-        <SchedulesCard className="dash-span-5" />
-        <TasksCard className="dash-span-7" />
-        <RecentActivitiesCard className="dash-span-12" />
+        <OnLeaveTodayCard className="dash-span-4" scope="org" limit={2} />
+        <UpcomingHolidaysCard className="dash-span-4" limit={2} manageHref />
+        <SchedulesCard className="dash-span-4" />
+        <TasksCard className="dash-span-6" />
+        <RecentActivitiesCard className="dash-span-6" />
         <EmployeeAttendanceTable className="dash-span-12" />
       </div>
     </div>
@@ -48,10 +51,13 @@ function AdminDashboardContent() {
 
 export const DashboardModule: React.FC = () => {
   const { state } = useApp();
+  const mobile = useMobileViewport();
 
   const role = state.currentPersona?.role;
   const isHr = role === 'hr_manager' || (role as string) === 'hr';
   const isAdmin = role === 'admin' || role === 'super_admin';
+
+  if (mobile) return <MobileDashboard />;
 
   if (isHr) {
     return <HrDashboardView />;

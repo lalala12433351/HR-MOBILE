@@ -6,15 +6,23 @@ import { ProjectsModule } from '@/components/modules/ProjectsModule';
 import { TabsTablePageSkeleton } from '@/components/skeletons';
 
 import { useProjectsData } from '@/hooks/useProjectsData';
+import { mergeOpenAttendance } from '@/utils/attendancePunches';
 
 export default function ProjectsPage() {
   const { state: uiState, updateState: updateUiState, isLoaded } = useApp();
   const { businessData, updateBusinessData, loading } = useProjectsData();
 
-  const combinedState = { ...uiState, ...businessData };
+  const combinedState = {
+    ...uiState,
+    ...businessData,
+    attendance: mergeOpenAttendance(businessData.attendance, uiState.attendance || []),
+  };
+  const stateRef = React.useRef(combinedState);
+  stateRef.current = combinedState;
 
   const handleUpdateState = (updater: (prev: any) => any) => {
-    const newState = updater(combinedState);
+    const newState = updater(stateRef.current);
+    stateRef.current = newState;
 
     updateBusinessData({
       employees: newState.employees,

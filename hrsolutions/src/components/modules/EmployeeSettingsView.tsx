@@ -1,5 +1,7 @@
 'use client';
+import './setup/onboarding-studio.css';
 
+import { SettingsPageHeader, SettingsButton, SettingsCard, SettingsSwitchRow } from './settings/SettingsPrimitives';
 import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { SettingsToggle } from './settings/SettingsToggle';
@@ -7,7 +9,7 @@ import { SettingsToast } from './settings/SettingsToast';
 import { DEFAULT_GEO_COORDINATES } from '@/config/constants';
 import { AppState } from '../../services/store';
 import { CustomProfileField, OnboardingSectionKey, Employee, DepartmentRecord } from '../../types';
-import { initialOnboardingFields } from '../../data/initialData';
+import { resolveOnboardingFields } from '../../utils/onboardingFields';
 import { AddOfficeModal, OfficeModalData } from '../common/AddOfficeModal';
 import { PayrollSettingsView } from './PayrollSettingsView';
 import { api } from '../../services/apiClient';
@@ -26,6 +28,9 @@ interface EmployeeSettingsViewProps {
   state: AppState;
   onUpdateState: (updater: (prev: AppState) => AppState) => void;
   showPayrollSettings?: boolean;
+  pane?: string;
+  paneLabel?: string;
+  onPaneChange?: (pane: string) => void;
 }
 
 export interface JobRoleDetail {
@@ -68,14 +73,22 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
   state,
   onUpdateState,
   showPayrollSettings = true,
+  pane,
+  paneLabel,
+  onPaneChange,
 }) => {
   const router = useRouter();
   const options = state.customOptions;
 
   // Sub-Navigation Tab State
-  const [subTab, setSubTab] = useState<
-    'general' | 'initial_passwords' | 'departments_teams' | 'job_posts' | 'employment_types' | 'priorities' | 'office_locations' | 'onboarding' | 'offboarding' | 'payroll_settings'
+  const [subTabState, setSubTabState] = useState<
+    'general' | 'initial_passwords' | 'departments_teams' | 'job_posts' | 'employment_types' | 'office_locations' | 'onboarding' | 'offboarding' | 'payroll_settings'
   >('general');
+  const subTab = (pane as typeof subTabState) || subTabState;
+  const setSubTab = (next: typeof subTabState) => {
+    if (onPaneChange) onPaneChange(next);
+    else setSubTabState(next);
+  };
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -242,12 +255,6 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
   const [defaultCurrency, setDefaultCurrency] = useState(
     () => options?.employeeIdSettings?.defaultCurrency || 'INR'
   );
-  const [probationMonths, setProbationMonths] = useState(
-    () => options?.probationSettings?.defaultDurationMonths ?? 3
-  );
-  const [autoConfirmProbation, setAutoConfirmProbation] = useState(
-    () => options?.probationSettings?.autoConfirmAfterPeriod ?? false
-  );
   const [noticePeriodDays, setNoticePeriodDays] = useState(
     () => options?.noticePeriodSettings?.days ?? 30
   );
@@ -262,6 +269,12 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
   );
   const [allowCoworkerDirectoryAccess, setAllowCoworkerDirectoryAccess] = useState(
     () => options?.profileSelfServiceSettings?.allowCoworkerDirectoryAccess ?? true
+  );
+  const [anyoneCanAssignTasks, setAnyoneCanAssignTasks] = useState(
+    () => options?.profileSelfServiceSettings?.anyoneCanAssignTasks ?? false
+  );
+  const [anyoneCanCreateProjects, setAnyoneCanCreateProjects] = useState(
+    () => options?.profileSelfServiceSettings?.anyoneCanCreateProjects ?? false
   );
 
   // 2. Departments & Teams & Offices State
@@ -533,18 +546,6 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
       setIsSaving(false);
     }
   };
-  const [taskPriorities, setTaskPriorities] = useState(
-    () =>
-      state.customOptions?.taskPriorities?.length
-        ? state.customOptions.taskPriorities
-        : [
-            { id: 'low', name: 'Low', badgeColor: 'slate', slaHours: 72 },
-            { id: 'medium', name: 'Medium', badgeColor: 'blue', slaHours: 48 },
-            { id: 'high', name: 'High', badgeColor: 'amber', slaHours: 24 },
-            { id: 'urgent', name: 'Urgent', badgeColor: 'rose', slaHours: 8 },
-          ]
-  );
-  const [newPriorityName, setNewPriorityName] = useState('');
   const [employmentTypes, setEmploymentTypes] = useState<
     { id: string; name: string; hasBenefits: boolean; isPermanent: boolean }[]
   >(() => {
@@ -619,18 +620,66 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
     () => options?.offboardingSettings?.fnfSettlementDays ?? 30
   );
 
+  // Settings often arrive after the first render. Keep the form aligned with that load
+  // until the admin edits a field.
+  const generalSettingsSnapshot = [
+    options?.employeeIdSettings?.prefix || 'EMP',
+    options?.employeeIdSettings?.sequenceStart || '101',
+    options?.employeeIdSettings?.defaultCurrency || 'INR',
+    String(options?.noticePeriodSettings?.days ?? 30),
+    String(options?.noticePeriodSettings?.allowBuyout ?? true),
+    String(options?.profileSelfServiceSettings?.allowSelfEditAddress ?? true),
+    String(options?.profileSelfServiceSettings?.allowSelfEditBank ?? false),
+    String(options?.profileSelfServiceSettings?.allowCoworkerDirectoryAccess ?? true),
+    String(options?.profileSelfServiceSettings?.anyoneCanAssignTasks === true),
+    String(options?.profileSelfServiceSettings?.anyoneCanCreateProjects === true),
+    String(options?.onboardingAutomation?.autoSendWelcomeEmail ?? true),
+    String(options?.onboardingAutomation?.autoAssignBuddy ?? true),
+    String(options?.offboardingSettings?.reqExitInterview ?? true),
+    String(options?.offboardingSettings?.reqAssetClearance ?? true),
+    String(options?.offboardingSettings?.reqManagerNOC ?? true),
+    String(options?.offboardingSettings?.autoRevokeAccessOnLastDay ?? true),
+    String(options?.offboardingSettings?.fnfSettlementDays ?? 30),
+  ].join('|');
+  const generalFormEdited = React.useRef(false);
+
+  useEffect(() => {
+    if (generalFormEdited.current) return;
+    const ids = options?.employeeIdSettings;
+    const notice = options?.noticePeriodSettings;
+    const profile = options?.profileSelfServiceSettings;
+    const onboard = options?.onboardingAutomation;
+    const offboard = options?.offboardingSettings;
+    setEmpIdPrefix(ids?.prefix || 'EMP');
+    setEmpIdSeqStart(ids?.sequenceStart || '101');
+    setDefaultCurrency(ids?.defaultCurrency || 'INR');
+    setNoticePeriodDays(notice?.days ?? 30);
+    setAllowNoticeBuyout(notice?.allowBuyout ?? true);
+    setAllowSelfEditAddress(profile?.allowSelfEditAddress ?? true);
+    setAllowSelfEditBank(profile?.allowSelfEditBank ?? false);
+    setAllowCoworkerDirectoryAccess(profile?.allowCoworkerDirectoryAccess ?? true);
+    setAnyoneCanAssignTasks(profile?.anyoneCanAssignTasks === true);
+    setAnyoneCanCreateProjects(profile?.anyoneCanCreateProjects === true);
+    setAutoSendWelcomeEmail(onboard?.autoSendWelcomeEmail ?? true);
+    setAutoAssignBuddy(onboard?.autoAssignBuddy ?? true);
+    setReqExitInterview(offboard?.reqExitInterview ?? true);
+    setReqAssetClearance(offboard?.reqAssetClearance ?? true);
+    setReqManagerNOC(offboard?.reqManagerNOC ?? true);
+    setAutoRevokeAccessOnLastDay(offboard?.autoRevokeAccessOnLastDay ?? true);
+    setFnfSettlementDays(offboard?.fnfSettlementDays ?? 30);
+  }, [generalSettingsSnapshot]);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
 
   // Robust Dynamic Onboarding & Profile Fields List
-  const currentOnboardingFields = useMemo<CustomProfileField[]>(() => {
-    if (state.customOptions?.onboardingFields && state.customOptions.onboardingFields.length > 0) {
-      return state.customOptions.onboardingFields;
-    }
-    return initialOnboardingFields;
-  }, [state.customOptions?.onboardingFields]);
+  // System-default document slots are stripped — HR adds document uploads explicitly.
+  const currentOnboardingFields = useMemo<CustomProfileField[]>(
+    () => resolveOnboardingFields(state.customOptions?.onboardingFields),
+    [state.customOptions?.onboardingFields]
+  );
 
   const syncOnboardingFields = async (updatedFields: CustomProfileField[]) => {
     setIsSaving(true);
@@ -1126,7 +1175,6 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
       designations: currentDesignations,
       employmentTypes: employmentTypes.map((e) => e.name),
       employmentTypeCategories: employmentTypes,
-      taskPriorities,
       onboardingFields: currentOnboardingFields,
       onboardingAutomation: {
         autoSendWelcomeEmail,
@@ -1141,6 +1189,8 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
         allowSelfEditAddress,
         allowSelfEditBank,
         allowCoworkerDirectoryAccess,
+        anyoneCanAssignTasks,
+        anyoneCanCreateProjects,
       },
       noticePeriodSettings: {
         days: Number(noticePeriodDays) || 30,
@@ -1152,12 +1202,6 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
         reqManagerNOC,
         autoRevokeAccessOnLastDay,
         fnfSettlementDays: Number(fnfSettlementDays) || 30,
-      },
-      probationSettings: {
-        ...(options?.probationSettings || {}),
-        enabled: options?.probationSettings?.enabled !== false,
-        defaultDurationMonths: Number(probationMonths) || 3,
-        autoConfirmAfterPeriod: autoConfirmProbation,
       },
     };
 
@@ -1220,21 +1264,10 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
     <div className="settings-page">
       <SettingsToast message={toastMessage} />
 
-      <div className="settings-page__header">
-        <h2 className="settings-page__heading">
-          Employee Settings
-        </h2>
-
-        <button
-          type="button"
-          onClick={handleSaveAllSettings}
-          className="settings-page__action shrink-0"
-        >
-          Save Changes
-        </button>
-      </div>
+      <SettingsPageHeader title={paneLabel || 'People and organization'} actions={<SettingsButton loading={isSaving} onClick={handleSaveAllSettings}>{isSaving ? 'Saving…' : 'Save changes'}</SettingsButton>} />
 
       {/* SubTab Navigation */}
+      {!pane && (
       <div className="settings-page__tabs" role="tablist" aria-label="People and organization settings categories">
         {[
           { id: 'general', label: 'General & Rules' },
@@ -1242,7 +1275,6 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           { id: 'job_posts', label: 'Job Roles & Titles' },
           { id: 'departments_teams', label: 'Departments & Teams' },
           { id: 'employment_types', label: 'Employment Types' },
-          { id: 'priorities', label: 'Task Priorities' },
           { id: 'office_locations', label: 'Office Locations' },
           { id: 'onboarding', label: 'Onboarding Fields' },
           { id: 'offboarding', label: 'Offboarding Policy' },
@@ -1271,6 +1303,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           );
         })}
       </div>
+      )}
 
       {/* Main Content Area */}
       <div className="w-full space-y-5" id={`employee-settings-${subTab}`} role="tabpanel">
@@ -1278,13 +1311,13 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* 1. GENERAL & PROFILE RULES                                                */}
           {/* ========================================================================= */}
           {subTab === 'general' && (
-            <div className="settings-page__card space-y-6">
+            <SettingsCard className="settings-page__card space-y-6">
               <div>
                 <h3 className="settings-page__section-heading">
                   General & Profile Rules
                 </h3>
                 <p className="settings-page__section-description">
-                  Define employee ID generation, standard probation duration, and self-service permissions.
+                  Define how employee IDs are generated, the notice period, and what people can edit themselves.
                 </p>
               </div>
 
@@ -1346,24 +1379,6 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                     </select>
                   </div>
                 </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-600">
-                    Probation Period Duration
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={probationMonths}
-                      onChange={(e) => setProbationMonths(Number(e.target.value))}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 appearance-none outline-none focus:border-blue-600 cursor-pointer pr-10"
-                    >
-                      <option value={1}>1 Month</option>
-                      <option value={3}>3 Months (Standard)</option>
-                      <option value={6}>6 Months</option>
-                      <option value={0}>No Probation (Immediate Direct Confirmation)</option>
-                    </select>
-                  </div>
-                </div>
               </div>
 
               {/* Standard Notice Period */}
@@ -1383,6 +1398,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                     <option value={90}>90 Days (3 Months)</option>
                   </select>
                 </div>
+                <SettingsSwitchRow title={"Allow notice buyout"} description={"An earlier exit date is allowed when this is on."} checked={allowNoticeBuyout} onChange={setAllowNoticeBuyout} />
               </div>
 
               {/* Self Service & Policy Toggles */}
@@ -1391,52 +1407,31 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   Self-Service & Permissions
                 </h4>
 
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Auto-Confirm Employee Upon Probation Completion
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Automatically change status to &apos;Active / Confirmed&apos; without requiring HR manual review form.
-                    </span>
-                  </div>
-                  <ToggleSwitch checked={autoConfirmProbation} onChange={setAutoConfirmProbation} />
-                </div>
+                <SettingsSwitchRow title={"Allow Employees to Edit Personal Phone & Address"} description={"Employees can update their contact details directly in their profile view."} checked={allowSelfEditAddress} onChange={setAllowSelfEditAddress} />
 
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Allow Employees to Edit Personal Phone & Address
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Employees can update their contact details directly in their profile view.
-                    </span>
-                  </div>
-                  <ToggleSwitch checked={allowSelfEditAddress} onChange={setAllowSelfEditAddress} />
-                </div>
+                <SettingsSwitchRow title={"Allow Self-Service Bank Account Updates"} description={"Enable direct edits to bank IFSC / IBAN details without payroll admin sign-off."} checked={allowSelfEditBank} onChange={setAllowSelfEditBank} />
 
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Allow Self-Service Bank Account Updates
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Enable direct edits to bank IFSC / IBAN details without payroll admin sign-off.
-                    </span>
-                  </div>
-                  <ToggleSwitch checked={allowSelfEditBank} onChange={setAllowSelfEditBank} />
-                </div>
+                <SettingsSwitchRow title={"Enable Company-Wide Coworker Directory Access"} description={"Allow all team members to search and view public profiles in the Employee Directory."} checked={allowCoworkerDirectoryAccess} onChange={setAllowCoworkerDirectoryAccess} />
 
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
+                <div className="pt-4 border-t border-slate-200 space-y-4">
                   <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Enable Company-Wide Coworker Directory Access
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Allow all team members to search and view public profiles in the Employee Directory.
-                    </span>
+                    <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                      Projects
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      These apply to everyone in the workspace. Admins and managers keep access when a switch is off.
+                    </p>
                   </div>
-                  <ToggleSwitch checked={allowCoworkerDirectoryAccess} onChange={setAllowCoworkerDirectoryAccess} />
+
+                  <SettingsSwitchRow title={"Let anyone assign tasks"} description={"Any employee can assign a task to anyone in the organization. People still only see their own tasks, or their team's if they manage one. Off keeps assignment inside each team."} checked={anyoneCanAssignTasks} onChange={(value) => {
+                        generalFormEdited.current = true;
+                        setAnyoneCanAssignTasks(value);
+                      }} labelledBy="setting-anyone-assign-tasks" />
+
+                  <SettingsSwitchRow title={"Let anyone create projects"} description={"Any employee can create a project. Off keeps project creation with admins and managers."} checked={anyoneCanCreateProjects} onChange={(value) => {
+                        generalFormEdited.current = true;
+                        setAnyoneCanCreateProjects(value);
+                      }} labelledBy="setting-anyone-create-projects" />
                 </div>
 
                 {/* Account Invites Card */}
@@ -1477,7 +1472,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   )}
                 </div>
               </div>
-            </div>
+            </SettingsCard>
           )}
 
           {/* ========================================================================= */}
@@ -1485,7 +1480,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* ========================================================================= */}
           {subTab === 'initial_passwords' && (
             <div className="space-y-6 font-sans">
-              <div className="settings-page__card space-y-6">
+              <SettingsCard className="settings-page__card space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h3 className="text-lg font-bold text-slate-900 tracking-tight">
@@ -1683,7 +1678,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                     })}
                   </div>
                 )}
-              </div>
+              </SettingsCard>
             </div>
           )}
 
@@ -1691,7 +1686,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
           {/* 2. JOB ROLES & TITLES (With Right-Side Slide-Over Drawer Modal)             */}
           {/* ========================================================================= */}
           {subTab === 'job_posts' && (
-            <div className="settings-page__card space-y-5">
+            <SettingsCard className="settings-page__card space-y-5">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <div>
                   <h3 className="text-base font-bold text-slate-900">
@@ -1763,14 +1758,14 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   })
                 )}
               </div>
-            </div>
+            </SettingsCard>
           )}
 
           {/* ========================================================================= */}
           {/* 3. DEPARTMENTS & TEAMS                                                    */}
           {/* ========================================================================= */}
           {subTab === 'departments_teams' && (
-            <div className="settings-page__card space-y-5">
+            <SettingsCard className="settings-page__card space-y-5">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <h3 className="text-base font-bold text-slate-900">
                   Departments & Teams
@@ -1984,81 +1979,11 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   </div>
                 </div>
               </div>
-            </div>
+            </SettingsCard>
           )}
 
-          {/* ========================================================================= */}
-          {/* 5. EMPLOYMENT TYPES                                                       */}
-          {/* ========================================================================= */}
-          {subTab === 'priorities' && (
-            <div className="settings-page__card space-y-5">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Priority custom options</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  These labels appear on project tasks. Keep at least two options.
-                </p>
-              </div>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const name = newPriorityName.trim();
-                  if (!name) return;
-                  if (taskPriorities.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
-                    showToast('That priority already exists.');
-                    return;
-                  }
-                  setTaskPriorities((prev) => [
-                    ...prev,
-                    {
-                      id: `prio_${Date.now()}`,
-                      name,
-                      badgeColor: 'slate',
-                      slaHours: 48,
-                    },
-                  ]);
-                  setNewPriorityName('');
-                }}
-                className="flex flex-col sm:flex-row items-center gap-3"
-              >
-                <input
-                  type="text"
-                  required
-                  value={newPriorityName}
-                  onChange={(e) => setNewPriorityName(e.target.value)}
-                  placeholder="New priority (e.g. Blocker)"
-                  className="flex-1 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs text-slate-900 outline-none focus:border-blue-600 font-medium"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors cursor-pointer shrink-0 shadow-xs"
-                >
-                  Add priority
-                </button>
-              </form>
-              <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 bg-white overflow-hidden">
-                {taskPriorities.map((priority) => (
-                  <div key={priority.id} className="p-3.5 flex items-center justify-between gap-4 text-xs">
-                    <span className="font-semibold text-slate-900">{priority.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (taskPriorities.length <= 2) {
-                          showToast('Keep at least two priorities.');
-                          return;
-                        }
-                        setTaskPriorities((prev) => prev.filter((p) => p.id !== priority.id));
-                      }}
-                      className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
           {subTab === 'employment_types' && (
-            <div className="settings-page__card space-y-5">
+            <SettingsCard className="settings-page__card space-y-5">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
                   Employment Types
@@ -2166,14 +2091,14 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   );
                 })}
               </div>
-            </div>
+            </SettingsCard>
           )}
 
           {/* ========================================================================= */}
           {/* 5. OFFICE LOCATIONS & SITES                                               */}
           {/* ========================================================================= */}
           {subTab === 'office_locations' && (
-            <div className="settings-page__card space-y-4">
+            <SettingsCard className="settings-page__card space-y-4">
               <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-200">
                 <h3 className="text-base font-bold text-slate-900">
                   Company Office Locations
@@ -2286,22 +2211,22 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   ))
                 )}
               </div>
-            </div>
+            </SettingsCard>
           )}
 
           {/* ========================================================================= */}
           {/* 6. PROFILE FIELDS & ONBOARDING CONFIGURATION                              */}
           {/* ========================================================================= */}
           {subTab === 'onboarding' && (
-            <div className="settings-page__card space-y-6">
+            <SettingsCard className="settings-page__card onboarding-field-settings space-y-6">
               {/* Header & Add Custom Field Action */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-lg font-bold text-slate-900 tracking-tight">
-                    Employee Profile & Onboarding Fields
+                    Onboarding fields
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5 font-medium">
-                    Configure standard and custom fields requested from new hires during onboarding, set mandatory rules, and define document upload slots.
+                    Choose which profile fields new hires fill in. Document uploads stay empty until you add them here.
                   </p>
                 </div>
 
@@ -2310,35 +2235,15 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   onClick={() => setShowAddFieldDrawer(true)}
                   className="px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs flex items-center gap-2 transition-all cursor-pointer active:scale-95 shrink-0 shadow-xs"
                 >
-                  <span>Add Custom Field</span>
+                  <span>Add field</span>
                 </button>
               </div>
 
               {/* Automation Toggles */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Auto-Send Welcome Email
-                    </span>
-                    <span className="text-[10px] text-slate-500">
-                      Dispatches temporary login credentials immediately.
-                    </span>
-                  </div>
-                  <ToggleSwitch checked={autoSendWelcomeEmail} onChange={setAutoSendWelcomeEmail} />
-                </div>
+                <SettingsSwitchRow title={"Auto-Send Welcome Email"} description={"Dispatches temporary login credentials immediately."} checked={autoSendWelcomeEmail} onChange={setAutoSendWelcomeEmail} />
 
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Auto-Assign Team Buddy
-                    </span>
-                    <span className="text-[10px] text-slate-500">
-                      Pairs the new hire with a senior peer for 30 days.
-                    </span>
-                  </div>
-                  <ToggleSwitch checked={autoAssignBuddy} onChange={setAutoAssignBuddy} />
-                </div>
+                <SettingsSwitchRow title={"Auto-Assign Team Buddy"} description={"Pairs the new hire with a senior peer for 30 days."} checked={autoAssignBuddy} onChange={setAutoAssignBuddy} />
               </div>
 
               {/* Section Filter Tabs */}
@@ -2371,6 +2276,27 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
 
               {/* Fields List */}
               <div className="space-y-3">
+                {selectedFieldSection === 'documents' &&
+                  currentOnboardingFields.filter((f) => f.section === 'documents').length === 0 && (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 px-5 py-8 text-center">
+                      <p className="text-sm font-semibold text-slate-900">No document uploads yet</p>
+                      <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
+                        New hires will not see a documents step until you add upload slots here — for example government ID or a signed offer letter.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewFieldSection('documents');
+                          setNewFieldType('file');
+                          setShowAddFieldDrawer(true);
+                        }}
+                        className="mt-4 px-4 py-2.5 rounded-lg bg-[var(--studio-navy,#17324e)] hover:bg-[#285275] text-white font-semibold text-xs transition-colors cursor-pointer"
+                      >
+                        Add document field
+                      </button>
+                    </div>
+                  )}
+
                 {currentOnboardingFields
                   .filter((f) => selectedFieldSection === 'all' || f.section === selectedFieldSection)
                   .map((field) => {
@@ -2408,10 +2334,20 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                                 Custom
                               </span>
                             )}
+                            {(field.name === 'designation' || field.name === 'department') && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                HR at invite
+                              </span>
+                            )}
                           </div>
                           {field.description && (
                             <p className="text-[11px] text-slate-500 font-medium">
                               {field.description}
+                            </p>
+                          )}
+                          {(field.name === 'designation' || field.name === 'department') && !field.description && (
+                            <p className="text-[11px] text-slate-500 font-medium">
+                              Assigned by HR at invite — not collected from the hire during onboarding.
                             </p>
                           )}
                           {field.options && field.options.length > 0 && (
@@ -2468,14 +2404,14 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                     );
                   })}
               </div>
-            </div>
+            </SettingsCard>
           )}
 
           {/* ========================================================================= */}
           {/* 7. OFFBOARDING & EXIT POLICY                                              */}
           {/* ========================================================================= */}
           {subTab === 'offboarding' && (
-            <div className="settings-page__card space-y-6">
+            <SettingsCard className="settings-page__card space-y-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900 tracking-tight">
                   Offboarding & Exit Management
@@ -2487,53 +2423,13 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
 
               {/* Clearance Policy Checklist */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Mandatory HR Exit Interview Survey
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Requires resigning employee to complete confidential feedback survey before last working day.
-                    </span>
-                  </div>
-                  <ToggleSwitch checked={reqExitInterview} onChange={setReqExitInterview} />
-                </div>
+                <SettingsSwitchRow title={"Mandatory HR Exit Interview Survey"} description={"Requires resigning employee to complete confidential feedback survey before last working day."} checked={reqExitInterview} onChange={setReqExitInterview} />
 
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      IT Asset & Hardware Recovery Clearance
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Requires IT admin verification that laptops, monitors, and security keys have been returned.
-                    </span>
-                  </div>
-                  <ToggleSwitch checked={reqAssetClearance} onChange={setReqAssetClearance} />
-                </div>
+                <SettingsSwitchRow title={"IT Asset & Hardware Recovery Clearance"} description={"Requires IT admin verification that laptops, monitors, and security keys have been returned."} checked={reqAssetClearance} onChange={setReqAssetClearance} />
 
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Line Manager Knowledge Transfer (KT) Sign-Off
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Line manager must sign off on project handover and task re-assignments.
-                    </span>
-                  </div>
-                  <ToggleSwitch checked={reqManagerNOC} onChange={setReqManagerNOC} />
-                </div>
+                <SettingsSwitchRow title={"Line Manager Knowledge Transfer (KT) Sign-Off"} description={"Line manager must sign off on project handover and task re-assignments."} checked={reqManagerNOC} onChange={setReqManagerNOC} />
 
-                <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Auto-Revoke Google/Workspace & Single Sign-On Access
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      Automatically terminates email, drive, and VPN credentials at 11:59 PM on the last day.
-                    </span>
-                  </div>
-                  <ToggleSwitch checked={autoRevokeAccessOnLastDay} onChange={setAutoRevokeAccessOnLastDay} />
-                </div>
+                <SettingsSwitchRow title={"Auto-Revoke Google/Workspace & Single Sign-On Access"} description={"Automatically terminates email, drive, and VPN credentials at 11:59 PM on the last day."} checked={autoRevokeAccessOnLastDay} onChange={setAutoRevokeAccessOnLastDay} />
               </div>
 
               {/* F&F Settlement Timeline */}
@@ -2553,7 +2449,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   </select>
                 </div>
               </div>
-            </div>
+            </SettingsCard>
           )}
 
           {/* ========================================================================= */}
@@ -2672,35 +2568,11 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   Role Capabilities & Approvals
                 </h4>
 
-                <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Can Approve Team Timesheets
-                    </span>
-                    <span className="text-[10px] text-slate-500">Direct reports submit timesheets to this role for sign-off.</span>
-                  </div>
-                  <ToggleSwitch checked={drawerCanApproveTimesheets} onChange={setDrawerCanApproveTimesheets} />
-                </div>
+                <SettingsSwitchRow title={"Can Approve Team Timesheets"} description={"Direct reports submit timesheets to this role for sign-off."} checked={drawerCanApproveTimesheets} onChange={setDrawerCanApproveTimesheets} />
 
-                <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Can Assign and Delegate Project Tasks
-                    </span>
-                    <span className="text-[10px] text-slate-500">Allows task creation and allocation in project Kanban boards.</span>
-                  </div>
-                  <ToggleSwitch checked={drawerCanAssignTasks} onChange={setDrawerCanAssignTasks} />
-                </div>
+                <SettingsSwitchRow title={"Can Assign and Delegate Project Tasks"} description={"Allows task creation and allocation in project Kanban boards."} checked={drawerCanAssignTasks} onChange={setDrawerCanAssignTasks} />
 
-                <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-bold text-slate-900 block">
-                      Can Regularize Attendance & Review Leaves
-                    </span>
-                    <span className="text-[10px] text-slate-500">Grants authorization for leave and biometric attendance overrides.</span>
-                  </div>
-                  <ToggleSwitch checked={drawerCanApproveLeaves} onChange={setDrawerCanApproveLeaves} />
-                </div>
+                <SettingsSwitchRow title={"Can Regularize Attendance & Review Leaves"} description={"Grants authorization for leave and biometric attendance overrides."} checked={drawerCanApproveLeaves} onChange={setDrawerCanApproveLeaves} />
               </div>
             </form>
 
@@ -2732,7 +2604,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
       {/* RIGHT-SIDE SLIDE-OVER DRAWER MODAL FOR CUSTOM PROFILE FIELD CREATION      */}
       {/* ========================================================================= */}
       {showAddFieldDrawer && (
-        <div className="fixed inset-0 z-50 overflow-hidden bg-black/50 flex justify-end animate-in fade-in duration-200">
+        <div className="onboarding-field-drawer fixed inset-0 z-50 overflow-hidden bg-black/50 flex justify-end animate-in fade-in duration-200">
           <div className="w-full max-w-xl bg-white h-full border-l border-slate-200 flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-300 custom-scrollbar">
             {/* Drawer Header */}
             <div className="p-6 md:p-7 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white/95 z-10">
@@ -2779,7 +2651,11 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
                   <div className="relative">
                     <select
                       value={newFieldSection}
-                      onChange={(e) => setNewFieldSection(e.target.value as OnboardingSectionKey)}
+                      onChange={(e) => {
+                        const section = e.target.value as OnboardingSectionKey;
+                        setNewFieldSection(section);
+                        if (section === 'documents') setNewFieldType('file');
+                      }}
                       className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-900 appearance-none outline-none focus:border-blue-600 cursor-pointer pr-10"
                     >
                       <option value="basic">1. Basic & Work Info</option>
@@ -2861,17 +2737,7 @@ export const EmployeeSettingsView: React.FC<EmployeeSettingsViewProps> = ({
               </div>
 
               {/* Required Field Toggle */}
-              <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 bg-slate-50/50">
-                <div>
-                  <span className="text-xs font-bold text-slate-900 block">
-                    Required Field
-                  </span>
-                  <span className="text-[11px] text-slate-500">
-                    Employee must complete this field before completing onboarding.
-                  </span>
-                </div>
-                <ToggleSwitch checked={newFieldRequired} onChange={setNewFieldRequired} />
-              </div>
+              <SettingsSwitchRow title={"Required Field"} description={"Employee must complete this field before completing onboarding."} checked={newFieldRequired} onChange={setNewFieldRequired} />
             </form>
 
             {/* Drawer Actions Footer */}

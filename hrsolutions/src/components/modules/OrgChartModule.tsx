@@ -1,21 +1,18 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import './org-chart.css';
+import { UserAvatar } from '@/components/common/UserAvatar';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
   MapPin,
   X,
   Users,
   ChevronDown,
   Mail,
   Shield,
-  GitFork,
   Pencil,
   Check,
-  ListTree,
   Lock,
   ChevronRight,
   ExternalLink,
@@ -132,6 +129,9 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDept, setSelectedDept] = useState<string>('All');
   const [zoomLevel, setZoomLevel] = useState(1);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [selectedNode, setSelectedNode] = useState<OrgNode | null>(null);
 
   // Permission Check: Only HR and Super Admin can edit org chart
@@ -163,7 +163,6 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
     () => ((state?.customOptions as any)?.teamRecords || []) as TeamRecord[],
     [state?.customOptions]
   );
-  const orgName = state?.organization?.name || 'Workspace';
   const didSyncReporting = React.useRef(false);
 
   const showToast = (msg: string) => {
@@ -600,8 +599,14 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
   };
 
   const handleZoomIn = () => setZoomLevel((z) => Math.min(1.4, Number((z + 0.1).toFixed(1))));
-  const handleZoomOut = () => setZoomLevel((z) => Math.max(0.5, Number((z - 0.1).toFixed(1))));
-  const handleResetZoom = () => setZoomLevel(1);
+  const handleZoomOut = () => setZoomLevel((z) => Math.max(0.15, Number((z - 0.1).toFixed(2))));
+  const handleFitToView = () => {
+    const canvas = canvasRef.current, tree = treeRef.current;
+    if (!canvas || !tree) return;
+    const scale = Math.min(1, (canvas.clientWidth - 48) / tree.offsetWidth, (canvas.clientHeight - 48) / tree.offsetHeight);
+    setZoomLevel(Math.max(0.15, Math.floor(scale * 100) / 100));
+    canvas.scrollTo({ left: 0, top: 0 });
+  };
 
   const countPeople = (node: OrgNode): number => {
     if (node.kind === 'person') {
@@ -610,178 +615,48 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
     return (node.children || []).reduce((sum, child) => sum + countPeople(child), 0);
   };
 
-  // Render a Single Node Card in Tree View (Cleaned Up & Modernized)
-  const renderCard = (node: OrgNode) => {
-    const hasChildren = node.children && node.children.length > 0;
-    const isCollapsed = collapsedNodeIds.has(node.id);
-    const matchesSearch = searchQuery
-      ? node.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        node.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        node.department.toLowerCase().includes(searchQuery.toLowerCase())
-      : false;
+  useEffect(() => {
+    if (!searchQuery.trim() || viewMode !== 'tree') return;
+    const frame = requestAnimationFrame(() => {
+      const canvas = canvasRef.current, match = treeRef.current?.querySelector<HTMLElement>('[data-match="true"]');
+      if (!canvas || !match) return;
+      const bounds = match.getBoundingClientRect(), viewport = canvas.getBoundingClientRect();
+      canvas.scrollTo({ left: Math.max(0, canvas.scrollLeft + bounds.left - viewport.left - (canvas.clientWidth - bounds.width) / 2), top: Math.max(0, canvas.scrollTop + bounds.top - viewport.top - 32), behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [searchQuery, selectedDept, viewMode]);
 
-    const deptTheme = DEPT_COLORS[node.department] || {
-      bg: 'bg-slate-50',
-      text: 'text-slate-700',
-      border: 'border-slate-200',
-    };
+  const planEmployees = employees.filter((employee) => (selectedDept === 'All' || employee.department === selectedDept) && `${employee.name} ${employee.designation || ''} ${employee.department || ''}`.toLowerCase().includes(searchQuery.trim().toLowerCase()));
 
-    const person = node.kind !== 'team' && node.kind !== 'unassigned'
-      ? employees.find((e) => e.id === node.id)
-      : undefined;
-    const isFounder = !!person && isLeadershipEmployee(person);
-    const isGroup = node.kind === 'team' || node.kind === 'unassigned';
-    const groupCount = isGroup ? countPeople(node) : node.children?.length || 0;
-
-    return (
-      <div className="flex flex-col items-center relative group z-10">
-        <div
-          onClick={() => {
-            if (isGroup) return;
-            // Editors peek in-chart; everyone else goes through parent routing
-            // (full detail for self, public profile modal for coworkers).
-            if (!canEditOrgChart && onSelectEmployee && person) {
-              onSelectEmployee(person);
-              return;
-            }
-            setSelectedNode(node);
-          }}
-          className={`w-52 rounded-2xl border bg-white p-4 pt-4 pb-5 flex flex-col items-center text-center shadow-xs transition-all duration-200 relative select-none ${
-            isGroup ? 'cursor-default' : 'cursor-pointer hover:shadow-lg'
-          } ${
-            matchesSearch
-              ? 'border-blue-600 ring-4 ring-blue-500/20 shadow-md scale-105'
-              : isFounder
-                ? 'border-slate-300 ring-2 ring-slate-900/5'
-                : isGroup
-                  ? 'border-dashed border-slate-300 bg-slate-50'
-                  : 'border-slate-200 hover:border-slate-300'
-          }`}
-        >
-          {isFounder && (
-            <div className="absolute -top-2.5 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[10px] font-bold uppercase tracking-wider border border-slate-200/80 shadow-2xs">
-              Founder / CEO
-            </div>
-          )}
-          {node.kind === 'unassigned' && (
-            <div className="absolute -top-2.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[10px] font-bold uppercase tracking-wider border border-amber-200 shadow-2xs">
-              Unassigned
-            </div>
-          )}
-
-          {isGroup ? (
-            <div className="h-14 w-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center">
-              <Users className="h-6 w-6 text-slate-500" />
-            </div>
-          ) : (
-            <div className="relative mt-1">
-              <img
-                src={node.avatar}
-                alt={node.name}
-                className="h-14 w-14 rounded-full object-cover ring-2 ring-slate-100 shadow-2xs"
-              />
-              <span
-                className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white ${
-                  node.status === 'On Leave' ? 'bg-amber-400' : 'bg-emerald-500'
-                }`}
-                title={node.status || 'Active'}
-              />
-            </div>
-          )}
-
-          <h4 className="mt-2.5 text-xs font-bold text-slate-900 tracking-tight leading-tight truncate max-w-[180px]">
-            {node.name}
-          </h4>
-
-          <p className="text-[11px] font-semibold text-slate-600 mt-0.5 truncate max-w-[180px]">
-            {isGroup ? `${groupCount} ${groupCount === 1 ? 'person' : 'people'}` : node.role}
-          </p>
-
-          {!!node.department && (
-            <div className="mt-2 flex items-center gap-1.5">
-              <span
-                className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${deptTheme.bg} ${deptTheme.text} ${deptTheme.border}`}
-              >
-                {node.department}
-              </span>
-            </div>
-          )}
-
-          {hasChildren && (
-            <button
-              type="button"
-              onClick={(e) => toggleCollapse(node.id, e)}
-              className="absolute -bottom-3 px-2 py-0.5 rounded-full bg-white hover:bg-slate-50 text-slate-700 hover:text-blue-600 flex items-center gap-1 text-[10px] font-bold transition-all shadow-xs cursor-pointer active:scale-95 z-20 border border-slate-200"
-              title={isCollapsed ? `Expand ${node.children?.length} items` : 'Collapse'}
-            >
-              <Users className="h-3 w-3 text-slate-500" />
-              <span>{node.children?.length}</span>
-              <span className="text-[10px] text-slate-400">{isCollapsed ? '+' : '−'}</span>
-            </button>
-          )}
-        </div>
-      </div>
-    );
+  const openNode = (node: OrgNode) => {
+    const person = employees.find((employee) => employee.id === node.id);
+    if (!canEditOrgChart && onSelectEmployee && person) onSelectEmployee(person);
+    else setSelectedNode(node);
   };
 
-  // Dynamic CSS Tree Connector Renderer
-  const renderTreeNode = (node: OrgNode) => {
-    const hasChildren = node.children && node.children.length > 0;
-    const isCollapsed = collapsedNodeIds.has(node.id);
-    const childCount = node.children?.length || 0;
-
-    return (
-      <div key={node.id} className="flex flex-col items-center">
-        {/* Node Card */}
-        {renderCard(node)}
-
-        {/* Children Branch Section */}
-        {hasChildren && !isCollapsed && (
-          <div className="flex flex-col items-center w-full">
-            {/* Vertical connector stem from parent downwards */}
-            <div className="w-[1.5px] h-8 bg-slate-300 shrink-0" />
-
-            {/* Container for all children with connecting horizontal arms */}
-            {childCount === 1 ? (
-              <div className="flex flex-col items-center">
-                {renderTreeNode(node.children![0])}
-              </div>
-            ) : (
-              <div className="flex justify-center items-start gap-6 sm:gap-10 relative">
-                {node.children!.map((child, index) => {
-                  const isFirst = index === 0;
-                  const isLast = index === childCount - 1;
-
-                  return (
-                    <div key={child.id} className="flex flex-col items-center relative flex-1">
-                      {/* Horizontal connecting arm at top of child column */}
-                      <div
-                        className="absolute top-0 h-[1.5px] bg-slate-300"
-                        style={{
-                          left: isFirst ? '50%' : '0',
-                          right: isLast ? '50%' : '0',
-                          width: isFirst || isLast ? '50%' : '100%',
-                        }}
-                      />
-
-                      {/* Vertical stem down into child card */}
-                      <div className="w-[1.5px] h-8 bg-slate-300 shrink-0 z-0" />
-
-                      {/* Child Node */}
-                      {renderTreeNode(child)}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+  const renderTreeNode = (node: OrgNode): React.ReactNode => {
+    const children = node.children || [];
+    const collapsed = collapsedNodeIds.has(node.id);
+    const group = node.kind === 'team' || node.kind === 'unassigned';
+    const query = searchQuery.trim().toLowerCase();
+    const match = !!query && `${node.name} ${node.role} ${node.department}`.toLowerCase().includes(query);
+    const content = <>
+      {group ? <span className="org-group-avatar"><Users size={20}/></span> : <UserAvatar src={node.avatar} name={node.name} className="org-person-avatar"/>}
+      <strong className="org-person-name" title={node.name}>{node.name}</strong>
+      <span className="org-person-role" title={node.role}>{group ? `${countPeople(node)} people` : node.role || 'Team member'}</span>
+      {node.department && <span className="org-person-department">{node.department}</span>}
+    </>;
+    return <div key={node.id} className="org-tree-node">
+      <div className="org-card-wrap">
+        {group ? <div className="org-person-card org-group-card" data-match={match}>{content}</div> : <button type="button" className="org-person-card" data-match={match} aria-label={`View ${node.name}, ${node.role}`} onClick={() => openNode(node)}>{content}</button>}
+        {children.length > 0 && <button type="button" className="org-node-toggle" aria-expanded={!collapsed} aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.name}'s reports`} title={`${children.length} direct ${children.length === 1 ? 'report' : 'reports'}`} onClick={(event) => toggleCollapse(node.id, event)}><ChevronDown size={12} className={collapsed ? 'is-collapsed' : ''}/><span>{children.length}</span></button>}
       </div>
-    );
+      {children.length > 0 && !collapsed && <div className="org-tree-branch"><div className="org-tree-children">{children.map((child) => <div className="org-tree-column" key={child.id}>{renderTreeNode(child)}</div>)}</div></div>}
+    </div>;
   };
 
   return (
-    <div className="space-y-4">
+    <div className="people-org-chart org-chart-studio">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
@@ -790,156 +665,36 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
         </div>
       )}
 
-      {/* Top Header Card with Clean View Switcher & Action Controls */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Organization Chart</h2>
-            {!canEditOrgChart && (
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200/80 flex items-center gap-1">
-                <Lock className="w-3 h-3 text-slate-400" /> Read-Only
-              </span>
-            )}
+      <div className="org-toolbar">
+        <div className="org-filter-controls">
+          <div className="org-mode-toggle" role="group" aria-label="Organization chart view">
+            <button type="button" aria-pressed={viewMode === 'tree'} onClick={() => setViewMode('tree')}>Tree view</button>
+            <button type="button" aria-pressed={viewMode === 'plan'} onClick={() => setViewMode('plan')}>Hierarchy plan</button>
           </div>
-          <p className="text-xs text-slate-500">
-            Reporting hierarchy & management structure for {orgName}
-          </p>
+          <select aria-label="Filter organization by department" value={selectedDept} onChange={(event) => setSelectedDept(event.target.value)}>{departments.map((department) => <option key={department} value={department}>{department === 'All' ? 'All departments' : department}</option>)}</select>
+          <label className="org-search"><Search size={15}/><input value={searchQuery} aria-label="Search organization chart" placeholder="Search name, role..." onChange={(event) => setSearchQuery(event.target.value)}/>{searchQuery && <button type="button" aria-label="Clear organization search" onClick={() => setSearchQuery('')}><X size={14}/></button>}</label>
         </div>
-
-        {/* Action Controls Toolbar */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* View Mode Toggle: Tree vs Hierarchy Plan */}
-          <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 p-1">
-            <button
-              type="button"
-              onClick={() => setViewMode('tree')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                viewMode === 'tree' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <GitFork className="h-3.5 w-3.5" />
-              <span>Tree View</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('plan')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                viewMode === 'plan' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <ListTree className="h-3.5 w-3.5" />
-              <span>Hierarchy Plan</span>
-            </button>
-          </div>
-
-          {/* Department Filter */}
-          <div className="relative">
-            <select
-              value={selectedDept}
-              onChange={(e) => setSelectedDept(e.target.value)}
-              className="appearance-none rounded-xl border border-slate-200 bg-slate-50 pl-3.5 pr-8 py-2 text-xs font-bold text-slate-800 outline-none focus:border-slate-900 focus:bg-white transition-all cursor-pointer"
-            >
-              {departments.map((dept) => (
-                <option key={dept} value={dept}>
-                  {dept === 'All' ? 'All Departments' : dept}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-2.5 top-2.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-          </div>
-
-          {/* Search Bar */}
-          <div className="relative">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search member, role..."
-              className="w-40 sm:w-52 rounded-xl border border-slate-200 bg-slate-50 pl-3.5 pr-8 py-2 text-xs font-medium text-slate-800 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white transition-all"
-            />
-            <Search className="absolute right-3 top-2.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-          </div>
-
-          {viewMode === 'tree' && (
-            <>
-              {/* Expand / Collapse Controls */}
-              <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 p-1">
-                <button
-                  type="button"
-                  onClick={expandAll}
-                  className="px-2.5 py-1 text-xs font-bold text-slate-600 hover:text-slate-900 rounded-lg hover:bg-white transition-all cursor-pointer"
-                >
-                  Expand
-                </button>
-                <button
-                  type="button"
-                  onClick={collapseAll}
-                  className="px-2.5 py-1 text-xs font-bold text-slate-600 hover:text-slate-900 rounded-lg hover:bg-white transition-all cursor-pointer"
-                >
-                  Collapse
-                </button>
-              </div>
-
-              {/* Zoom Controls */}
-              <div className="flex items-center gap-1 border border-slate-200 rounded-xl bg-slate-50 p-1 text-slate-600">
-                <button
-                  type="button"
-                  onClick={handleZoomOut}
-                  className="p-1.5 hover:bg-white rounded-lg transition-all cursor-pointer hover:text-slate-900"
-                  title="Zoom out"
-                >
-                  <ZoomOut className="h-4 w-4" />
-                </button>
-                <span className="text-[11px] font-mono font-bold px-1 select-none">
-                  {Math.round(zoomLevel * 100)}%
-                </span>
-                <button
-                  type="button"
-                  onClick={handleZoomIn}
-                  className="p-1.5 hover:bg-white rounded-lg transition-all cursor-pointer hover:text-slate-900"
-                  title="Zoom in"
-                >
-                  <ZoomIn className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleResetZoom}
-                  className="p-1.5 hover:bg-white rounded-lg transition-all cursor-pointer hover:text-slate-900"
-                  title="Reset zoom"
-                >
-                  <Maximize2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        {viewMode === 'tree' && <div className="org-tree-controls">
+          <button type="button" onClick={expandAll}>Expand all</button><button type="button" onClick={collapseAll}>Collapse all</button>
+          <button type="button" className="org-icon-control" aria-label="Zoom out" onClick={handleZoomOut} disabled={zoomLevel <= 0.15}>−</button><button type="button" className="org-zoom-value" aria-label={`Reset zoom to 100 percent. Current zoom ${Math.round(zoomLevel * 100)} percent`} title="Reset zoom to 100%" onClick={() => setZoomLevel(1)}>{Math.round(zoomLevel * 100)}%</button>
+          <button type="button" className="org-icon-control" aria-label="Zoom in" onClick={handleZoomIn} disabled={zoomLevel >= 1.4}>+</button><button type="button" onClick={handleFitToView}>Fit to view</button>
+        </div>}
+        {!canEditOrgChart && <span className="org-read-only"><Lock size={12}/>Read only</span>}
       </div>
+      {searchQuery.trim() && <p className="org-search-summary" role="status">{employees.filter((employee) => (selectedDept === 'All' || employee.department === selectedDept) && `${employee.name} ${employee.designation || ''} ${employee.department || ''}`.toLowerCase().includes(searchQuery.trim().toLowerCase())).length} matching people{viewMode === 'tree' ? ' · Matching cards are highlighted; reporting lines remain visible.' : ''}</p>}
 
       {/* VIEW 1: VISUAL TREE VIEW */}
       {viewMode === 'tree' ? (
-        <div className="rounded-3xl border border-slate-200 bg-white p-8 sm:p-12 min-h-[640px] overflow-auto shadow-xs flex justify-center items-start">
-          {orgTrees.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center space-y-3">
-              <div className="p-4 rounded-2xl bg-slate-100 text-slate-400">
-                <Users className="h-8 w-8" />
-              </div>
-              <h3 className="text-sm font-bold text-slate-800">No Employees Found</h3>
-              <p className="text-xs text-slate-500 max-w-sm">
-                Add or invite employees to automatically generate the organizational reporting chart.
-              </p>
-            </div>
-          ) : (
-            <div
-              className="transition-transform duration-200 ease-out origin-top py-6 px-8 flex justify-center gap-16"
-              style={{ transform: `scale(${zoomLevel})` }}
-            >
-              {orgTrees.map((tree) => renderTreeNode(tree))}
-            </div>
-          )}
+        <div className="org-tree-canvas" ref={canvasRef} tabIndex={0} role="region" aria-label="Organization hierarchy. Scroll or drag the background to explore."
+          onPointerDown={(event) => { if (event.button !== 0 || (event.target as HTMLElement).closest('button,input,select')) return; const canvas = canvasRef.current!; panRef.current = { x: event.clientX, y: event.clientY, left: canvas.scrollLeft, top: canvas.scrollTop }; canvas.setPointerCapture(event.pointerId); canvas.dataset.panning = 'true'; }}
+          onPointerMove={(event) => { const pan = panRef.current, canvas = canvasRef.current; if (!pan || !canvas) return; canvas.scrollLeft = pan.left - (event.clientX - pan.x); canvas.scrollTop = pan.top - (event.clientY - pan.y); }}
+          onPointerUp={() => { panRef.current = null; if (canvasRef.current) canvasRef.current.dataset.panning = 'false'; }}
+          onPointerCancel={() => { panRef.current = null; if (canvasRef.current) canvasRef.current.dataset.panning = 'false'; }}>
+          {orgTrees.length === 0 ? <div className="org-empty"><Users size={28}/><h3>No people in this view</h3><p>{selectedDept !== 'All' ? 'Choose another department to explore its reporting structure.' : 'Add or invite employees to build your organization chart.'}</p></div> : <div className="org-tree-content" ref={treeRef} style={{ zoom: zoomLevel }}>{orgTrees.map((tree) => renderTreeNode(tree))}</div>}
         </div>
       ) : (
         /* VIEW 2: ONBOARDING-STYLE HIERARCHY PLAN VIEW (Clean Cards with Manager Selectors) */
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xs space-y-4">
+        <div className="org-hierarchy-plan space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div>
               <h3 className="text-base font-bold text-slate-900">Hierarchy & Reporting Assignments</h3>
@@ -951,20 +706,9 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
             </div>
           </div>
 
+          {planEmployees.length === 0 && <div className="org-empty"><Users size={28}/><h3>No matching people</h3><p>Try a different name, role, or department.</p></div>}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {employees
-              .filter((emp) => {
-                if (selectedDept !== 'All' && emp.department !== selectedDept) return false;
-                if (searchQuery.trim()) {
-                  const q = searchQuery.toLowerCase();
-                  return (
-                    emp.name.toLowerCase().includes(q) ||
-                    emp.designation?.toLowerCase().includes(q) ||
-                    emp.department?.toLowerCase().includes(q)
-                  );
-                }
-                return true;
-              })
+            {planEmployees
               .map((emp) => {
                 const isLeader = getRoleRank(emp) === 1;
                 const deptTheme = DEPT_COLORS[emp.department || ''] || {
@@ -977,15 +721,11 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
                 return (
                   <div
                     key={emp.id}
-                    className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-2xs hover:border-slate-300 transition-all space-y-4"
+                    className="org-plan-card space-y-4"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        <img
-                          src={emp.avatar || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2394a3b8"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>'}
-                          alt={emp.name}
-                          className="w-11 h-11 rounded-full object-cover ring-2 ring-slate-100 shrink-0"
-                        />
+                        <UserAvatar src={emp.avatar} name={emp.name} className="org-plan-avatar"/>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <h4 className="font-bold text-slate-900 text-sm truncate">{emp.name}</h4>
@@ -1016,6 +756,7 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
                           onClick={() => handleOpenEditEmp(emp)}
                           className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
                           title="Edit Employee Details"
+                          aria-label={`Edit hierarchy for ${emp.name}`}
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
@@ -1027,6 +768,7 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
                       <span className="font-bold text-slate-700 shrink-0">Reports to:</span>
                       {canEditOrgChart ? (
                         <select
+                          aria-label={`Reporting manager for ${emp.name}`}
                           value={emp.managerId || ''}
                           onChange={(e) => handleUpdateReportingManager(emp.id, e.target.value)}
                           className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold outline-none focus:border-slate-900 bg-slate-50 hover:bg-white transition-colors cursor-pointer w-full max-w-[220px]"
@@ -1090,11 +832,7 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
                 if (!targetEmp) return null;
                 return (
                   <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
-                    <img
-                      src={targetEmp.avatar || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2394a3b8"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>'}
-                      alt={targetEmp.name}
-                      className="w-11 h-11 rounded-full object-cover ring-2 ring-slate-100"
-                    />
+                    <UserAvatar src={targetEmp.avatar} name={targetEmp.name} className="h-11 w-11"/>
                     <div>
                       <h4 className="font-bold text-slate-900 text-sm">{targetEmp.name}</h4>
                       <p className="text-xs text-slate-500">{targetEmp.email}</p>

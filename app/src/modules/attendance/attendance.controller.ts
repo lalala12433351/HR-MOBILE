@@ -23,15 +23,25 @@ import {
   withTenantTransaction,
 } from './leaveBalances.js';
 import {
+  assertLeaveRequestAllowed,
+  ensureLeaveAttachmentColumn,
+  loadLeavePolicy,
+  nextLeaveDecision,
+} from './leavePolicy.js';
+import {
   applyAutoClockOut,
   assertClockingDeviceAllowed,
   clientIp,
+  readAttendanceSession,
+  recordPresencePing,
+  submitMissedCheckoutTime,
   createOfficeQrToken,
   ensurePunchPhotoColumn,
   findOpenCheckIn,
+  isRemoteAttendanceDevice,
+  loadRegularizationRules,
   isGeofenceRequired,
   isIpAllowed,
-  isRemoteAttendanceDevice,
   loadAttendancePolicy,
   officeAllowsQr,
   officePolicyFor,
@@ -208,6 +218,11 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
 
     const policy = await loadAttendancePolicy(req);
     try {
+      await clearFutureWfhShiftCheckouts(req);
+    } catch (clearErr) {
+      console.warn('Future WFH checkout cleanup skipped:', clearErr);
+    }
+    try {
       await applyAutoClockOut(req, validEmpId, policy);
     } catch (autoErr) {
       console.warn('Auto clock-out skipped:', autoErr);
@@ -215,7 +230,12 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
     const hasSelfieColumn = await ensurePunchPhotoColumn(req);
 
     const ipAddress = clientIp(req) || '127.0.0.1';
-    if (!isIpAllowed(policy, ipAddress)) {
+    const isRemote =
+      workFromHome === true ||
+      String(deviceInfo || '').toLowerCase().includes('wfh') ||
+      String(deviceInfo || '').toLowerCase().includes('remote');
+    // Home networks are not on the office allowlist. WFH still files a regularization for the manager.
+    if (!isRemote && !isIpAllowed(policy, ipAddress)) {
       res.status(403).json({
         success: false,
         error: {
@@ -224,22 +244,6 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
         },
       });
       return;
-    }
-
-    const isRemote = workFromHome === true || String(deviceInfo || '').toLowerCase().includes('wfh') || String(deviceInfo || '').toLowerCase().includes('remote');
-    if (isRemote) {
-      const approvedWfh = await hasApprovedWfhRegularization(req, validEmpId);
-      if (!approvedWfh) {
-        res.status(403).json({
-          success: false,
-          error: {
-            code: 'WFH_NOT_APPROVED',
-            message:
-              'Work from home requires an approved regularization for today. Submit a WFH request under Attendance → Regularizations and wait for manager approval.',
-          },
-        });
-        return;
-      }
     }
     const usedQr = Boolean(qrToken);
     if (usedQr) {
@@ -260,13 +264,15 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
       }
     }
 
-    const deviceGate = assertClockingDeviceAllowed(policy, office, req, usedQr);
-    if (!deviceGate.ok) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'DEVICE_NOT_ALLOWED', message: deviceGate.message },
-      });
-      return;
+    if (!isRemote) {
+      const deviceGate = assertClockingDeviceAllowed(policy, office, req, usedQr);
+      if (!deviceGate.ok) {
+        res.status(403).json({
+          success: false,
+          error: { code: 'DEVICE_NOT_ALLOWED', message: deviceGate.message },
+        });
+        return;
+      }
     }
 
     const latRaw = latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : NaN;
@@ -340,7 +346,7 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
       }
     } else {
       distanceMeters = 0;
-      isWithinGeofence = true;
+      isWithinGeofence = !isRemote;
     }
 
     // Calculate server-derived logged hours if checkIn and checkOut timestamps provided
@@ -358,6 +364,16 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
     }
 
     const photo = selfieLooksPresent(selfiePhoto) ? String(selfiePhoto) : null;
+    if (photo && !hasSelfieColumn) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'PHOTO_STORE_UNAVAILABLE',
+          message: 'The punch photo could not be stored. Retry after the attendance database is updated.',
+        },
+      });
+      return;
+    }
     const result = hasSelfieColumn
       ? await req.tenantQuery!(
           `INSERT INTO attendance_punches (
@@ -416,6 +432,66 @@ export async function recordPunch(req: Request, res: Response): Promise<void> {
     });
   } catch (err: any) {
     console.error('Error recording punch:', err);
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
+export async function getOfficeQrToken(req: Request, res: Response): Promise<void> {
+  try {
+    const policy = await loadAttendancePolicy(req);
+    if (!policy.allowQrCodeAttendance) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'QR_DISABLED', message: 'QR attendance is disabled in Attendance Settings.' },
+      });
+      return;
+    }
+
+    const officeId = String(req.query.officeId || '');
+    let office: any = null;
+    if (officeId) {
+      const officeRes = await req.tenantQuery!(
+        `SELECT * FROM offices WHERE (id::text = $1 OR code = $1) AND is_active = true LIMIT 1`,
+        [officeId]
+      );
+      office = officeRes.rows[0] || null;
+    }
+    if (!office) {
+      const fallback = await req.tenantQuery!(
+        `SELECT * FROM offices WHERE is_active = true ORDER BY created_at ASC NULLS LAST LIMIT 1`
+      );
+      office = fallback.rows[0] || null;
+    }
+    if (!office) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'OFFICE_NOT_CONFIGURED', message: 'No office is configured for QR attendance.' },
+      });
+      return;
+    }
+    if (!officeAllowsQr(policy, office)) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'QR_DISABLED', message: 'QR attendance is not enabled for this office.' },
+      });
+      return;
+    }
+
+    const issued = createOfficeQrToken(
+      String(req.tenant?.id || req.dbSchema || ''),
+      String(office.id),
+      policy.qrRefreshIntervalSeconds
+    );
+    res.json({
+      success: true,
+      data: {
+        ...issued,
+        officeId: office.id,
+        officeName: office.name,
+        refreshSeconds: policy.qrRefreshIntervalSeconds,
+      },
+    });
+  } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
 }
@@ -587,91 +663,43 @@ export async function verifyWorkplaceLocation(req: Request, res: Response): Prom
   }
 }
 
-export async function getOfficeQrToken(req: Request, res: Response): Promise<void> {
-  try {
-    const policy = await loadAttendancePolicy(req);
-    if (!policy.allowQrCodeAttendance) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'QR_DISABLED', message: 'QR attendance is disabled in Attendance Settings.' },
-      });
-      return;
-    }
-
-    const officeId = String(req.query.officeId || '');
-    let office: any = null;
-    if (officeId) {
-      const officeRes = await req.tenantQuery!(
-        `SELECT * FROM offices WHERE (id::text = $1 OR code = $1) AND is_active = true LIMIT 1`,
-        [officeId]
-      );
-      office = officeRes.rows[0] || null;
-    }
-    if (!office) {
-      const fallback = await req.tenantQuery!(
-        `SELECT * FROM offices WHERE is_active = true ORDER BY created_at ASC NULLS LAST LIMIT 1`
-      );
-      office = fallback.rows[0] || null;
-    }
-    if (!office) {
-      res.status(400).json({
-        success: false,
-        error: { code: 'OFFICE_NOT_CONFIGURED', message: 'No office is configured for QR attendance.' },
-      });
-      return;
-    }
-    if (!officeAllowsQr(policy, office)) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'QR_DISABLED', message: 'QR attendance is not enabled for this office.' },
-      });
-      return;
-    }
-
-    const issued = createOfficeQrToken(
-      String(req.tenant?.id || req.dbSchema || ''),
-      String(office.id),
-      policy.qrRefreshIntervalSeconds
-    );
-    res.json({
-      success: true,
-      data: {
-        ...issued,
-        officeId: office.id,
-        officeName: office.name,
-        refreshSeconds: policy.qrRefreshIntervalSeconds,
-      },
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
-  }
-}
-
 export async function getPunches(req: Request, res: Response): Promise<void> {
   try {
     const { employeeId, date } = req.query;
     const policy = await loadAttendancePolicy(req);
+    try {
+      await clearFutureWfhShiftCheckouts(req);
+    } catch (clearErr) {
+      console.warn('Future WFH checkout cleanup skipped:', clearErr);
+    }
     const hasSelfieColumn = await ensurePunchPhotoColumn(req);
     const me = await resolveCallerEmployee(req);
-    if (me?.id) {
-      try {
-        await applyAutoClockOut(req, me.id, policy);
-      } catch (autoErr) {
-        console.warn('Auto clock-out skipped:', autoErr);
-      }
+    try {
+      await applyAutoClockOut(req, me?.id, policy);
+    } catch (autoErr) {
+      console.warn('Auto clock-out skipped:', autoErr);
     }
     const scope = await getAccessScope(req);
+    const includePhotos =
+      Boolean(employeeId) &&
+      (req.query.includePhotos === '1' || req.query.includePhotos === 'true');
     const selfieSelect = hasSelfieColumn
-      ? `(p.selfie_photo IS NOT NULL AND length(p.selfie_photo) > 0) AS has_selfie,`
+      ? includePhotos
+        ? `p.selfie_photo, (p.selfie_photo IS NOT NULL AND length(p.selfie_photo) > 0) AS has_selfie,`
+        : `(p.selfie_photo IS NOT NULL AND length(p.selfie_photo) > 0) AS has_selfie,`
       : `false AS has_selfie,`;
     let sql = `
       SELECT 
         p.id, p.employee_id, p.office_id, p.punch_type, p.punch_timestamp,
         p.latitude, p.longitude, p.distance_from_office_meters, p.is_within_geofence,
         p.device_info, p.ip_address,
+        EXISTS (
+          SELECT 1 FROM attendance_missed_checkouts m
+          WHERE m.check_in_punch_id = p.id
+        ) AS missed_checkout,
         ${selfieSelect}
         p.punch_timestamp as punch_time,
-        e.first_name || ' ' || e.last_name as employee_name,
+        TRIM(COALESCE(e.first_name, '') || ' ' || COALESCE(e.last_name, '')) as employee_name,
         e.employee_code,
         o.name as office_name
       FROM attendance_punches p
@@ -695,11 +723,23 @@ export async function getPunches(req: Request, res: Response): Promise<void> {
       sql += ` AND p.employee_id = $${params.length}`;
     }
     if (date) {
-      params.push(date);
-      sql += ` AND DATE(p.punch_timestamp) = $${params.length}`;
+      params.push(String(date).slice(0, 10));
+      // Include a day on either side so a UTC database date still matches the viewer's local day.
+      sql += includePhotos
+        ? ` AND p.punch_timestamp >= ($${params.length}::date - INTERVAL '1 day') AND p.punch_timestamp < ($${params.length}::date + INTERVAL '2 days')`
+        : ` AND DATE(p.punch_timestamp) = $${params.length}::date`;
     }
 
-    sql += ` ORDER BY p.punch_timestamp DESC LIMIT 200`;
+    if (!employeeId && !date) {
+      // Daily boards need the whole recent window. A 200-row cap dropped
+      // earlier check-ins once enough later punches existed, so someone
+      // still clocked in looked absent.
+      sql += ` AND p.punch_timestamp >= (NOW() - INTERVAL '120 days')`;
+    }
+
+    sql += employeeId
+      ? ` ORDER BY p.punch_timestamp DESC LIMIT 500`
+      : ` ORDER BY p.punch_timestamp DESC LIMIT 20000`;
 
     const result = await req.tenantQuery!(sql, params);
     res.json({ success: true, data: result.rows });
@@ -761,6 +801,7 @@ export async function requestLeave(req: Request, res: Response): Promise<void> {
     const validStart = startDate || new Date().toISOString().split('T')[0];
     const validEnd = endDate || validStart;
     const year = Number(String(validStart).slice(0, 4)) || new Date().getFullYear();
+    const attachmentUrl = String(req.body?.attachmentUrl || '').trim() || null;
 
     if (!req.dbSchema) {
       res.status(400).json({ success: false, error: { code: 'TENANT_CONTEXT_REQUIRED', message: 'Missing tenant schema' } });
@@ -769,17 +810,36 @@ export async function requestLeave(req: Request, res: Response): Promise<void> {
 
     try {
       const result = await withTenantTransaction(req.dbSchema, async (query) => {
+        await ensureLeaveAttachmentColumn(query);
+        await assertLeaveRequestAllowed(query, {
+          employeeId: validEmpId,
+          leaveType: validLeaveType,
+          daysCount: daysCountNum,
+          attachmentUrl,
+        });
         await assertSufficientBalance(query, validEmpId, validLeaveType, daysCountNum, year);
         const insertRes = await query(
-          `INSERT INTO leave_requests (employee_id, leave_type, start_date, end_date, days_count, reason, status)
-           VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+          `INSERT INTO leave_requests (employee_id, leave_type, start_date, end_date, days_count, reason, status, attachment_url)
+           VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
            RETURNING *`,
-          [validEmpId, validLeaveType, validStart, validEnd, daysCountNum, reason || 'Personal Leave']
+          [validEmpId, validLeaveType, validStart, validEnd, daysCountNum, reason || 'Personal Leave', attachmentUrl]
         );
         return insertRes.rows[0];
       });
       res.status(201).json({ success: true, data: result });
     } catch (balErr: any) {
+      if (
+        balErr?.code === 'COMP_OFF_DISABLED' ||
+        balErr?.code === 'DOCUMENT_REQUIRED' ||
+        balErr?.code === 'PROBATION_RESTRICTED' ||
+        balErr?.code === 'NOTICE_RESTRICTED'
+      ) {
+        res.status(400).json({
+          success: false,
+          error: { code: balErr.code, message: balErr.message },
+        });
+        return;
+      }
       if (balErr?.code === 'INSUFFICIENT_BALANCE') {
         res.status(400).json({
           success: false,
@@ -843,36 +903,57 @@ export async function decideLeave(req: Request, res: Response): Promise<void> {
           }
         }
 
-        const validStatus =
+        const requested =
           String(status).toLowerCase().trim() === 'approved'
             ? 'approved'
             : String(status).toLowerCase().trim() === 'rejected'
               ? 'rejected'
-              : 'pending';
+              : null;
+        if (!requested) {
+          throw Object.assign(new Error('status must be approved or rejected'), { code: 'FORBIDDEN' });
+        }
+        const policy = await loadLeavePolicy(query);
+        const callerIsManager = me?.id
+          ? await isManagerOf(query, String(me.id), String(leave.employee_id))
+          : false;
+        const decision = nextLeaveDecision({
+          workflow: policy.approvalWorkflow,
+          callerIsOrgWide: isOrgWideRole(req.user?.role),
+          callerIsManager,
+          currentStatus: String(leave.status || 'pending'),
+          requested,
+        });
+        if ('error' in decision) {
+          throw Object.assign(new Error(decision.error), { code: 'FORBIDDEN' });
+        }
+        const validStatus = decision.status;
 
         const nextLeaveType =
           validStatus === 'approved' && forceUnpaid ? 'unpaid' : String(leave.leave_type);
 
         const prevStatus = String(leave.status);
+        const daysCount = Number(leave.days_count) || 1;
+        const year = Number(String(leave.start_date).slice(0, 4)) || new Date().getFullYear();
+
+        // Check while the row is still pending, and don't count this request twice
+        // (once as a hold, again as the debit). Monthly usage also ignores it until
+        // the status actually changes.
+        if (validStatus === 'approved' && prevStatus !== 'approved' && isDebitableLeaveType(nextLeaveType)) {
+          await assertSufficientBalance(query, leave.employee_id, nextLeaveType, daysCount, year, {
+            excludeRequestId: String(leave.id),
+          });
+        }
+
         const result = await query(
           `UPDATE leave_requests
-           SET status = $1, decision_notes = $2, leave_type = $3, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $4
+           SET status = $1, decision_notes = $2, leave_type = $3, approver_id = $4, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $5
            RETURNING *`,
-          [validStatus, decisionNotes || null, nextLeaveType, id]
+          [validStatus, decisionNotes || null, nextLeaveType, me?.id || null, id]
         );
         const row = result.rows[0];
 
-        // Debit only when transitioning into approved for debitable types
         if (validStatus === 'approved' && prevStatus !== 'approved' && isDebitableLeaveType(nextLeaveType)) {
-          const year = Number(String(leave.start_date).slice(0, 4)) || new Date().getFullYear();
-          await assertSufficientBalance(
-            query,
-            leave.employee_id,
-            nextLeaveType,
-            Number(leave.days_count) || 1,
-            year
-          );
           await debitLeaveBalance(query, {
             employeeId: leave.employee_id,
             leaveType: nextLeaveType,
@@ -1153,26 +1234,41 @@ export async function bulkUpdateLeaveStatus(req: Request, res: Response): Promis
             if (!(await isManagerOf(query, String(me.id), String(leave.employee_id)))) return null;
           }
 
-          const nextLeaveType = mapped === 'approved' && forceUnpaid ? 'unpaid' : String(leave.leave_type);
+          const policy = await loadLeavePolicy(query);
+          const callerIsManager = me?.id
+            ? await isManagerOf(query, String(me.id), String(leave.employee_id))
+            : false;
+          const decision = nextLeaveDecision({
+            workflow: policy.approvalWorkflow,
+            callerIsOrgWide: isOrgWideRole(req.user?.role),
+            callerIsManager,
+            currentStatus: String(leave.status || 'pending'),
+            requested: mapped,
+          });
+          if ('error' in decision) return null;
+          const validStatus = decision.status;
+
+          const nextLeaveType = validStatus === 'approved' && forceUnpaid ? 'unpaid' : String(leave.leave_type);
           const prevStatus = String(leave.status);
+          const daysCount = Number(leave.days_count) || 1;
+          const year = Number(String(leave.start_date).slice(0, 4)) || new Date().getFullYear();
+
+          if (validStatus === 'approved' && prevStatus !== 'approved' && isDebitableLeaveType(nextLeaveType)) {
+            await assertSufficientBalance(query, leave.employee_id, nextLeaveType, daysCount, year, {
+              excludeRequestId: String(leave.id),
+            });
+          }
+
           const result = await query(
             `UPDATE leave_requests
-             SET status = $1, decision_notes = $2, leave_type = $3, updated_at = CURRENT_TIMESTAMP
-             WHERE id = $4
+             SET status = $1, decision_notes = $2, leave_type = $3, approver_id = $4, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $5
              RETURNING *`,
-            [mapped, decisionNotes, nextLeaveType, id]
+            [validStatus, decisionNotes, nextLeaveType, me?.id || null, id]
           );
           const out = result.rows[0];
 
-          if (mapped === 'approved' && prevStatus !== 'approved' && isDebitableLeaveType(nextLeaveType)) {
-            const year = Number(String(leave.start_date).slice(0, 4)) || new Date().getFullYear();
-            await assertSufficientBalance(
-              query,
-              leave.employee_id,
-              nextLeaveType,
-              Number(leave.days_count) || 1,
-              year
-            );
+          if (validStatus === 'approved' && prevStatus !== 'approved' && isDebitableLeaveType(nextLeaveType)) {
             await debitLeaveBalance(query, {
               employeeId: leave.employee_id,
               leaveType: nextLeaveType,
@@ -1392,31 +1488,59 @@ function isWfhReasonText(value?: string | null): boolean {
   return text.includes('work from home') || /\bwfh\b/.test(text);
 }
 
-async function hasApprovedWfhRegularization(
-  req: Request,
-  employeeId: string,
-  dateStr?: string | null
-): Promise<boolean> {
-  const params: any[] = [employeeId];
-  let dateClause = 'r.date = CURRENT_DATE';
-  if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr).slice(0, 10))) {
-    params.push(String(dateStr).slice(0, 10));
-    dateClause = `r.date = $${params.length}::date`;
-  }
-  const res = await req.tenantQuery!(
-    `SELECT r.id
-     FROM attendance_regularizations r
-     WHERE r.employee_id = $1
-       AND ${dateClause}
-       AND LOWER(r.status) = 'approved'
-       AND (
-         LOWER(COALESCE(r.reason, '')) LIKE '%work from home%'
-         OR LOWER(COALESCE(r.reason, '')) LIKE '%wfh%'
-       )
-     LIMIT 1`,
-    params
+/**
+ * A WFH approval used to write the shift end (about 18:00) as a checkout.
+ * That checkout is still in the future during the workday, so a later punch-in
+ * is swallowed and the clock shows a full shift. Drop those rows.
+ */
+async function clearFutureWfhShiftCheckouts(req: Request): Promise<void> {
+  await req.tenantQuery!(
+    `DELETE FROM attendance_punches AS p
+     WHERE p.punch_type = 'check_out'
+       AND p.punch_timestamp > NOW() + INTERVAL '2 minutes'
+       AND EXISTS (
+         SELECT 1 FROM attendance_regularizations r
+         WHERE r.employee_id = p.employee_id
+           AND r.date = DATE(p.punch_timestamp)
+           AND (
+             LOWER(r.reason) LIKE '%work from home%'
+             OR LOWER(r.reason) LIKE '%wfh%'
+           )
+       )`
   );
-  return Boolean(res.rows[0]);
+}
+
+/** Close an open WFH session when the manager rejects. Leaves the check-in in place. */
+async function forceClockOutOpenWfhSession(req: Request, employeeId: string, dateStr: string): Promise<void> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+  const latest = await req.tenantQuery!(
+    `SELECT punch_type, office_id, latitude, longitude
+     FROM attendance_punches
+     WHERE employee_id = $1 AND DATE(punch_timestamp) = $2::date
+     ORDER BY punch_timestamp DESC
+     LIMIT 1`,
+    [employeeId, dateStr]
+  );
+  const row = latest.rows[0];
+  if (!row || String(row.punch_type || '').toLowerCase() !== 'check_in') return;
+  const officeId = row.office_id && UUID_RE.test(String(row.office_id)) ? row.office_id : null;
+  const lat = clampCoord(Number(row.latitude), -90, 90);
+  const lng = clampCoord(Number(row.longitude), -180, 180);
+  const ip = clientIp(req) || '127.0.0.1';
+  await req.tenantQuery!(
+    `INSERT INTO attendance_punches (
+      employee_id, office_id, punch_type, punch_timestamp, latitude, longitude,
+      distance_from_office_meters, is_within_geofence, device_info, ip_address
+    ) VALUES (
+      $1, $2, 'check_out',
+      CASE
+        WHEN $3::date = CURRENT_DATE THEN NOW()
+        ELSE ($3::date + CURRENT_TIME) AT TIME ZONE current_setting('TIMEZONE')
+      END,
+      $4, $5, 0, false, $6, $7
+    )`,
+    [employeeId, officeId, dateStr, lat, lng, 'WFH regularization rejected', ip]
+  );
 }
 
 async function upsertDayPunches(
@@ -1435,6 +1559,25 @@ async function upsertDayPunches(
   const ip = clientIp(req) || req.ip || '127.0.0.1';
   const deviceInfo = opts?.deviceInfo || 'Manual Edit';
   const withinGeofence = opts?.withinGeofence !== false && !isWfhReasonText(deviceInfo);
+  const hasSelfieColumn = await ensurePunchPhotoColumn(req);
+
+  let checkInPhoto: string | null = null;
+  let checkOutPhoto: string | null = null;
+  if (hasSelfieColumn) {
+    const existing = await req.tenantQuery!(
+      `SELECT punch_type, selfie_photo
+       FROM attendance_punches
+       WHERE employee_id = $1 AND DATE(punch_timestamp) = $2::date
+       ORDER BY punch_timestamp ASC`,
+      [employeeId, dateStr]
+    );
+    for (const row of existing.rows) {
+      const photo = selfieLooksPresent(row.selfie_photo) ? String(row.selfie_photo) : null;
+      if (!photo) continue;
+      if (row.punch_type === 'check_in' && !checkInPhoto) checkInPhoto = photo;
+      if (row.punch_type === 'check_out') checkOutPhoto = photo;
+    }
+  }
 
   await req.tenantQuery!(
     `DELETE FROM attendance_punches
@@ -1442,30 +1585,38 @@ async function upsertDayPunches(
     [employeeId, dateStr]
   );
 
-  if (checkIn) {
-    const inTs = combineDateAndTime(dateStr, checkIn);
-    if (inTs) {
+  const insertPunch = async (
+    punchType: 'check_in' | 'check_out',
+    timestamp: Date,
+    photo: string | null
+  ) => {
+    if (hasSelfieColumn) {
       await req.tenantQuery!(
         `INSERT INTO attendance_punches (
           employee_id, office_id, punch_type, punch_timestamp, latitude, longitude,
-          distance_from_office_meters, is_within_geofence, device_info, ip_address
-         ) VALUES ($1, $2, 'check_in', $3, $4, $5, 0, $7, $8, $6)`,
-        [employeeId, officeId, inTs.toISOString(), safeLat, safeLng, ip, withinGeofence, deviceInfo]
+          distance_from_office_meters, is_within_geofence, device_info, ip_address, selfie_photo
+         ) VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8, $9, $10)`,
+        [employeeId, officeId, punchType, timestamp.toISOString(), safeLat, safeLng, withinGeofence, deviceInfo, ip, photo]
       );
+      return;
     }
+    await req.tenantQuery!(
+      `INSERT INTO attendance_punches (
+        employee_id, office_id, punch_type, punch_timestamp, latitude, longitude,
+        distance_from_office_meters, is_within_geofence, device_info, ip_address
+       ) VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8, $9)`,
+      [employeeId, officeId, punchType, timestamp.toISOString(), safeLat, safeLng, withinGeofence, deviceInfo, ip]
+    );
+  };
+
+  if (checkIn) {
+    const inTs = combineDateAndTime(dateStr, checkIn);
+    if (inTs) await insertPunch('check_in', inTs, checkInPhoto);
   }
 
   if (checkOut) {
     const outTs = combineDateAndTime(dateStr, checkOut);
-    if (outTs) {
-      await req.tenantQuery!(
-        `INSERT INTO attendance_punches (
-          employee_id, office_id, punch_type, punch_timestamp, latitude, longitude,
-          distance_from_office_meters, is_within_geofence, device_info, ip_address
-         ) VALUES ($1, $2, 'check_out', $3, $4, $5, 0, $7, $8, $6)`,
-        [employeeId, officeId, outTs.toISOString(), safeLat, safeLng, ip, withinGeofence, deviceInfo]
-      );
-    }
+    if (outTs) await insertPunch('check_out', outTs, checkOutPhoto);
   }
 }
 
@@ -1517,7 +1668,7 @@ export async function getRegularizations(req: Request, res: Response): Promise<v
 
 export async function requestRegularization(req: Request, res: Response): Promise<void> {
   try {
-    const { employeeId, date, requestedCheckIn, requestedCheckOut, reason, remarks } = req.body;
+    const { employeeId, date, requestedCheckIn, requestedCheckOut, reason, remarks, creditCompOff } = req.body;
 
     let validEmpId = employeeId;
     const me = await resolveCallerEmployee(req);
@@ -1542,14 +1693,61 @@ export async function requestRegularization(req: Request, res: Response): Promis
     const inTime = valueToSqlTime(requestedCheckIn);
     const outTime = valueToSqlTime(requestedCheckOut);
     const reasonText = [reason, remarks].filter(Boolean).join(' — ').slice(0, 1000) || 'Regularization request';
+    const dateStr = String(date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_DATE', message: 'A regularization date is required.' },
+      });
+      return;
+    }
 
+    if (creditCompOff === true) {
+      const leavePolicy = await loadLeavePolicy(req.tenantQuery!);
+      if (!leavePolicy.enableCompOff && isWfhReasonText(reasonText)) {
+        res.status(400).json({
+          success: false,
+          error: { code: 'COMP_OFF_DISABLED', message: 'Comp-off is turned off, so this request cannot be filed.' },
+        });
+        return;
+      }
+    }
+
+    const rules = await loadRegularizationRules(req);
+    const target = new Date(`${dateStr}T00:00:00`);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const ageDays = Math.floor((today.getTime() - target.getTime()) / 86400000);
+    if (ageDays > rules.windowDays) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'OUTSIDE_WINDOW',
+          message: `Regularization is only allowed within ${rules.windowDays} days of the missed punch.`,
+        },
+      });
+      return;
+    }
+
+    const status = rules.requireManagerApproval ? 'pending' : 'approved';
     const result = await req.tenantQuery!(
       `INSERT INTO attendance_regularizations (
          employee_id, date, requested_check_in, requested_check_out, reason, status
-       ) VALUES ($1, $2::date, $3::time, $4::time, $5, 'pending')
+       ) VALUES ($1, $2::date, $3::time, $4::time, $5, $6)
        RETURNING *, date::text AS date`,
-      [validEmpId, date, inTime, outTime, reasonText]
+      [validEmpId, dateStr, inTime, outTime, reasonText, status]
     );
+
+    if (!rules.requireManagerApproval && !isWfhReasonText(reasonText)) {
+      try {
+        await upsertDayPunches(req, validEmpId, dateStr, inTime, outTime, {
+          deviceInfo: 'Manual Edit',
+          withinGeofence: true,
+        });
+      } catch {
+        // The approved row still stands if the punch rewrite fails.
+      }
+    }
 
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err: any) {
@@ -1625,9 +1823,11 @@ export async function updateRegularizationStatus(req: Request, res: Response): P
       ? rawDate.slice(0, 10)
       : String(reg.date || '').slice(0, 10);
 
+    const compOffOn = wfh ? (await loadLeavePolicy(req.tenantQuery!)).enableCompOff : false;
     if (
       mapped === 'approved' &&
       wfh &&
+      compOffOn &&
       String(reg.status || '').toLowerCase() !== 'approved'
     ) {
       try {
@@ -1667,18 +1867,26 @@ export async function updateRegularizationStatus(req: Request, res: Response): P
       [mapped, me?.id || null, id]
     );
 
-    if (mapped === 'approved') {
+    if (mapped === 'approved' && !wfh) {
       const checkIn = valueToSqlTime(reg.requested_check_in);
       const checkOut = valueToSqlTime(reg.requested_check_out);
       try {
         if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
           await upsertDayPunches(req, reg.employee_id, dateStr, checkIn, checkOut, {
-            deviceInfo: wfh ? 'Work From Home' : 'Manual Edit',
-            withinGeofence: !wfh,
+            deviceInfo: 'Manual Edit',
+            withinGeofence: true,
           });
         }
       } catch {
         // Keep the decision even if rewriting punches fails (coords/schema drift).
+      }
+    }
+
+    if (mapped === 'rejected' && wfh) {
+      try {
+        await forceClockOutOpenWfhSession(req, reg.employee_id, dateStr);
+      } catch (clockErr) {
+        console.warn('WFH rejection clock-out skipped:', clockErr);
       }
     }
 
@@ -1847,6 +2055,86 @@ export async function toggleBreak(req: Request, res: Response): Promise<void> {
     }
 
     res.json({ success: true, data: { employeeId: validEmpId, isOnBreak: false } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
+export async function getAttendanceSession(req: Request, res: Response): Promise<void> {
+  try {
+    const me = await resolveCallerEmployee(req);
+    if (!me?.id) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Unable to resolve your employee record.' },
+      });
+      return;
+    }
+    try {
+      await applyAutoClockOut(req);
+    } catch (err) {
+      console.warn('Attendance session sweep skipped:', err);
+    }
+    const data = await readAttendanceSession(req.tenantQuery!, me.id);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
+export async function postPresence(req: Request, res: Response): Promise<void> {
+  try {
+    const me = await resolveCallerEmployee(req);
+    if (!me?.id) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Unable to resolve your employee record.' },
+      });
+      return;
+    }
+    const latitude = Number(req.body?.latitude);
+    const longitude = Number(req.body?.longitude);
+    const accuracyRaw = req.body?.accuracy;
+    const accuracy = accuracyRaw == null || accuracyRaw === '' ? null : Number(accuracyRaw);
+    const data = await recordPresencePing(
+      req.tenantQuery!,
+      me.id,
+      latitude,
+      longitude,
+      accuracy != null && Number.isFinite(accuracy) ? accuracy : null,
+      clientIp(req) || '127.0.0.1'
+    );
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
+export async function postMissedCheckout(req: Request, res: Response): Promise<void> {
+  try {
+    const me = await resolveCallerEmployee(req);
+    if (!me?.id) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Unable to resolve your employee record.' },
+      });
+      return;
+    }
+    const result = await submitMissedCheckoutTime(
+      req.tenantQuery!,
+      me.id,
+      String(req.body?.workDate || ''),
+      String(req.body?.time || ''),
+      clientIp(req) || '127.0.0.1'
+    );
+    if (!result.ok) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_TIME', message: result.message } });
+      return;
+    }
+    res.json({
+      success: true,
+      data: { workDate: String(req.body.workDate), checkOutLabel: result.checkOutLabel, employeeId: me.id },
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }

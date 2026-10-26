@@ -2,13 +2,13 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, FolderKanban } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { DashPanel } from './DashPanel';
 
-export const TasksCard: React.FC<{ className?: string }> = ({ className = '' }) => {
+export const TasksCard: React.FC<{ className?: string; title?: string; limit?: number }> = ({ className = '', title = 'Open tasks', limit = 3 }) => {
   const router = useRouter();
   const { state } = useApp();
   const dashboardState = useDashboardContext();
@@ -16,7 +16,7 @@ export const TasksCard: React.FC<{ className?: string }> = ({ className = '' }) 
   const projectTasks = React.useMemo(() => {
     const all = dashboardState.tasks || state.tasks || [];
     const isExecutive =
-      state.currentPersona?.role === 'super_admin' || state.currentPersona?.role === 'hr_manager';
+      state.currentPersona?.role === 'super_admin' || state.currentPersona?.role === 'admin' || state.currentPersona?.role === 'hr_manager';
     if (isExecutive) return all;
     const personaId = state.currentPersona?.id;
     const personaName = state.currentPersona?.name?.toLowerCase();
@@ -34,15 +34,16 @@ export const TasksCard: React.FC<{ className?: string }> = ({ className = '' }) 
       if (assigneeIsExecutive && assignee?.id !== personaId && !ids.includes(personaId || '')) return false;
       return true;
     });
-  }, [dashboardState.tasks, state.tasks, state.currentPersona]);
+  }, [dashboardState.tasks, state.tasks, state.currentPersona, state.employees]);
 
-  const displayTasks = projectTasks.slice(0, 4);
+  const openTasks = projectTasks.filter((task) => task.status !== 'Completed');
+  const displayTasks = openTasks.slice(0, limit);
   const remainingCount = displayTasks.filter((t) => t.status !== 'Completed').length;
   const totalCount = displayTasks.length;
 
   const formatDueDate = (dueDateStr?: string, status?: string) => {
     if (status === 'Completed') return 'Completed';
-    if (!dueDateStr) return 'Due Today';
+    if (!dueDateStr) return 'No due date';
     try {
       const cleanStr = dueDateStr.includes('T') ? dueDateStr.split('T')[0] : dueDateStr;
       const d = new Date(cleanStr + 'T00:00:00');
@@ -57,38 +58,22 @@ export const TasksCard: React.FC<{ className?: string }> = ({ className = '' }) 
 
   const headerAction = (
     <div className="flex items-center gap-3 shrink-0">
-      <span className="text-xs font-semibold text-[var(--text-muted)] tabular-nums">
-        {remainingCount} of {totalCount} remaining
-      </span>
       <button
         type="button"
         onClick={() => router.push('/projects')}
-        className="w-7 h-7 rounded-[7px] border border-[var(--border-color)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] hover:text-[var(--primary-blue)] flex items-center justify-center cursor-pointer"
-        title="Create task"
+        className="w-7 h-7 rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-muted)] flex items-center justify-center cursor-pointer"
+        title={`Create task. ${remainingCount} of ${totalCount} remaining`}
       >
         <Plus className="w-3 h-3" />
       </button>
-      <button
-        type="button"
-        onClick={() => router.push('/projects')}
-        className="text-xs font-bold text-[var(--studio-navy)] hover:underline inline-flex items-center gap-1 cursor-pointer"
-      >
-        <FolderKanban className="w-3.5 h-3.5" />
-        Board
+      <button type="button" onClick={() => router.push('/projects')} className="dash-quiet-link">
+        Projects ›
       </button>
     </div>
   );
 
   return (
-    <DashPanel title="Open tasks" action={headerAction} className={className} purpose="tasks-checklist">
-      {!dashboardState.loading && totalCount > 0 && (
-        <div className="w-full h-1 bg-[var(--bg-surface-subtle)] mb-2 overflow-hidden">
-          <div
-            className="h-full bg-[var(--primary-blue)] transition-[width] duration-200 ease-out"
-            style={{ width: `${totalCount > 0 ? ((totalCount - remainingCount) / totalCount) * 100 : 0}%` }}
-          />
-        </div>
-      )}
+    <DashPanel title={title} action={headerAction} className={`${className} ${!dashboardState.loading && displayTasks.length === 0 ? 'dash-panel--empty-work' : ''}`.trim()} purpose="tasks-checklist">
 
       {dashboardState.loading ? (
         <div className="space-y-2">
@@ -98,18 +83,19 @@ export const TasksCard: React.FC<{ className?: string }> = ({ className = '' }) 
           <Skeleton height="40px" borderRadius="8px" />
         </div>
       ) : displayTasks.length === 0 ? (
-        <div className="dash-empty-state">
-          <p>No tasks on your board</p>
+        <div className="dash-work-empty">
+          <p className="dash-work-empty-title">No open tasks</p>
+          <p className="dash-work-empty-description">You're all caught up. New tasks will appear here.</p>
           <button
             type="button"
             onClick={() => router.push('/projects')}
-            className="mt-2 text-xs font-bold text-[var(--studio-navy)] hover:underline cursor-pointer"
+            className="dash-quiet-link dash-work-empty-action"
           >
             Go to projects
           </button>
         </div>
       ) : (
-        <div>
+        <div className="dash-task-list">
           {displayTasks.map((task) => {
             const isCompleted = task.status === 'Completed';
             const dueText = formatDueDate(task.dueDate, task.status);
@@ -121,22 +107,25 @@ export const TasksCard: React.FC<{ className?: string }> = ({ className = '' }) 
                 onClick={() => router.push('/projects')}
                 className="dash-row dash-row--clickable"
               >
-                <div className="min-w-0">
-                  <p
-                    className={`text-xs text-pretty ${
-                      isCompleted
-                        ? 'font-medium text-[var(--text-muted)] line-through'
-                        : 'font-semibold text-[var(--text-primary)]'
-                    }`}
-                  >
+                <span className="dash-check" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className={`dash-people-name ${isCompleted ? 'line-through text-[var(--text-muted)]' : ''}`}>
                     {task.title}
                   </p>
-                  <p className="text-[11px] text-[var(--text-muted)] mt-1">{dueText}</p>
+                  <p className="dash-people-meta">
+                    {[task.projectName, task.assigneeName].filter(Boolean).join(' · ') || 'Project task'}
+                  </p>
                 </div>
+                <span className="dash-people-return">{dueText.replace(/^Due /, '')}</span>
               </button>
             );
           })}
         </div>
+      )}
+      {openTasks.length > displayTasks.length && (
+        <button type="button" className="dash-quiet-link dash-tasks-more" onClick={() => router.push('/projects')}>
+          View all {openTasks.length} open tasks ↗
+        </button>
       )}
     </DashPanel>
   );

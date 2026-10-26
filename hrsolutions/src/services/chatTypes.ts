@@ -86,6 +86,7 @@ export interface ChatMessage {
   createdAt: string | null;
   attachments: ChatAttachment[];
   reactions: ChatReaction[];
+  mentions: { employeeId: string; name: string }[];
   clientId?: string;
   /** Client-only delivery state for optimistic messages. */
   status?: 'sending' | 'failed';

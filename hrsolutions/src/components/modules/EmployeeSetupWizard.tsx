@@ -1,3 +1,4 @@
+import { DateInput } from '@/components/common/DateInput';
 import React, { useState, useMemo } from 'react';
 import { Plus, X, Building2, Users, ListTree, GitFork, UserPlus, MapPin } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
@@ -106,7 +107,7 @@ const DepartmentTeamCard: React.FC<{
         {selectedManager && !managerFocused ? (
           <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200/80 rounded-2xl text-xs">
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-full bg-slate-200 text-slate-800 font-bold flex items-center justify-center text-[10px]">
+              <div className="person-avatar w-7 h-7 rounded-full bg-slate-200 text-slate-800 font-bold flex items-center justify-center text-[10px]">
                 {selectedManager.name.charAt(0)}
               </div>
               <div>
@@ -276,7 +277,7 @@ const OrgHierarchyTree: React.FC<{
       <div key={emp.id} className="relative space-y-2">
         <div className="bg-white rounded-2xl border border-slate-200/90 p-3.5 shadow-2xs hover:border-slate-300 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-800 font-bold flex items-center justify-center text-xs border border-slate-200/60">
+            <div className="person-avatar w-8 h-8 rounded-full bg-slate-100 text-slate-800 font-bold flex items-center justify-center text-xs border border-slate-200/60">
               {emp.name.charAt(0)}
             </div>
             <div>
@@ -1463,10 +1464,7 @@ export const EmployeeSetupWizard: React.FC<{ onComplete?: () => void }> = ({ onC
                       <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                         Joining Date
                       </label>
-                      <input
-                        type="date"
-                        value={newEmployeeJoinDate}
-                        onChange={(e) => setNewEmployeeJoinDate(e.target.value)}
+                      <DateInput value={newEmployeeJoinDate} onChange={(e) => setNewEmployeeJoinDate(e.target.value)}
                         className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-xs font-medium outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900/10 [color-scheme:light] bg-white transition-all cursor-pointer"
                       />
                     </div>
@@ -1550,7 +1548,7 @@ export const EmployeeSetupWizard: React.FC<{ onComplete?: () => void }> = ({ onC
                             className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-slate-50/70 hover:bg-slate-100/80 rounded-2xl border border-slate-100 transition-all text-xs gap-3"
                           >
                             <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-bold flex items-center justify-center text-xs shrink-0">
+                              <div className="person-avatar w-9 h-9 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-bold flex items-center justify-center text-xs shrink-0">
                                 {emp.name.charAt(0)}
                               </div>
                               <div className="min-w-0">
@@ -1792,7 +1790,7 @@ export const EmployeeSetupWizard: React.FC<{ onComplete?: () => void }> = ({ onC
                               className="p-3.5 rounded-2xl border border-slate-200/80 bg-slate-50/60 hover:bg-slate-100/60 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                             >
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-800 font-bold flex items-center justify-center text-xs">
+                                <div className="person-avatar w-8 h-8 rounded-full bg-slate-200 text-slate-800 font-bold flex items-center justify-center text-xs">
                                   {emp.name.charAt(0)}
                                 </div>
                                 <div>

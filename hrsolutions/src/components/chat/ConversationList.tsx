@@ -11,7 +11,7 @@ import {
   fieldClass,
   formatListTime,
   iconButton,
-  ticketStatusClass,
+  mentionPlainText,
 } from './chatUi';
 
 export type ChatTab = 'teams' | 'chats' | 'hr' | 'inbox';
@@ -33,7 +33,7 @@ function lastLine(conversation: ChatConversation, meId?: string): string {
   const last = conversation.lastMessage;
   if (!last) return conversation.type === 'team_channel' ? 'No messages yet. Say hello to the team.' : 'No messages yet';
   if (last.isDeleted) return 'Message deleted';
-  const body = last.body || (last.hasAttachments ? 'Sent a file' : '');
+  const body = mentionPlainText(last.body || (last.hasAttachments ? 'Sent a file' : ''));
   if (last.type === 'system') return body;
   const who = last.senderId === meId ? 'You' : last.senderName?.split(' ')[0];
   return conversation.type === 'direct' && last.senderId !== meId ? body : `${who}: ${body}`;
@@ -46,6 +46,8 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
   const [inboxAssigned, setInboxAssigned] = useState<'all' | 'me' | 'unassigned'>('all');
   const [inboxError, setInboxError] = useState<string | null>(null);
   const meId = me?.employeeId;
+
+  useEffect(() => { setQuery(''); }, [tab]);
 
   useEffect(() => {
     if (tab !== 'inbox' || !isHr) return;
@@ -109,7 +111,7 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
           type="button"
           onClick={() => onSelect(c.id)}
           aria-current={active ? 'true' : undefined}
-          className={`chat-row ${opts?.indent ? 'pl-4' : ''}`}
+          className={`chat-row ${opts?.indent ? 'chat-row--nested' : ''}`}
         >
           {c.type === 'team_channel' ? (
             <ChatChannelMark conversation={c} className="mt-0.5" />
@@ -120,40 +122,30 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
               name={title}
               src={other?.avatarUrl}
               size={32}
+              square={c.type === 'group'}
               online={other ? online.has(other.employeeId) : undefined}
             />
           )}
-          <span className="min-w-0 flex-1">
+          <span className="chat-row-copy min-w-0 flex-1">
             <span className="flex items-baseline gap-2">
               <span
-                className={`truncate text-[13px] ${unread ? 'font-bold text-[var(--text-primary)]' : 'font-semibold text-[var(--text-primary)]'}`}
+                className={`chat-row-title truncate text-[13px] ${unread ? 'font-bold text-[var(--text-primary)]' : 'font-semibold text-[var(--text-primary)]'}`}
               >
                 {title}
               </span>
               {c.muted && <BellOff className="h-3 w-3 shrink-0 text-[var(--text-muted)]" aria-label="Muted" />}
-              <span className="ml-auto shrink-0 text-[11px] text-[var(--text-muted)]">
+              <span className="chat-row-time ml-auto shrink-0 text-[11px] text-[var(--text-muted)]">
                 {formatListTime(c.lastMessage?.createdAt || c.lastMessageAt)}
               </span>
             </span>
-            {c.type === 'hr_ticket' && c.ticket && (
-              <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-                <span className={`rounded-full px-1.5 py-px font-semibold ${ticketStatusClass(c.ticket.status)}`}>
-                  {TICKET_STATUS_LABELS[c.ticket.status]}
-                </span>
-                <span className="truncate">
-                  {opts?.showRequester ? `${c.createdByName || 'Employee'} · ` : ''}
-                  {c.ticket.category}
-                </span>
-              </span>
-            )}
             <span className="mt-0.5 flex items-center gap-2">
               <span
-                className={`truncate text-[12px] ${unread ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)]'}`}
+                className={`chat-row-preview truncate text-[12px] ${unread ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)]'}`}
               >
-                {lastLine(c, meId)}
+                {c.type === 'hr_ticket' && c.ticket ? [TICKET_STATUS_LABELS[c.ticket.status], c.ticket.category, opts?.showRequester ? c.createdByName : null].filter(Boolean).join(' · ') : lastLine(c, meId)}
               </span>
               {unread && (
-                <span className="ml-auto min-w-[18px] h-[18px] shrink-0 rounded-full bg-[#17324e] dark:bg-sky-500 px-1.5 text-[10px] font-bold leading-[18px] text-white text-center">
+                <span className="chat-unread ml-auto min-w-[18px] h-[18px] shrink-0 rounded-full bg-[#17324e] dark:bg-sky-500 px-1.5 text-[10px] font-bold leading-[18px] text-white text-center">
                   {c.unreadCount > 99 ? '99+' : c.unreadCount}
                 </span>
               )}
@@ -169,18 +161,11 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="chat-rail-head">
-        <div className="flex items-center justify-between gap-2">
+        <div className="chat-rail-heading flex items-center justify-between gap-2">
           <h1 className="chat-rail-title">Chat</h1>
-          {tab === 'chats' && (
-            <button type="button" className={iconButton} onClick={onNewChat} title="Start a new chat" aria-label="Start a new chat">
-              <Plus className="h-4 w-4" />
-            </button>
-          )}
-          {tab === 'hr' && (
-            <button type="button" className={iconButton} onClick={onNewHrRequest} title="New HR request" aria-label="New HR request">
-              <Plus className="h-4 w-4" />
-            </button>
-          )}
+          <button type="button" className={iconButton} onClick={tab === 'hr' ? onNewHrRequest : onNewChat} aria-label={tab === 'hr' ? 'New HR request' : 'Start a new chat'}>
+            <Plus className="h-4 w-4" />
+          </button>
         </div>
         <div role="tablist" aria-label="Chat sections" className="chat-tabs">
           {tabs.map((t) => (
@@ -202,7 +187,7 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
           ))}
         </div>
         {tab !== 'inbox' && (
-          <label className="relative mt-2.5 block">
+          <label className="chat-rail-search relative block">
             <span className="sr-only">Search conversations</span>
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
@@ -214,7 +199,7 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
           </label>
         )}
         {tab === 'inbox' && (
-          <div className="mt-2.5 grid grid-cols-2 gap-2">
+          <div className="chat-rail-search grid grid-cols-2 gap-2">
             <select
               aria-label="Filter by status"
               value={inboxStatus}
@@ -242,10 +227,10 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar px-2 py-2">
+      <div className="chat-conversations min-h-0 flex-1 overflow-y-auto custom-scrollbar">
         {tab === 'teams' &&
-          (channelGroups.length === 0
-            ? empty('You are not in a team yet. Team channels appear here once HR adds you to a department or team.')
+          (channelGroups.every((group) => !group.items.some(matches))
+            ? empty(query.trim() ? 'No teams match your search.' : 'You are not in a team yet. Team channels appear here once HR adds you to a department or team.')
             : channelGroups.map((group) => {
                 const items = group.items.filter(matches);
                 if (items.length === 0) return null;
@@ -254,37 +239,37 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
                     <h2 className="chat-group-label">
                       {group.label}
                     </h2>
-                    <ul className="space-y-0.5">{items.map((c) => renderRow(c, { indent: !!c.teamId }))}</ul>
+                    <ul className="chat-conversation-rows">{items.map((c) => renderRow(c, { indent: !!c.teamId }))}</ul>
                   </section>
                 );
               }))}
 
         {tab === 'chats' &&
-          (chats.length === 0 ? (
+          (chats.filter(matches).length === 0 ? (
             <div className="px-3 py-8 text-center">
               <p className="text-[12px] leading-relaxed text-[var(--text-muted)]">
-                Start a one-to-one chat or a group with the people you work with.
+                {query.trim() ? 'No conversations match your search.' : 'Start a one-to-one chat or a group with the people you work with.'}
               </p>
               <button type="button" onClick={onNewChat} className="mt-3 text-[12.5px] font-semibold text-[#2d628e] dark:text-sky-300 hover:underline">
                 Start a new chat
               </button>
             </div>
           ) : (
-            <ul className="space-y-0.5">{chats.filter(matches).map((c) => renderRow(c))}</ul>
+            <ul className="chat-conversation-rows">{chats.filter(matches).map((c) => renderRow(c))}</ul>
           ))}
 
         {tab === 'hr' &&
-          (myTickets.length === 0 ? (
+          (myTickets.filter(matches).length === 0 ? (
             <div className="px-3 py-8 text-center">
               <p className="text-[12px] leading-relaxed text-[var(--text-muted)]">
-                Questions about leave, pay, documents or policies? Send a private request to HR and follow the reply here.
+                {query.trim() ? 'No requests match your search.' : 'Questions about leave, pay, documents or policies? Send a private request to HR and follow the reply here.'}
               </p>
               <button type="button" onClick={onNewHrRequest} className="mt-3 text-[12.5px] font-semibold text-[#2d628e] dark:text-sky-300 hover:underline">
                 Ask HR a question
               </button>
             </div>
           ) : (
-            <ul className="space-y-0.5">{myTickets.filter(matches).map((c) => renderRow(c))}</ul>
+            <ul className="chat-conversation-rows">{myTickets.filter(matches).map((c) => renderRow(c))}</ul>
           ))}
 
         {tab === 'inbox' &&
@@ -295,7 +280,7 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
           ) : hrTickets.length === 0 ? (
             empty('No requests match these filters.')
           ) : (
-            <ul className="space-y-0.5">{hrTickets.map((c) => renderRow(c, { showRequester: true }))}</ul>
+            <ul className="chat-conversation-rows">{hrTickets.map((c) => renderRow(c, { showRequester: true }))}</ul>
           ))}
       </div>
     </div>

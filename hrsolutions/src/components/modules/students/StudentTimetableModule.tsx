@@ -864,9 +864,9 @@ export const StudentTimetableModule: React.FC<StudentTimetableModuleProps> = ({
   };
 
   return (
-    <div className="space-y-4 text-[var(--text-primary)] font-sans">
+    <div className="timetable-page space-y-4 text-[var(--text-primary)] font-sans">
       {/* ─── 1. TOP TOOLBAR: TITLE, BATCH / TEACHER SELECTOR, VIEW MODES & ACTIONS ─── */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-1">
+      <div className="timetable-head flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-1">
         {/* Left: Title & Entity Selector (Batches vs Teachers) */}
         <div className="flex items-center justify-between sm:justify-start flex-wrap gap-2.5">
           <h2 className="text-lg sm:text-xl font-bold text-[var(--text-primary)] tracking-tight">
@@ -912,7 +912,7 @@ export const StudentTimetableModule: React.FC<StudentTimetableModuleProps> = ({
         {/* Right: View Modes & Action Buttons */}
         <div className="flex items-center flex-wrap sm:flex-nowrap gap-2 justify-between lg:justify-end">
           {/* View Mode Toggle Group */}
-          <div className="flex items-center bg-[var(--bg-surface-subtle)] p-0.5 rounded-lg border border-[var(--border-color)]/80 overflow-x-auto no-scrollbar max-w-full">
+          <div className="timetable-view-switch flex items-center bg-[var(--bg-surface-subtle)] p-0.5 rounded-lg border border-[var(--border-color)]/80 overflow-x-auto no-scrollbar max-w-full">
             <button
               type="button"
               onClick={() => setViewMode('matrix')}
@@ -1002,7 +1002,20 @@ export const StudentTimetableModule: React.FC<StudentTimetableModuleProps> = ({
       </div>
 
       {/* ─── 3A. ADAPTIVE PERIOD GRID VIEW (PERIODS ON TOP, ZERO OVERLAP & FULL BREAK PILLARS) ─── */}
-      {viewMode === 'matrix' && (
+      <section className="timetable-mobile-agenda" aria-label="Daily timetable">
+        <div className="timetable-mobile-days" role="group" aria-label="Timetable day">
+          {activeDays.map((day) => <button type="button" key={day} aria-label={day} aria-pressed={selectedDay === day} onClick={() => setSelectedDay(day)}>{day.slice(0,3)}</button>)}
+        </div>
+        <div className="timetable-mobile-heading"><h3>{selectedDay}</h3>{!isStudent && <button type="button" onClick={() => handleOpenCreateModal('class', selectedDay)}>Add period</button>}</div>
+        {displayedSlots.filter((slot) => slot.dayOfWeek === selectedDay).sort((a,b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime)).map((slot) => <article className="timetable-mobile-slot" data-break={slot.type === 'break' ? 'true' : undefined} key={slot.id}>
+          <time>{formatTime12h(slot.startTime)} – {formatTime12h(slot.endTime)}</time>
+          <h4>{slot.title}</h4>
+          {slot.subjectCode && <p>{slot.subjectCode}</p>}
+          <footer><span>{[slot.facultyName,slot.room].filter(Boolean).join(' · ') || (slot.type === 'break' ? 'Break' : 'Class period')}</span>{!isStudent && <button type="button" onClick={() => handleOpenEditModal(slot)} aria-label={`Edit ${slot.title}`}>Edit</button>}</footer>
+        </article>)}
+        {!displayedSlots.some((slot) => slot.dayOfWeek === selectedDay) && <div className="timetable-mobile-slot"><h4>No periods scheduled</h4><p>{isStudent ? 'Your published classes will appear here.' : 'Add a period for this day or choose another day.'}</p></div>}
+      </section>
+      <div className="timetable-desktop-view">{viewMode === 'matrix' && (
         <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] shadow-2xs overflow-hidden flex flex-col">
           <div className="overflow-x-auto custom-scrollbar">
             <div className="min-w-[780px] sm:min-w-[960px]">
@@ -1624,6 +1637,7 @@ export const StudentTimetableModule: React.FC<StudentTimetableModuleProps> = ({
 
 
       {/* ─── 6. MANAGE WEEKLY BREAKS MODAL ─── */}
+      </div>
       {showManageBreaksModal && !isStudent && (
         <SlideOverDrawer
           title="Weekly Break Schedule"

@@ -20,6 +20,7 @@ import { instituteRoutes } from './modules/institute/institute.routes.js';
 import { setupRoutes } from './modules/setup/setup.routes.js';
 import { reportsRoutes } from './modules/reports/reports.routes.js';
 import { chatRoutes } from './modules/chat/chat.routes.js';
+import { pushRoutes } from './modules/push/push.routes.js';
 import { supportRoutes } from './modules/support/support.routes.js';
 
 import { requestLogger } from './utils/logger.js';
@@ -57,7 +58,6 @@ export function createApp(): Express {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       service: 'enterprise-bos-backend',
-      version: '1.0.6',
       uptime: process.uptime(),
       environment: env.NODE_ENV,
     });
@@ -103,6 +103,7 @@ export function createApp(): Express {
   app.use(`${API_PREFIX}/setup`, setupRoutes);
   app.use(`${API_PREFIX}/reports`, reportsRoutes);
   app.use(`${API_PREFIX}/chat`, chatRoutes);
+  app.use(`${API_PREFIX}/push`, pushRoutes);
   app.use(`${API_PREFIX}/support`, supportRoutes);
 
   // 404 Route Handler

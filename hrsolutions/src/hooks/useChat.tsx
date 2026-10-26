@@ -7,6 +7,7 @@ import { api, ApiClientError } from '@/services/apiClient';
 import { connectChatSocket, disconnectChatSocket, getChatSocket, refreshChatSocketAuth } from '@/services/chatSocket';
 import { showRealtimeToast } from '@/lib/sonnerToast';
 import { showAppNotification } from '@/lib/native';
+import type { NotificationItem } from '@/types';
 import type {
   ChatAttachment,
   ChatAttachmentInput,
@@ -17,7 +18,7 @@ import type {
   TicketPriority,
   TicketStatus,
 } from '@/services/chatTypes';
-import { chatMediaKind } from '@/components/chat/chatUi';
+import { chatMediaKind, mentionPlainText } from '@/components/chat/chatUi';
 
 const PAGE_SIZE = 40;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -131,7 +132,7 @@ function upsertMessage(items: ChatMessage[], message: ChatMessage): ChatMessage[
 
 function previewOf(message: ChatMessage): string {
   if (message.deletedAt) return 'Message deleted';
-  if (message.body) return message.body;
+  if (message.body) return mentionPlainText(message.body);
   if (message.attachments.length) return `Sent ${message.attachments.length === 1 ? 'a file' : `${message.attachments.length} files`}`;
   return '';
 }
@@ -170,7 +171,7 @@ async function uploadFiles(files: File[]): Promise<ChatAttachmentInput[]> {
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { state, currentPersona } = useApp();
+  const { state, currentPersona, updateState } = useApp();
   const enabled = Boolean(state.isAuthenticated && currentPersona && currentPersona.role !== 'student');
 
   const [me, setMe] = useState<ChatMe | null>(null);
@@ -187,6 +188,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const meRef = useRef<ChatMe | null>(null);
   const activeRef = useRef<string | null>(null);
+  const updateStateRef = useRef(updateState);
+  updateStateRef.current = updateState;
   const conversationsRef = useRef<Record<string, ChatConversation>>({});
   const messagesRef = useRef<Record<string, MessageBucket>>({});
   const hrFilterRef = useRef<HrTicketFilter | null>(null);
@@ -377,7 +380,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         scheduleMarkRead(id);
         return;
       }
-      if (message.type === 'system' || known?.muted || (known && !known.isParticipant)) return;
+      const mentionedMe = (message.mentions || []).some((m) => m.employeeId === meRef.current?.employeeId);
+      if (message.type === 'system' || (known?.muted && !mentionedMe) || (known && !known.isParticipant)) return;
 
       const title = known ? conversationTitle(known, meRef.current?.employeeId) : 'New message';
       const toastTitle = known?.type === 'direct' ? title : `${message.senderName || 'Someone'} in ${title}`;
@@ -521,6 +525,64 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     };
     const onPresenceSnapshot = ({ online: ids }: { online: string[] }) => setOnline(new Set(ids));
 
+    const onNotification = (payload: {
+      id?: string;
+      title?: string;
+      message?: string;
+      category?: string;
+      priority?: string;
+      linkUrl?: string;
+    } | null) => {
+      if (!payload?.id || !payload.title) return;
+      const linkUrl = payload.linkUrl || '';
+      let conversationId = '';
+      try {
+        conversationId = new URL(linkUrl, window.location.origin).searchParams.get('c') || '';
+      } catch {
+        conversationId = '';
+      }
+      const addNotice = (read: boolean) => {
+        const item: NotificationItem = {
+          id: payload.id as string,
+          title: payload.title as string,
+          message: payload.message || '',
+          timestamp: 'Just now',
+          category: (payload.category || 'System') as NotificationItem['category'],
+          priority: (payload.priority || 'medium') as NotificationItem['priority'],
+          read,
+          linkUrl: linkUrl || undefined,
+        };
+        updateStateRef.current((prev) => {
+          if ((prev.notifications || []).some((n) => n.id === item.id)) return prev;
+          return { ...prev, notifications: [item, ...(prev.notifications || [])] };
+        });
+      };
+      const looking =
+        Boolean(conversationId) &&
+        activeRef.current === conversationId &&
+        document.visibilityState === 'visible';
+      if (looking) {
+        void api.auditComms.markNotificationRead(payload.id).catch(() => addNotice(false));
+        return;
+      }
+      addNotice(false);
+      if (payload.category === 'Chat') return;
+      const type = payload.category === 'Tasks' ? 'task' : payload.category === 'HR Desk' ? 'hr' : 'message';
+      showRealtimeToast(
+        {
+          id: `notice-${payload.id}`,
+          type,
+          title: payload.title,
+          message: payload.message || '',
+          timestamp: 'Just now',
+          priority: (payload.priority || 'medium') as NotificationItem['priority'],
+        },
+        () => {
+          if (linkUrl) router.push(linkUrl);
+        }
+      );
+    };
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('message:new', onMessageNew);
@@ -533,6 +595,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     socket.on('typing', onTyping);
     socket.on('presence', onPresence);
     socket.on('presence:snapshot', onPresenceSnapshot);
+    socket.on('notification:new', onNotification);
     if (socket.connected) setConnected(true);
 
     return () => {
@@ -548,6 +611,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       socket.off('typing', onTyping);
       socket.off('presence', onPresence);
       socket.off('presence:snapshot', onPresenceSnapshot);
+      socket.off('notification:new', onNotification);
     };
   }, [enabled, me, refreshConversation, refreshConversations, loadHrTickets, scheduleMarkRead, router]);
 
@@ -710,6 +774,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         editedAt: null,
         deletedAt: null,
         createdAt: new Date().toISOString(),
+        mentions: [],
         attachments: (input.files || []).map((f, i) => {
           const attachment: ChatAttachment = {
             id: `tmp-${clientId}-${i}`,

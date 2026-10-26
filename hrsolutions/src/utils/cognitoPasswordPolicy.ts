@@ -1,13 +1,9 @@
 /**
- * AWS Cognito Password Policy Validator & Strength Evaluation Utility
- * 
- * Standard AWS Cognito User Pool Password Requirements:
- * 1. Minimum 8 characters
- * 2. At least 1 uppercase letter (A-Z)
- * 3. At least 1 lowercase letter (a-z)
- * 4. At least 1 numeric digit (0-9)
- * 5. At least 1 special character (!@#$%^&*...)
+ * Password rules shown on create-password fields.
+ * Stricter than the Cognito pool floor: 8 characters, mixed case, a number, and a symbol.
  */
+
+const SPECIAL_CHAR = /[!@#$%^&*(),.?":{}|<>\-_+=\[\]~`\/\\;']/;
 
 export interface CognitoPasswordChecklist {
   hasMinLength: boolean;
@@ -17,8 +13,15 @@ export interface CognitoPasswordChecklist {
   hasSpecialChar: boolean;
 }
 
+export interface PasswordPolicyRule {
+  id: string;
+  label: string;
+  met: boolean;
+}
+
 export interface PasswordStrengthResult {
   checklist: CognitoPasswordChecklist;
+  rules: PasswordPolicyRule[];
   metCount: number;
   totalCount: number;
   isValid: boolean;
@@ -31,10 +34,13 @@ export interface PasswordStrengthResult {
 
 export const COGNITO_POLICY_RULES = [
   { id: 'hasMinLength', label: 'At least 8 characters', test: (p: string) => p.length >= 8 },
-  { id: 'hasUppercase', label: 'At least 1 uppercase letter (A-Z)', test: (p: string) => /[A-Z]/.test(p) },
-  { id: 'hasLowercase', label: 'At least 1 lowercase letter (a-z)', test: (p: string) => /[a-z]/.test(p) },
-  { id: 'hasNumber', label: 'At least 1 number (0-9)', test: (p: string) => /[0-9]/.test(p) },
-  { id: 'hasSpecialChar', label: 'At least 1 special symbol (!@#$%^&*)', test: (p: string) => /[!@#$%^&*(),.?":{}|<>\-_+=\[\]~`\/\\;']/.test(p) },
+  {
+    id: 'hasLetters',
+    label: 'Upper & lowercase letters',
+    test: (p: string) => /[A-Z]/.test(p) && /[a-z]/.test(p),
+  },
+  { id: 'hasNumber', label: 'At least one number', test: (p: string) => /[0-9]/.test(p) },
+  { id: 'hasSpecialChar', label: 'At least one symbol', test: (p: string) => SPECIAL_CHAR.test(p) },
 ] as const;
 
 export function evaluateCognitoPassword(password: string = ''): PasswordStrengthResult {
@@ -45,41 +51,42 @@ export function evaluateCognitoPassword(password: string = ''): PasswordStrength
     hasUppercase: /[A-Z]/.test(p),
     hasLowercase: /[a-z]/.test(p),
     hasNumber: /[0-9]/.test(p),
-    hasSpecialChar: /[!@#$%^&*(),.?":{}|<>\-_+=\[\]~`\/\\;']/.test(p),
+    hasSpecialChar: SPECIAL_CHAR.test(p),
   };
 
-  const missingRequirements: string[] = [];
-  if (!checklist.hasMinLength) missingRequirements.push('8+ characters');
-  if (!checklist.hasUppercase) missingRequirements.push('uppercase letter (A-Z)');
-  if (!checklist.hasLowercase) missingRequirements.push('lowercase letter (a-z)');
-  if (!checklist.hasNumber) missingRequirements.push('number (0-9)');
-  if (!checklist.hasSpecialChar) missingRequirements.push('special character (!@#$%^&*)');
+  const rules: PasswordPolicyRule[] = COGNITO_POLICY_RULES.map((rule) => ({
+    id: rule.id,
+    label: rule.label,
+    met: rule.test(p),
+  }));
 
-  const metCount = Object.values(checklist).filter(Boolean).length;
-  const totalCount = 5;
+  const missingRequirements = rules.filter((rule) => !rule.met).map((rule) => rule.label);
+  const metCount = rules.filter((rule) => rule.met).length;
+  const totalCount = rules.length;
   const isValid = metCount === totalCount;
   const strengthPercent = (metCount / totalCount) * 100;
 
   let strengthLabel: 'Weak' | 'Fair' | 'Good' | 'Strong' = 'Weak';
-  let strengthColor = '#ef4444'; // red-500
+  let strengthColor = '#8b3133';
   let strengthBg = 'bg-red-500';
 
-  if (metCount >= 5) {
+  if (metCount >= 4) {
     strengthLabel = 'Strong';
-    strengthColor = '#10b981'; // emerald-500
+    strengthColor = '#53886b';
     strengthBg = 'bg-emerald-500';
-  } else if (metCount >= 3) {
+  } else if (metCount === 3) {
+    strengthLabel = 'Good';
+    strengthColor = '#53886b';
+    strengthBg = 'bg-emerald-500';
+  } else if (metCount === 2) {
     strengthLabel = 'Fair';
-    strengthColor = '#f59e0b'; // amber-500
+    strengthColor = '#5e6c7b';
     strengthBg = 'bg-amber-500';
-  } else if (metCount >= 1) {
-    strengthLabel = 'Weak';
-    strengthColor = '#ef4444';
-    strengthBg = 'bg-red-500';
   }
 
   return {
     checklist,
+    rules,
     metCount,
     totalCount,
     isValid,

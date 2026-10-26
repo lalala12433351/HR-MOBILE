@@ -51,6 +51,7 @@ export function HrTicketPanel({ conversation }: { conversation: ChatConversation
         </span>
       </div>
 
+      <p className="chat-details-name">{conversation.name || 'HR request'}</p>
       <dl className="space-y-1.5 text-[12.5px]">
         <div className="flex justify-between gap-3">
           <dt className="text-[var(--text-muted)]">Raised by</dt>
@@ -75,7 +76,9 @@ export function HrTicketPanel({ conversation }: { conversation: ChatConversation
       </dl>
 
       {isHr && (
-        <div className="space-y-3">
+        <details className="chat-ticket-controls">
+          <summary>Manage request</summary>
+          <div className="space-y-3 pt-3">
           <div>
             <label htmlFor="ticket-status" className={labelClass}>
               Status
@@ -190,7 +193,8 @@ export function HrTicketPanel({ conversation }: { conversation: ChatConversation
             </div>
           )}
           {saving && <p className="text-[11.5px] text-[var(--text-muted)]">Saving…</p>}
-        </div>
+          </div>
+        </details>
       )}
 
       {!isHr && (ticket.status === 'resolved' || ticket.status === 'closed') && (
@@ -201,6 +205,7 @@ export function HrTicketPanel({ conversation }: { conversation: ChatConversation
         </p>
       )}
 
+      <p className="text-[12px] leading-relaxed text-[var(--text-muted)]">Only you and the HR team can see this request.</p>
       {error && <p className="text-[12px] text-[#8b3133] dark:text-red-300">{error}</p>}
     </section>
   );

@@ -50,7 +50,13 @@ function reportTables(report: UserReport): PdfTable[] {
     {
       title: 'Attendance',
       headers: ['Date', 'In', 'Out', 'Hours', 'Status'],
-      rows: report.attendance.map((row) => [row.date, row.checkIn, row.checkOut, row.hours.toFixed(1), row.status]),
+      rows: report.attendance.map((row) => [
+        row.date,
+        row.checkIn,
+        row.checkOut,
+        row.hours.toFixed(1),
+        row.note ? `${row.status} · ${row.note}` : row.status,
+      ]),
     },
     {
       title: 'Tasks',
@@ -249,6 +255,7 @@ export async function downloadUserReportXlsx(report: UserReport, organizationNam
     ['WFH', report.wfhDays],
     ['Half days', report.halfDays],
     ['Absent', report.absentDays],
+    ['Holidays', report.holidayDays],
     ['Leave days', report.leaveDays],
     ['Attendance hours', report.attendanceHours],
     ['Timesheet hours', report.timesheetHours],
@@ -274,7 +281,7 @@ export async function downloadUserReportXlsx(report: UserReport, organizationNam
     workbook,
     XLSX.utils.aoa_to_sheet([
       ['Date', 'In', 'Out', 'Hours', 'Status'],
-      ...report.attendance.map((row) => [row.date, row.checkIn, row.checkOut, row.hours, row.status]),
+      ...report.attendance.map((row) => [row.date, row.checkIn, row.checkOut, row.hours, row.note ? `${row.status} · ${row.note}` : row.status]),
     ]),
     'Attendance'
   );

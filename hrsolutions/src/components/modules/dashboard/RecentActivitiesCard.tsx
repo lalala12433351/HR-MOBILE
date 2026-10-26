@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { GoogleIcon } from '@/components/ui/GoogleIcon';
 import { useDashboardContext } from './DashboardDataContext';
 import { DashPanel } from './DashPanel';
 
@@ -136,41 +135,40 @@ export const RecentActivitiesCard: React.FC<{ className?: string }> = ({ classNa
   return (
     <DashPanel
       title="Recent activity"
-      className={className}
+      className={`${className} ${displayItems.length === 0 ? 'dash-panel--empty-work' : ''}`.trim()}
       purpose="recent-activities"
       action={
         <button
           type="button"
           onClick={() => router.push('/notifications')}
-          className="text-xs font-semibold text-[var(--studio-navy)] hover:underline cursor-pointer inline-flex items-center gap-1"
+          className="dash-quiet-link"
         >
-          View log
-          <GoogleIcon name="arrow_forward" size={14} />
+          View all ›
         </button>
       }
     >
       {displayItems.length === 0 ? (
-        <div className="dash-empty-state">
-          <p>No recent activity recorded yet</p>
+        <div className="dash-work-empty">
+          <p className="dash-work-empty-title">No recent activity yet</p>
+          <p className="dash-work-empty-description">Updates from your workspace will appear here.</p>
         </div>
       ) : (
         <div>
           {displayItems.map((item) => (
             <div key={item.id} className="dash-row">
-              <div className="flex items-start gap-2.5 min-w-0">
-                <div
-                  className={`w-8 h-8 rounded-[8px] flex items-center justify-center shrink-0 ${item.badge.bgClass}`}
-                >
-                  <GoogleIcon name={item.badge.iconName} size={17} weight={500} />
-                </div>
-                <p className="text-xs text-[var(--text-secondary)] leading-relaxed min-w-0">
-                  <strong className="font-semibold text-[var(--text-primary)] mr-1.5">{item.user}</strong>
-                  <span>{item.text}</span>
-                </p>
-              </div>
-              <span className="text-[11px] font-semibold text-[var(--text-muted)] tabular-nums shrink-0">
-                {item.time}
+              <span className="dash-initials" aria-hidden>
+                {item.user
+                  .split(' ')
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((part) => part[0]?.toUpperCase())
+                  .join('')}
               </span>
+              <div className="min-w-0 flex-1">
+                <p className="dash-people-name">{item.user}</p>
+                <p className="dash-people-meta">{item.text}</p>
+              </div>
+              <span className="dash-people-return">{item.time}</span>
             </div>
           ))}
         </div>

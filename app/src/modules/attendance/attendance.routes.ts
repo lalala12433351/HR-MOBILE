@@ -19,6 +19,9 @@ import {
   updateRegularizationStatus,
   updateAttendanceRecord,
   toggleBreak,
+  getAttendanceSession,
+  postPresence,
+  postMissedCheckout,
 } from './attendance.controller.js';
 import {
   recordPunchSchema,
@@ -31,6 +34,8 @@ import {
   regularizationStatusSchema,
   updateAttendanceRecordSchema,
   toggleBreakSchema,
+  presencePingSchema,
+  missedCheckoutSchema,
   workplaceLocationCheckSchema,
 } from './attendance.schema.js';
 import { validateRequest } from '../../middleware/validateRequest.js';
@@ -50,6 +55,9 @@ attendanceRoutes.post(
   validateRequest({ body: workplaceLocationCheckSchema }),
   verifyWorkplaceLocation
 );
+attendanceRoutes.get('/session', getAttendanceSession);
+attendanceRoutes.post('/presence', validateRequest({ body: presencePingSchema }), postPresence);
+attendanceRoutes.post('/missed-checkout', validateRequest({ body: missedCheckoutSchema }), postMissedCheckout);
 attendanceRoutes.get(
   '/qr-token',
   requireRole(['super_admin', 'hr_manager', 'manager', 'faculty']),
@@ -58,21 +66,25 @@ attendanceRoutes.get(
 
 attendanceRoutes.get('/leaves', getLeaves);
 attendanceRoutes.post('/leaves', validateRequest({ body: requestLeaveSchema }), requestLeave);
+// Controller checks reporting manager / department lead. Auth role can still be
+// "employee" for someone who has direct reports, so the route cannot block them.
+const leaveDecisionRoles = requireRole(['super_admin', 'hr_manager', 'manager', 'employee', 'faculty']);
+
 attendanceRoutes.put(
   '/leaves/bulk-status',
-  requireRole(['super_admin', 'hr_manager', 'manager']),
+  leaveDecisionRoles,
   validateRequest({ body: bulkLeaveStatusSchema }),
   bulkUpdateLeaveStatus
 );
 attendanceRoutes.put(
   '/leaves/:id/status',
-  requireRole(['super_admin', 'hr_manager', 'manager']),
+  leaveDecisionRoles,
   validateRequest({ body: leaveStatusSchema }),
   updateLeaveStatus
 );
 attendanceRoutes.put(
   '/leaves/:id/decision',
-  requireRole(['super_admin', 'hr_manager', 'manager']),
+  leaveDecisionRoles,
   decideLeave
 );
 attendanceRoutes.delete('/leaves/:id', deleteLeave);

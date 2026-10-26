@@ -131,23 +131,46 @@ export const initialOnboardingFields: CustomProfileField[] = [
   { id: 'f_name', name: 'name', label: 'Full Legal Name', section: 'basic', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: 'e.g. Alex Mercer' },
   { id: 'f_email', name: 'email', label: 'Official Work Email', section: 'basic', type: 'email', required: true, enabled: true, isSystemDefault: true, placeholder: 'name@company.com' },
   { id: 'f_phone', name: 'phone', label: 'Primary Contact Phone', section: 'basic', type: 'tel', required: false, enabled: true, isSystemDefault: true, placeholder: '+1 (555) 000-0000' },
-  { id: 'f_designation', name: 'designation', label: 'Job Role / Designation', section: 'basic', type: 'text', required: true, enabled: true, isSystemDefault: true },
-  { id: 'f_department', name: 'department', label: 'Department / Division', section: 'basic', type: 'text', required: true, enabled: true, isSystemDefault: true },
-  
+  {
+    id: 'f_designation',
+    name: 'designation',
+    label: 'Job Role / Designation',
+    section: 'basic',
+    type: 'text',
+    required: true,
+    enabled: true,
+    isSystemDefault: true,
+    description: 'Assigned by HR at invite — not collected from the hire during onboarding.',
+  },
+  {
+    id: 'f_department',
+    name: 'department',
+    label: 'Department / Division',
+    section: 'basic',
+    type: 'text',
+    required: true,
+    enabled: true,
+    isSystemDefault: true,
+    description: 'Assigned by HR at invite — not collected from the hire during onboarding.',
+  },
+
   // 2. Personal Information
   { id: 'f_dob', name: 'dateOfBirth', label: 'Date of Birth', section: 'personal', type: 'date', required: true, enabled: true, isSystemDefault: true },
   { id: 'f_gender', name: 'gender', label: 'Gender Identification', section: 'personal', type: 'select', required: true, enabled: true, options: ['Male', 'Female', 'Non-Binary', 'Prefer not to say'], isSystemDefault: true },
   { id: 'f_blood_group', name: 'bloodGroup', label: 'Blood Group', section: 'personal', type: 'select', required: false, enabled: true, options: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'], isSystemDefault: true },
   { id: 'f_marital_status', name: 'maritalStatus', label: 'Marital Status', section: 'personal', type: 'select', required: false, enabled: true, options: ['Single', 'Married', 'Other'], isSystemDefault: true },
-  { id: 'f_nationality', name: 'nationality', label: 'Nationality / Citizenship', section: 'personal', type: 'text', required: false, enabled: true, isSystemDefault: true, placeholder: 'e.g. American, Indian, British' },
+  { id: 'f_nationality', name: 'nationality', label: 'Nationality / Citizenship', section: 'personal', type: 'select', required: false, enabled: true, isSystemDefault: true },
   { id: 'f_personal_email', name: 'personalEmail', label: 'Personal Backup Email', section: 'personal', type: 'email', required: false, enabled: true, isSystemDefault: true, placeholder: 'personal@gmail.com' },
+  { id: 'f_health_insurance', name: 'healthInsurance', label: 'Health Insurance / Provider', section: 'personal', type: 'text', required: false, enabled: true, isSystemDefault: true, placeholder: 'e.g. Company plan / provider name' },
+  { id: 'f_bio', name: 'bio', label: 'About / Bio', section: 'personal', type: 'textarea', required: false, enabled: true, isSystemDefault: true, placeholder: 'Short public about text' },
+  { id: 'f_avatar', name: 'avatar', label: 'Profile Photo', section: 'personal', type: 'file', required: false, enabled: true, isSystemDefault: true, description: 'Optional profile photo for your workspace directory.' },
 
   // 3. Residential Address & Emergency
   { id: 'f_address', name: 'primaryAddress', label: 'Residential Street Address', section: 'address', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: '123 Innovation Way, Apt 4B' },
-  { id: 'f_city', name: 'city', label: 'City', section: 'address', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: 'San Francisco' },
-  { id: 'f_state', name: 'stateProvince', label: 'State / Province', section: 'address', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: 'CA' },
-  { id: 'f_zip', name: 'postalCode', label: 'Postal / ZIP Code', section: 'address', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: '94107' },
-  { id: 'f_country', name: 'country', label: 'Country', section: 'address', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: 'United States' },
+  { id: 'f_country', name: 'country', label: 'Country', section: 'address', type: 'select', required: true, enabled: true, isSystemDefault: true },
+  { id: 'f_state', name: 'stateProvince', label: 'State / Province', section: 'address', type: 'select', required: true, enabled: true, isSystemDefault: true },
+  { id: 'f_city', name: 'city', label: 'City', section: 'address', type: 'select', required: true, enabled: true, isSystemDefault: true },
+  { id: 'f_zip', name: 'postalCode', label: 'Postal / ZIP Code', section: 'address', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: '560001' },
   { id: 'f_emg_name', name: 'emergencyContactName', label: 'Emergency Contact Full Name', section: 'address', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: 'Jane Mercer' },
   { id: 'f_emg_rel', name: 'emergencyContactRelation', label: 'Emergency Contact Relationship', section: 'address', type: 'select', required: true, enabled: true, options: ['Spouse', 'Parent', 'Sibling', 'Family', 'Friend', 'Guardian'], isSystemDefault: true },
   { id: 'f_emg_phone', name: 'emergencyContactPhone', label: 'Emergency Contact Phone', section: 'address', type: 'tel', required: true, enabled: true, isSystemDefault: true, placeholder: '+1 (555) 999-8888' },
@@ -158,14 +181,11 @@ export const initialOnboardingFields: CustomProfileField[] = [
   { id: 'f_ifsc', name: 'ifscCode', label: 'Routing Number / IFSC / SWIFT', section: 'banking', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: 'e.g. CHASE0001 or HDFC0001234' },
   { id: 'f_acc_holder', name: 'accountHolderName', label: 'Account Holder Name', section: 'banking', type: 'text', required: true, enabled: true, isSystemDefault: true, placeholder: 'As registered on bank passbook' },
   { id: 'f_tax_id', name: 'personalTaxId', label: 'PAN / SSN / National Tax ID', section: 'banking', type: 'text', required: false, enabled: true, isSystemDefault: true, placeholder: 'ABCDE1234F or XXX-XX-XXXX' },
-  { id: 'f_pf_uan', name: 'socialInsurance', label: 'PF / UAN / Retirement Number', section: 'banking', type: 'text', required: false, enabled: true, isSystemDefault: true, placeholder: '100987654321' },
+  { id: 'f_social_insurance', name: 'socialInsurance', label: 'Social Insurance Number', section: 'banking', type: 'text', required: false, enabled: true, isSystemDefault: true, placeholder: 'e.g. national social insurance ID' },
+  { id: 'f_pf_uan_number', name: 'pfUanNumber', label: 'PF Universal Account (UAN)', section: 'banking', type: 'text', required: false, enabled: true, isSystemDefault: true, placeholder: '100987654321' },
+  { id: 'f_esi_number', name: 'esiNumber', label: 'ESIC Insurance Number', section: 'banking', type: 'text', required: false, enabled: true, isSystemDefault: true, placeholder: 'e.g. 1234567890' },
 
-  // 5. Document Uploads
-  { id: 'f_doc_govt_id', name: 'doc_govt_id', label: 'Government Photo ID / Passport Copy', section: 'documents', type: 'file', required: true, enabled: true, isSystemDefault: true, description: 'Clear color scan or PDF of Driver License, Passport, or National ID.' },
-  { id: 'f_doc_degree', name: 'doc_degree', label: 'Highest Academic Degree / Diploma', section: 'documents', type: 'file', required: false, enabled: true, isSystemDefault: true, description: 'Graduation certificate or consolidated marksheet.' },
-  { id: 'f_doc_relieving', name: 'doc_relieving', label: 'Previous Experience / Relieving Letter', section: 'documents', type: 'file', required: false, enabled: true, isSystemDefault: true, description: 'Service certificate from immediate prior employer (if applicable).' },
-  { id: 'f_doc_signed_nda', name: 'doc_signed_nda', label: 'Signed Offer Letter / NDA Agreement', section: 'documents', type: 'file', required: true, enabled: true, isSystemDefault: true, description: 'Signed company intellectual property and terms agreement.' },
-  { id: 'f_doc_bank_proof', name: 'doc_bank_proof', label: 'Bank Proof / Voided Cheque / Statement', section: 'documents', type: 'file', required: false, enabled: true, isSystemDefault: true, description: 'Header page of bank statement or cancelled cheque confirming account details.' },
+  // Document upload slots are empty by default — HR adds them in Employee Settings → Onboarding Fields.
 ];
 
 export const initialPayrollGroups: PayrollGroup[] = [

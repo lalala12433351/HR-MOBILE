@@ -2,7 +2,6 @@
 
 import React, { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { GoogleIcon } from '@/components/ui/GoogleIcon';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
@@ -49,17 +48,16 @@ export const OnLeaveTodayCard: React.FC<OnLeaveTodayCardProps> = ({
 
   return (
     <DashPanel
-      title="On leave today"
+      title={scope === 'coworkers' ? 'Coworkers on leave' : 'On leave today'}
       className={className}
       purpose="on-leave-today"
       action={
         <button
           type="button"
           onClick={() => router.push('/leaves')}
-          className="text-xs font-semibold text-[var(--studio-navy)] hover:underline inline-flex items-center gap-1 cursor-pointer"
+          className="dash-quiet-link"
         >
-          Leaves
-          <GoogleIcon name="arrow_forward" size={15} weight={600} />
+          View leave ›
         </button>
       }
     >
@@ -77,7 +75,17 @@ export const OnLeaveTodayCard: React.FC<OnLeaveTodayCardProps> = ({
                   {person.department ? ` · ${person.department}` : ''}
                 </p>
               </div>
-              <span className="dash-people-return">Returns {formatShortDate(person.endDate) || 'soon'}</span>
+              <span className="dash-people-return">
+                {(() => {
+                  const end = new Date(`${person.endDate}T00:00:00`);
+                  if (Number.isNaN(end.getTime())) return formatShortDate(person.endDate) || 'Today';
+                  const start = new Date();
+                  start.setHours(0, 0, 0, 0);
+                  const days = Math.round((end.getTime() - start.getTime()) / 86400000);
+                  if (days <= 0) return 'Today';
+                  return days === 1 ? '1 day' : `${days} days`;
+                })()}
+              </span>
             </li>
           ))}
         </ul>

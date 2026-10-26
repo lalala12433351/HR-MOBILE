@@ -157,10 +157,69 @@ export const getTeamEmployees = (
     });
   }
 
-  // Regular employee sees only themselves
+  // Regular employee sees only themselves for approvals, attendance, and other privileged data.
   return employees.filter(
     (emp) => emp.id === personaId || emp.name.toLowerCase() === personaName || emp.email.toLowerCase() === personaEmail
   );
+};
+
+export type TeamNameRecord = {
+  id?: string | null;
+  name?: string | null;
+  leadEmployeeId?: string | null;
+  leadEmployeeIds?: string[] | null;
+};
+
+/**
+ * People shown on My Team: the persona, everyone assigned to the same team,
+ * and a manager's direct reports. This is a directory view, not an approval scope.
+ */
+export const getMyTeamRoster = (
+  persona?: UserPersona | null,
+  employees: Employee[] = [],
+  teamRecords: TeamNameRecord[] = []
+): Employee[] => {
+  if (!persona) return [];
+  if (isAdminPersona(persona) || isHRPersona(persona)) return employees;
+
+  const me = findPersonaRecord(persona, employees);
+  const teamIds = new Set<string>();
+  const teamNames = new Set<string>();
+
+  const remember = (id?: string | null, name?: string | null) => {
+    const cleanId = String(id || '').trim();
+    const cleanName = String(name || '').trim().toLowerCase();
+    if (cleanId) teamIds.add(cleanId);
+    if (cleanName) teamNames.add(cleanName);
+  };
+
+  if (me) {
+    remember(me.teamId, me.team);
+    for (const record of teamRecords) {
+      const recordId = String(record.id || '').trim();
+      const recordName = String(record.name || '').trim();
+      const leadIds = [record.leadEmployeeId, ...(record.leadEmployeeIds || [])]
+        .map((id) => String(id || '').trim())
+        .filter(Boolean);
+      const idMatch = !!me.teamId && recordId === me.teamId;
+      const nameMatch = !!me.team && recordName.toLowerCase() === me.team.trim().toLowerCase();
+      const leadMatch = leadIds.includes(me.id);
+      if (idMatch || nameMatch || leadMatch) remember(recordId, recordName);
+    }
+  }
+
+  const onTeam = (emp: Employee) => {
+    if (me && emp.id === me.id) return true;
+    if (emp.teamId && teamIds.has(String(emp.teamId))) return true;
+    const name = (emp.team || '').trim().toLowerCase();
+    if (name && teamNames.has(name)) return true;
+    return false;
+  };
+
+  const managedIds = new Set(getTeamEmployees(persona, employees).map((emp) => emp.id));
+  const roster = employees.filter((emp) => onTeam(emp) || managedIds.has(emp.id));
+  if (me && !roster.some((emp) => emp.id === me.id)) roster.unshift(me);
+  return roster;
 };
 
 const findPersonaRecord = (persona: UserPersona, employees: Employee[]): Employee | undefined => {
@@ -376,13 +435,30 @@ const isOwnLeaveRequest = (
 export const canApproveLeave = (
   persona?: UserPersona | null,
   leave?: LeaveRequest | null,
-  employees: Employee[] = []
+  employees: Employee[] = [],
+  workflow?: 'manager_then_hr' | 'manager_only' | 'hr_only'
 ): boolean => {
   if (!persona || !leave) return false;
   // Nobody — including managers, HR, and admins — may decide their own leave.
   if (isOwnLeaveRequest(persona, leave, employees)) return false;
 
-  if (isAdminPersona(persona) || isHRPersona(persona)) return true;
+  const isHr = isAdminPersona(persona) || isHRPersona(persona);
+  if (leave.status === 'Manager approved') return isHr;
+  if (workflow === 'hr_only') return isHr;
+  if (workflow === 'manager_only' && isHr) {
+    const target = employees.find(
+      (e) => e.id === leave.employeeId || e.name.toLowerCase() === (leave.employeeName || '').toLowerCase()
+    );
+    return Boolean(target && isDirectReport(target, persona));
+  }
+  if (workflow === 'manager_then_hr' && leave.status === 'Pending' && isHr) {
+    const target = employees.find(
+      (e) => e.id === leave.employeeId || e.name.toLowerCase() === (leave.employeeName || '').toLowerCase()
+    );
+    return Boolean(target && isDirectReport(target, persona));
+  }
+
+  if (isHr) return true;
 
   const targetEmp = employees.find(
     (e) => e.id === leave.employeeId || e.name.toLowerCase() === (leave.employeeName || '').toLowerCase()

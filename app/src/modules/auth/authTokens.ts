@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { pool } from '../../config/database.js';
 
-export type AuthTokenPurpose = 'invite' | 'verify_email' | 'password_reset';
+export type AuthTokenPurpose = 'invite' | 'verify_email' | 'password_reset' | 'change_email';
 
 export const INVITE_TTL_HOURS = 72;
 export const PASSWORD_RESET_TTL_HOURS = 1;
@@ -41,8 +41,8 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function otpHash(email: string, code: string): string {
-  return sha256(`verify_email:${normalizeEmail(email)}:${code}`);
+function otpHash(purpose: 'verify_email' | 'change_email', email: string, code: string): string {
+  return sha256(`${purpose}:${normalizeEmail(email)}:${code}`);
 }
 
 /** Throws RESEND_COOLDOWN if a token of this purpose was issued to this email too recently. */
@@ -74,7 +74,7 @@ export async function invalidateOpenTokens(purpose: AuthTokenPurpose, email: str
 
 /** Issues a single-use link token (invite / password reset). Returns the raw token for the URL. */
 export async function issueLinkToken(params: {
-  purpose: Exclude<AuthTokenPurpose, 'verify_email'>;
+  purpose: Exclude<AuthTokenPurpose, 'verify_email' | 'change_email'>;
   email: string;
   ttlHours: number;
   tenantId?: string | null;
@@ -132,28 +132,49 @@ export async function consumeLinkToken(purpose: AuthTokenPurpose, token: string)
 }
 
 /** Issues a 6-digit email verification code. Returns the raw code. */
-export async function issueOtp(email: string, metadata?: Record<string, any>): Promise<{ code: string; expiresAt: Date }> {
-  await invalidateOpenTokens('verify_email', email);
+export async function issueOtp(
+  email: string,
+  metadata?: Record<string, any>,
+  options?: {
+    purpose?: 'verify_email' | 'change_email';
+    tenantId?: string | null;
+    employeeId?: string | null;
+  }
+): Promise<{ code: string; expiresAt: Date }> {
+  const purpose = options?.purpose || 'verify_email';
+  await invalidateOpenTokens(purpose, email);
   const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
   const res = await pool.query(
-    `INSERT INTO public.auth_tokens (purpose, token_hash, email, metadata, expires_at)
-     VALUES ('verify_email', $1, $2, $3, CURRENT_TIMESTAMP + ($4 || ' minutes')::interval)
+    `INSERT INTO public.auth_tokens (purpose, token_hash, email, tenant_id, employee_id, metadata, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP + ($7 || ' minutes')::interval)
      RETURNING expires_at`,
-    [otpHash(email, code), normalizeEmail(email), JSON.stringify(metadata || {}), String(OTP_TTL_MINUTES)]
+    [
+      purpose,
+      otpHash(purpose, email, code),
+      normalizeEmail(email),
+      options?.tenantId || null,
+      options?.employeeId || null,
+      JSON.stringify(metadata || {}),
+      String(OTP_TTL_MINUTES),
+    ]
   );
   return { code, expiresAt: res.rows[0].expires_at };
 }
 
 /** Verifies and consumes the latest open code for this email, counting failed attempts. */
-export async function verifyOtp(email: string, code: string): Promise<AuthTokenRow> {
+export async function verifyOtp(
+  email: string,
+  code: string,
+  purpose: 'verify_email' | 'change_email' = 'verify_email'
+): Promise<AuthTokenRow> {
   const cleanEmail = normalizeEmail(email);
   const res = await pool.query(
     `SELECT *, (token_hash = $2) AS matches
      FROM public.auth_tokens
-     WHERE purpose = 'verify_email' AND LOWER(email) = $1 AND consumed_at IS NULL
+     WHERE purpose = $3 AND LOWER(email) = $1 AND consumed_at IS NULL
      ORDER BY created_at DESC
      LIMIT 1`,
-    [cleanEmail, otpHash(cleanEmail, String(code || '').trim())]
+    [cleanEmail, otpHash(purpose, cleanEmail, String(code || '').trim()), purpose]
   );
   const row = res.rows[0] as (AuthTokenRow & { matches: boolean }) | undefined;
   if (!row) throw new AuthTokenError('CODE_INVALID', 'No active code for this email. Request a new one.');

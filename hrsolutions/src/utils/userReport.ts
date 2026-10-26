@@ -6,7 +6,10 @@ import {
   Task,
   TimesheetEntry,
 } from '@/types';
+import { paidHolidayDates, type HolidayLike } from '@/utils/holidays';
 import { isPaidLeaveType } from '@/utils/leaveRules';
+import { leaveBelongsToEmployee } from '@/utils/mapLeaveRow';
+import { absenceDaysInPeriod, isWfhLeaveType } from '@/utils/dashboardPeople';
 
 export type UserReportRange = { start: string; end: string };
 
@@ -16,6 +19,7 @@ export type UserReportAttendanceRow = {
   checkOut: string;
   hours: number;
   status: string;
+  note?: string;
 };
 
 export type UserReportTaskRow = {
@@ -54,6 +58,7 @@ export type UserReport = {
   wfhDays: number;
   halfDays: number;
   absentDays: number;
+  holidayDays: number;
   leaveDays: number;
   attendanceHours: number;
   timesheetHours: number;
@@ -118,7 +123,12 @@ function estimateFallbackLop(args: {
   const absent = args.attendance.filter((row) => row.status === 'Absent').length;
   const half = args.attendance.filter((row) => row.status === 'Half Day').length * 0.5;
   const unpaidLeave = args.leaves
-    .filter((leave) => leave.status === 'Approved' && !isPaidLeaveType(leave.leaveType, leave.isPaid))
+    .filter(
+      (leave) =>
+        leave.status === 'Approved' &&
+        !isWfhLeaveType(leave.leaveType) &&
+        !isPaidLeaveType(leave.leaveType, leave.isPaid)
+    )
     .reduce((sum, leave) => sum + (Number(leave.daysCount) || 0), 0);
   return round2(absent + half + unpaidLeave);
 }
@@ -131,32 +141,60 @@ export function buildUserReport(args: {
   tasks?: Task[];
   timesheets?: TimesheetEntry[];
   payrollLine?: PayrollRecord | null;
+  holidays?: HolidayLike[];
+  workingDays?: string[];
 }): UserReport {
   const { employee, range, payrollLine } = args;
   const attendance = (args.attendance || []).filter(
-    (row) => row.employeeId === employee.id && inRange(row.date, range.start, range.end)
+    (row) =>
+      (row.employeeId === employee.id ||
+        (!!employee.employeeId && row.employeeId === employee.employeeId)) &&
+      inRange(row.date, range.start, range.end)
   );
+  const joined = dateOnly(employee.joiningDate || employee.joinDate);
+  const exited = dateOnly(employee.exitDate);
+  const holidayStart = joined && joined > range.start ? joined : range.start;
+  const holidayEnd = exited && exited < range.end ? exited : range.end;
+  const paidHolidays = paidHolidayDates({
+    holidays: args.holidays,
+    start: holidayStart,
+    end: holidayEnd,
+    workingDays: args.workingDays,
+  });
+  const holidayByDate = new Map(paidHolidays.map((holiday) => [holiday.date, holiday.name]));
+  const attendanceWithoutHolidayAbsence = attendance.filter((row) => {
+    const day = dateOnly(row.date);
+    return !(holidayByDate.has(day) && row.status === 'Absent');
+  });
   const leaves = (args.leaves || []).filter(
-    (row) => row.employeeId === employee.id && leaveOverlapsRange(row, range.start, range.end)
+    (row) => leaveBelongsToEmployee(row, employee) && leaveOverlapsRange(row, range.start, range.end)
   );
   const tasks = (args.tasks || []).filter((task) => taskBelongsTo(task, employee.id));
   const timesheets = (args.timesheets || []).filter(
     (row) => row.employeeId === employee.id && inRange(row.date, range.start, range.end)
   );
 
-  const presentDays = new Set(
-    attendance
+  const workedDates = new Set(
+    attendanceWithoutHolidayAbsence
+      .filter((row) => ['Present', 'Late', 'Work From Home', 'Half Day'].includes(row.status))
+      .map((row) => dateOnly(row.date))
+  );
+  const holidayOnly = paidHolidays.filter((holiday) => !workedDates.has(holiday.date));
+  const punchPresent = new Set(
+    attendanceWithoutHolidayAbsence
       .filter((row) => ['Present', 'Late', 'Work From Home'].includes(row.status))
       .map((row) => dateOnly(row.date))
   ).size;
-  const lateDays = attendance.filter((row) => row.status === 'Late').length;
-  const wfhDays = attendance.filter((row) => row.status === 'Work From Home').length;
-  const halfDays = attendance.filter((row) => row.status === 'Half Day').length;
-  const absentDays = attendance.filter((row) => row.status === 'Absent').length;
-  const leaveDays = leaves
-    .filter((leave) => leave.status === 'Approved')
-    .reduce((sum, leave) => sum + (Number(leave.daysCount) || 0), 0);
-  const attendanceHours = round2(attendance.reduce((sum, row) => sum + (Number(row.workingHours) || 0), 0));
+  const holidayDays = holidayOnly.length;
+  const presentDays = punchPresent + holidayDays;
+  const lateDays = attendanceWithoutHolidayAbsence.filter((row) => row.status === 'Late').length;
+  const wfhDays = attendanceWithoutHolidayAbsence.filter((row) => row.status === 'Work From Home').length;
+  const halfDays = attendanceWithoutHolidayAbsence.filter((row) => row.status === 'Half Day').length;
+  const absentDays = attendanceWithoutHolidayAbsence.filter((row) => row.status === 'Absent').length;
+  const leaveDays = absenceDaysInPeriod(leaves, employee, range.start, range.end, workedDates).size;
+  const attendanceHours = round2(
+    attendanceWithoutHolidayAbsence.reduce((sum, row) => sum + (Number(row.workingHours) || 0), 0)
+  );
   const timesheetHours = round2(timesheets.reduce((sum, row) => sum + (Number(row.hours) || 0), 0));
   const taskRows: UserReportTaskRow[] = tasks.map((task) => {
     const due = dateOnly(task.dueDate);
@@ -200,6 +238,7 @@ export function buildUserReport(args: {
     wfhDays,
     halfDays,
     absentDays,
+    holidayDays,
     leaveDays: round2(leaveDays),
     attendanceHours,
     timesheetHours,
@@ -208,19 +247,29 @@ export function buildUserReport(args: {
     hoursRequired: Number(payrollLine?.hoursRequired) || 0,
     daysWorked: Number(payrollLine?.daysWorked) || presentDays + halfDays * 0.5,
     daysRequired: Number(payrollLine?.daysRequired) || 0,
-    lopDays: Number(payrollLine?.lopDays) || estimateFallbackLop({ attendance, leaves }),
+    lopDays:
+      Number(payrollLine?.lopDays) ||
+      estimateFallbackLop({ attendance: attendanceWithoutHolidayAbsence, leaves }),
     lopAmount: Number(payrollLine?.lopAmount) || 0,
     leaveBalances,
-    attendance: attendance
-      .slice()
-      .sort((a, b) => dateOnly(a.date).localeCompare(dateOnly(b.date)))
-      .map((row) => ({
+    attendance: [
+      ...attendanceWithoutHolidayAbsence.map((row) => ({
         date: dateOnly(row.date),
         checkIn: row.checkIn || '—',
         checkOut: row.checkOut || '—',
         hours: Number(row.workingHours) || 0,
         status: row.status,
+        note: holidayByDate.get(dateOnly(row.date)),
       })),
+      ...holidayOnly.map((holiday) => ({
+        date: holiday.date,
+        checkIn: '—',
+        checkOut: '—',
+        hours: 0,
+        status: 'Holiday',
+        note: holiday.name,
+      })),
+    ].sort((a, b) => a.date.localeCompare(b.date)),
     tasks: taskRows,
     completedTasks: taskRows.filter((row) => ['Completed', 'Approved'].includes(row.status)).length,
     overdueTasks: taskRows.filter((row) => row.overdue).length,

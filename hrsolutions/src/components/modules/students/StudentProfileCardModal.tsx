@@ -19,8 +19,8 @@ import {
 } from 'lucide-react';
 import { Student, AttendanceRecord, Organization } from '@/types';
 import { StudentAttendanceLogModal } from './StudentAttendanceLogModal';
-import { buildStudentIdCardDraft, IdCardStudio } from '../../print/IdCardStudio';
 import { resolveAvatarDataUrl, shouldUseNativeAvatarPicker } from '@/utils/avatarUpload';
+import { buildStudentIdCardDraft, IdCardStudio } from '../../print/IdCardStudio';
 
 interface StudentProfileCardModalProps {
   isOpen: boolean;
@@ -239,14 +239,13 @@ export const StudentProfileCardModal: React.FC<StudentProfileCardModalProps> = (
             </div>
           </div>
 
+          {/* Photo File Input (Hidden) */}
           <input
             type="file"
             ref={avatarInputRef}
             onChange={handleAvatarChange}
-            accept="image/jpeg,image/png,image/webp,image/gif"
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden="true"
+            accept="image/*"
+            className="hidden"
           />
 
           {/* Modal Body */}

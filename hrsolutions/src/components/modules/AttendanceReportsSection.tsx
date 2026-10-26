@@ -28,6 +28,17 @@ import {
 } from '@/utils/teamAccess';
 import { getDefaultReportSettings } from '@/utils/reportCatalog';
 import { leaveBelongsToEmployee } from '@/utils/mapLeaveRow';
+import { absenceDaysInPeriod, approvedAbsenceOnDay } from '@/utils/dashboardPeople';
+import { calendarDateInTimeZone } from '@/utils/payrollRun';
+import { paidHolidayDates } from '@/utils/holidays';
+import {
+  applyHoursMethod,
+  dateInRange,
+  isScheduledWorkingDay,
+  onOrAfterStart,
+  parseDateKey,
+  reconciliationBounds,
+} from '@/utils/attendanceRules';
 import {
   ChartTooltip,
   chartGradientDefs,
@@ -128,7 +139,10 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('All');
-  const [selectedBranch, setSelectedBranch] = useState<string>('All');
+  const scopedOffice = state.customOptions?.attendanceSettings?.locationScope;
+  const [selectedBranch, setSelectedBranch] = useState<string>(
+    scopedOffice && scopedOffice !== 'All Offices' ? scopedOffice : 'All'
+  );
   const [selectedShift, setSelectedShift] = useState<string>('All');
   const [selectedMonth, setSelectedMonth] = useState<string>(() =>
     monthKeyFromOffset((reportSettings.defaultMonthOffset as 0 | -1) ?? 0)
@@ -200,18 +214,31 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
   const activeEmp = filteredEmployees.find((e) => e.id === activeEmpId) || baseEmployees.find((e) => e.id === activeEmpId) || baseEmployees?.[0];
 
   // Month Date Calculations
-  const { year, month, daysInMonth, scheduledDays } = useMemo(() => {
+  const { year, month, daysInMonth, scheduledDays, hourDays, holidayDates, periodStart, periodEnd } = useMemo(() => {
     const parts = selectedMonth.split('-');
     const y = parseInt(parts[0], 10) || new Date().getFullYear();
     const m = parseInt(parts[1], 10) || (new Date().getMonth() + 1);
     const dCount = new Date(y, m, 0).getDate();
+    const bounds = reconciliationBounds(state.customOptions?.attendanceSettings, selectedMonth);
+    const holidays = paidHolidayDates({
+      holidays: state.customOptions?.holidays,
+      start: bounds.start,
+      end: bounds.end,
+      workingDays: state.organization?.workingDays,
+    });
 
     let workDays = 0;
-    for (let day = 1; day <= dCount; day++) {
-      const dayOfWeek = new Date(y, m - 1, day).getDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        workDays++;
+    let cursor = new Date(`${bounds.start}T00:00:00`);
+    const end = new Date(`${bounds.end}T00:00:00`);
+    while (cursor <= end) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+      if (
+        onOrAfterStart(key, state.customOptions?.attendanceSettings?.startDate) &&
+        isScheduledWorkingDay(key, state.organization?.workingDays, state.customOptions?.attendanceSettings)
+      ) {
+        workDays += 1;
       }
+      cursor.setDate(cursor.getDate() + 1);
     }
 
     return {
@@ -219,21 +246,34 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       month: m,
       daysInMonth: dCount,
       scheduledDays: Math.max(1, workDays),
+      hourDays: Math.max(0, workDays - holidays.length),
+      holidayDates: holidays.map((holiday) => holiday.date),
+      periodStart: bounds.start,
+      periodEnd: bounds.end,
     };
-  }, [selectedMonth]);
+  }, [selectedMonth, state.customOptions?.holidays, state.customOptions?.attendanceSettings, state.organization?.workingDays]);
+
+  const holidayDateSet = useMemo(() => new Set(holidayDates), [holidayDates]);
 
   // Monthly Attendance & Leaves
   const monthAttendance = useMemo(() => {
-    return (state.attendance || []).filter((a) => a.date && a.date.startsWith(selectedMonth));
-  }, [state.attendance, selectedMonth]);
+    return applyHoursMethod(state.attendance || [], state.customOptions?.attendanceSettings).filter(
+      (a) =>
+        a.date &&
+        dateInRange(a.date, periodStart, periodEnd) &&
+        onOrAfterStart(a.date, state.customOptions?.attendanceSettings?.startDate)
+    );
+  }, [state.attendance, periodStart, periodEnd, state.customOptions?.attendanceSettings]);
 
   const monthLeaves = useMemo(() => {
-    return (state.leaves || []).filter(
-      (l) =>
-        (l.status === 'Approved' || l.status === 'Pending') &&
-        ((l.startDate && l.startDate.startsWith(selectedMonth)) || (l.endDate && l.endDate.startsWith(selectedMonth)))
-    );
-  }, [state.leaves, selectedMonth]);
+    return (state.leaves || []).filter((l) => {
+      if (l.status === 'Rejected' || l.status === 'Cancelled') return false;
+      const start = String(l.startDate || '').slice(0, 10);
+      const end = String(l.endDate || '').slice(0, 10) || start;
+      if (!start || !end) return false;
+      return start <= periodEnd && end >= periodStart;
+    });
+  }, [state.leaves, periodStart, periodEnd]);
 
   // ---------------------------------------------------------------------------
   // PER-EMPLOYEE COMPUTED METRICS MAP
@@ -245,6 +285,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
         presentDays: number;
         lateDays: number;
         leaveDays: number;
+        holidayDays: number;
         loggedHours: number;
         geofencedCount: number;
         remoteCount: number;
@@ -256,6 +297,8 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
         status: string;
       }
     >();
+
+    const companyStart = calendarDateInTimeZone(state.organization?.createdAt, state.organization?.timeZone);
 
     filteredEmployees.forEach((emp) => {
       const empPunches = monthAttendance.filter(
@@ -273,10 +316,10 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
         if (p.status === 'Present' || p.status === 'Late' || p.status === 'Work From Home') {
           presentDates.add(p.date);
         }
-        if (p.status === 'Late' || (p.checkIn && p.checkIn > '09:15')) {
+        if (p.status === 'Late') {
           lateDates.add(p.date);
         }
-        totalHours += Number(p.workingHours) || 8;
+        totalHours += Number(p.workingHours) || 0;
         if (p.isWithinGeofence) {
           geofenced++;
         } else {
@@ -293,20 +336,44 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       const empLeaves = monthLeaves.filter(
         (l) => leaveBelongsToEmployee(l, emp) && l.status === 'Approved'
       );
-      const leaveDays = empLeaves.reduce((sum, l) => sum + (Number(l.daysCount) || 1), 0);
+      const leaveDays = absenceDaysInPeriod(
+        empLeaves,
+        emp,
+        periodStart,
+        periodEnd,
+        presentDates
+      ).size;
+      const joinDate = String(emp.joiningDate || emp.joinDate || '').slice(0, 10);
+      const exitDate = String(emp.exitDate || '').slice(0, 10);
+      const leaveCovers = (date: string) =>
+        empLeaves.some((leave) => {
+          const start = String(leave.startDate || '').slice(0, 10);
+          const end = String(leave.endDate || '').slice(0, 10);
+          return Boolean(start && end && start <= date && end >= date);
+        });
+      let holidayDays = 0;
+      holidayDates.forEach((date) => {
+        if (presentDates.has(date) || leaveCovers(date)) return;
+        if (joinDate && date < joinDate) return;
+        if (exitDate && date > exitDate) return;
+        if (companyStart && date < companyStart) return;
+        holidayDays += 1;
+      });
 
       const presentDays = presentDates.size;
       const lateDays = lateDates.size;
-      const rate = scheduledDays > 0 ? Math.min(100, Math.round((presentDays / scheduledDays) * 1000) / 10) : 0;
+      const countedDays = presentDays + holidayDays;
+      const rate = scheduledDays > 0 ? Math.min(100, Math.round((countedDays / scheduledDays) * 1000) / 10) : 0;
       const punctuality = presentDays > 0 ? Math.min(100, Math.round(((presentDays - lateDays) / presentDays) * 1000) / 10) : 0;
 
-      const expectedHours = scheduledDays * hoursPerDay;
+      const expectedHours = hourDays * hoursPerDay;
       const status = totalHours >= expectedHours ? 'Target Met' : totalHours > 0 ? 'In Progress' : 'No Activity';
 
       map.set(emp.id, {
         presentDays,
         lateDays,
         leaveDays,
+        holidayDays,
         loggedHours: Math.round(totalHours * 10) / 10,
         geofencedCount: geofenced,
         remoteCount: remote,
@@ -320,13 +387,14 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
     });
 
     return map;
-  }, [filteredEmployees, monthAttendance, monthLeaves, scheduledDays, hoursPerDay]);
+  }, [filteredEmployees, monthAttendance, monthLeaves, scheduledDays, hourDays, holidayDates, hoursPerDay, periodStart, periodEnd, state.organization]);
 
   // Overall aggregate stats
   const totalStats = useMemo(() => {
     let totalPresentDays = 0;
     let totalLateDays = 0;
     let totalLeaveDays = 0;
+    let totalHolidayDays = 0;
     let totalLoggedHours = 0;
     let totalGeofenced = 0;
     let totalRemote = 0;
@@ -335,6 +403,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       totalPresentDays += s.presentDays;
       totalLateDays += s.lateDays;
       totalLeaveDays += s.leaveDays;
+      totalHolidayDays += s.holidayDays;
       totalLoggedHours += s.loggedHours;
       totalGeofenced += s.geofencedCount;
       totalRemote += s.remoteCount;
@@ -342,10 +411,11 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
 
     const staffCount = filteredEmployees.length;
     const totalScheduledDays = staffCount * scheduledDays;
-    const overallAttendanceRate = totalScheduledDays > 0 ? Math.min(100, (totalPresentDays / totalScheduledDays) * 100) : 0;
+    const overallAttendanceRate =
+      totalScheduledDays > 0 ? Math.min(100, ((totalPresentDays + totalHolidayDays) / totalScheduledDays) * 100) : 0;
     const overallOnTimeRate = totalPresentDays > 0 ? Math.min(100, ((totalPresentDays - totalLateDays) / totalPresentDays) * 100) : 0;
     const avgPresentDays = staffCount > 0 ? totalPresentDays / staffCount : 0;
-    const totalExpectedHours = totalScheduledDays * hoursPerDay;
+    const totalExpectedHours = staffCount * hourDays * hoursPerDay;
     const totalOvertime = Math.max(0, totalLoggedHours - totalExpectedHours);
     const totalDeficit = Math.max(0, totalExpectedHours - totalLoggedHours);
 
@@ -353,6 +423,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       totalPresentDays,
       totalLateDays,
       totalLeaveDays,
+      totalHolidayDays,
       totalLoggedHours,
       totalGeofenced,
       totalRemote,
@@ -365,7 +436,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       totalOvertime,
       totalDeficit,
     };
-  }, [employeeStatsMap, filteredEmployees.length, scheduledDays, hoursPerDay]);
+  }, [employeeStatsMap, filteredEmployees.length, scheduledDays, hourDays, hoursPerDay]);
 
   // ---------------------------------------------------------------------------
   // CATEGORY METRIC DATA
@@ -417,7 +488,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       }
 
       case 'muster_report': {
-        const totalPayable = totalStats.totalPresentDays + totalStats.totalLeaveDays;
+        const totalPayable = totalStats.totalPresentDays + totalStats.totalLeaveDays + totalStats.totalHolidayDays;
         const avgPayable = totalStats.staffCount > 0 ? totalPayable / totalStats.staffCount : 0;
         const leaveRatio = (totalStats.totalPresentDays + totalStats.totalLeaveDays) > 0
           ? (totalStats.totalLeaveDays / (totalStats.totalPresentDays + totalStats.totalLeaveDays)) * 100
@@ -452,7 +523,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
         return [
           { title: 'Employee', value: activeEmp?.name || 'No Selection' },
           { title: 'Monthly Hours', value: `${activeStats?.loggedHours || 0}h` },
-          { title: 'Present Days', value: `${activeStats?.presentDays || 0} / ${totalStats.scheduledDays}` },
+          { title: 'Present Days', value: `${(activeStats?.presentDays || 0) + (activeStats?.holidayDays || 0)} / ${totalStats.scheduledDays}` },
           { title: 'Punctuality', value: `${(activeStats?.punctualityRate || 0).toFixed(1)}%` },
         ];
       }
@@ -472,7 +543,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
         deptMap[dept] = { present: 0, scheduled: 0 };
       }
       const stats = employeeStatsMap.get(emp.id);
-      deptMap[dept].present += stats?.presentDays || 0;
+      deptMap[dept].present += (stats?.presentDays || 0) + (stats?.holidayDays || 0);
       deptMap[dept].scheduled += scheduledDays;
     });
 
@@ -487,10 +558,11 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
     const onTime = Math.max(0, totalStats.totalPresentDays - totalStats.totalLateDays);
     const late = totalStats.totalLateDays;
     const leaves = totalStats.totalLeaveDays;
+    const holidays = totalStats.totalHolidayDays;
     const totalScheduled = totalStats.staffCount * totalStats.scheduledDays;
-    const absent = Math.max(0, totalScheduled - totalStats.totalPresentDays - totalStats.totalLeaveDays);
+    const absent = Math.max(0, totalScheduled - totalStats.totalPresentDays - totalStats.totalLeaveDays - holidays);
 
-    const total = onTime + late + leaves + absent;
+    const total = onTime + late + leaves + holidays + absent;
     if (total === 0) {
       return [];
     }
@@ -499,6 +571,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       { name: 'On-Time', value: Math.round((onTime / total) * 100), count: onTime, color: '#22c55e' },
       { name: 'Grace / Late', value: Math.round((late / total) * 100), count: late, color: '#3b82f6' },
       { name: 'Leave', value: Math.round((leaves / total) * 100), count: leaves, color: '#f59e0b' },
+      { name: 'Holiday', value: Math.round((holidays / total) * 100), count: holidays, color: '#2d628e' },
       { name: 'Absent', value: Math.round((absent / total) * 100), count: absent, color: '#ef4444' },
     ].filter((item) => item.value > 0 || item.count > 0);
   }, [totalStats]);
@@ -615,9 +688,9 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
     return Object.entries(deptMap).map(([department, data]) => ({
       department,
       logged: Math.round(data.logged * 10) / 10,
-      expected: data.staffCount * scheduledDays * hoursPerDay,
+      expected: data.staffCount * hourDays * hoursPerDay,
     }));
-  }, [filteredEmployees, employeeStatsMap, scheduledDays, hoursPerDay]);
+  }, [filteredEmployees, employeeStatsMap, hourDays, hoursPerDay]);
 
   // 8. Weekly Hours Flow
   const weeklyHoursFlow = useMemo(() => {
@@ -628,12 +701,11 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
     });
 
     monthAttendance.forEach((p) => {
-      const d = new Date(p.date);
-      if (!isNaN(d.getTime())) {
-        const name = dayNames[d.getDay()];
-        dayMap[name].hours += Number(p.workingHours) || 8;
-        dayMap[name].count++;
-      }
+      const d = parseDateKey(p.date);
+      if (!d) return;
+      const name = dayNames[d.getDay()];
+      dayMap[name].hours += Number(p.workingHours) || 0;
+      dayMap[name].count++;
     });
 
     return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => ({
@@ -814,7 +886,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
       headers = ['Employee', 'Department', 'Expected Hours', 'Logged Hours', 'Overtime', 'Deficit', 'Status'];
       rows = filteredEmployees.map((e) => {
         const stats = employeeStatsMap.get(e.id);
-        const exp = scheduledDays * hoursPerDay;
+        const exp = hourDays * hoursPerDay;
         const logged = stats?.loggedHours || 0;
         const ot = Math.max(0, logged - exp);
         const def = Math.max(0, exp - logged);
@@ -834,7 +906,8 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
         const stats = employeeStatsMap.get(e.id);
         const p = stats?.presentDays || 0;
         const l = stats?.leaveDays || 0;
-        return [e.name, e.department || 'Operations', String(p), String(l), String(p + l)];
+        const h = stats?.holidayDays || 0;
+        return [e.name, e.department || 'Operations', String(p), String(l), String(p + l + h)];
       });
     } else if (selectedReport === 'leave_taken') {
       headers = ['Employee', 'Leave Type', 'From Date', 'To Date', 'Days', 'Reason', 'Status'];
@@ -1674,7 +1747,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                         )}
                         {isFieldVisible('daily_punch', 'workingHours') && (
                           <td className="p-3.5 text-right font-mono font-bold text-[var(--text-primary)]">
-                            {p.workingHours || 8}h
+                            {Number(p.workingHours) || 0}h
                           </td>
                         )}
                       </tr>
@@ -1710,7 +1783,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                   ) : (
                     paginatedEmployees.map((emp) => {
                       const stats = employeeStatsMap.get(emp.id);
-                      const exp = scheduledDays * hoursPerDay;
+                      const exp = hourDays * hoursPerDay;
                       const logged = stats?.loggedHours || 0;
                       const ot = Math.max(0, logged - exp);
                       const def = Math.max(0, exp - logged);
@@ -1791,6 +1864,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                       const stats = employeeStatsMap.get(emp.id);
                       const pCount = stats?.presentDays || 0;
                       const lCount = stats?.leaveDays || 0;
+                      const hCount = stats?.holidayDays || 0;
                       const empPunches = monthAttendance.filter(
                         (a) => a.employeeId === emp.id || (emp.employeeId && a.employeeId === emp.employeeId) || a.employeeName === emp.name
                       );
@@ -1806,14 +1880,23 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                           {Array.from({ length: Math.min(15, daysInMonth) }, (_, i) => {
                             const dayNum = i + 1;
                             const dateStr = `${selectedMonth}-${String(dayNum).padStart(2, '0')}`;
-                            const isWeekend = new Date(year, month - 1, dayNum).getDay() === 0 || new Date(year, month - 1, dayNum).getDay() === 6;
-                            const hasPunch = empPunches.some((p) => p.date === dateStr);
+                            const punch = empPunches.find((p) => p.date === dateStr);
+                            const worked = Boolean(
+                              punch && ['Present', 'Late', 'Work From Home', 'Half Day'].includes(punch.status)
+                            );
+                            const onLeave = !worked && Boolean(approvedAbsenceOnDay(monthLeaves, emp, dateStr));
+                            const isHoliday = holidayDateSet.has(dateStr);
+                            const isOff = !isScheduledWorkingDay(dateStr, state.organization?.workingDays, state.customOptions?.attendanceSettings);
 
                             let code = '—';
-                            if (isWeekend) {
-                              code = 'WO';
-                            } else if (hasPunch) {
+                            if (worked) {
                               code = 'P';
+                            } else if (isHoliday) {
+                              code = 'H';
+                            } else if (isOff) {
+                              code = 'WO';
+                            } else if (onLeave) {
+                              code = 'L';
                             } else {
                               code = 'A';
                             }
@@ -1824,8 +1907,12 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                                   className={`px-1.5 py-0.5 rounded font-bold border ${
                                     code === 'WO'
                                       ? 'text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] border-[var(--border-color)]'
-                                      : code === 'P'
+                                      : code === 'H'
+                                      ? 'text-[#2d628e] bg-[#f3f8fb] border-[#b7d3e4]'
+                                      :                                     code === 'P'
                                       ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                      : code === 'L'
+                                      ? 'text-blue-700 bg-blue-50 border-blue-200'
                                       : 'text-[var(--text-muted)] border-transparent'
                                   }`}
                                 >
@@ -1842,7 +1929,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                           )}
                           {isFieldVisible('muster_report', 'payableDays') && (
                             <td className="p-3.5 text-right font-mono font-bold text-[var(--text-primary)]">
-                              {pCount + lCount}
+                              {pCount + lCount + hCount}
                             </td>
                           )}
                           {isFieldVisible('muster_report', 'attendanceHealth') && (
@@ -1966,7 +2053,8 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                       const dayNum = i + 1;
                       const dateStr = `${selectedMonth}-${String(dayNum).padStart(2, '0')}`;
                       const dayDate = new Date(year, month - 1, dayNum);
-                      const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
+                      const isWeeklyOff = !isScheduledWorkingDay(dateStr, state.organization?.workingDays, state.customOptions?.attendanceSettings);
+                      const isHoliday = holidayDateSet.has(dateStr);
                       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
                       const dayName = dayNames[dayDate.getDay()];
 
@@ -1978,6 +2066,11 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                       const isFuture = dateStr > todayStr;
                       const joinDate = activeEmp.joiningDate || activeEmp.joinDate || (activeEmp as any).dateOfJoining;
                       const isBeforeJoining = joinDate ? dateStr < joinDate.substring(0, 10) : false;
+                      const companyStart = calendarDateInTimeZone(
+                        state.organization?.createdAt,
+                        state.organization?.timeZone
+                      );
+                      const isBeforeCompany = companyStart ? dateStr < companyStart : false;
 
                       const empPunches = monthAttendance.filter(
                         (a) =>
@@ -1992,11 +2085,11 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                       let statusBadgeClass = 'text-rose-700 bg-rose-50 border-rose-200';
                       let hoursText = '0h';
 
-                      if (isWeekend) {
-                        displayStatus = 'Weekly Off';
-                        statusBadgeClass = 'text-[var(--text-secondary)] bg-[var(--bg-surface-subtle)] border-[var(--border-color)]';
-                        hoursText = punch ? `${punch.workingHours || 8}h` : '—';
-                      } else if (punch) {
+                      const worked = Boolean(
+                        punch && ['Present', 'Late', 'Work From Home', 'Half Day'].includes(punch.status || '')
+                      );
+
+                      if (worked && punch) {
                         displayStatus = punch.status || 'Present';
                         statusBadgeClass =
                           punch.status === 'Late'
@@ -2006,10 +2099,26 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                             : punch.status === 'Work From Home'
                             ? 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border-blue-200'
                             : 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                        hoursText = `${punch.workingHours || 8}h`;
+                        hoursText = `${Number(punch.workingHours) || 0}h`;
+                      } else if (isHoliday && !isBeforeJoining && !isBeforeCompany) {
+                        displayStatus = 'Holiday';
+                        statusBadgeClass = 'text-[#2d628e] bg-[#f3f8fb] border-[#b7d3e4]';
+                        hoursText = '—';
+                      } else if (isWeeklyOff) {
+                        displayStatus = 'Weekly Off';
+                        statusBadgeClass = 'text-[var(--text-secondary)] bg-[var(--bg-surface-subtle)] border-[var(--border-color)]';
+                        hoursText = punch ? `${Number(punch.workingHours) || 0}h` : '—';
                       } else if (isBeforeJoining) {
                         displayStatus = 'Not Joined';
                         statusBadgeClass = 'text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] border-[var(--border-color)]';
+                        hoursText = '—';
+                      } else if (isBeforeCompany) {
+                        displayStatus = 'Before company';
+                        statusBadgeClass = 'text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] border-[var(--border-color)]';
+                        hoursText = '—';
+                      } else if (approvedAbsenceOnDay(monthLeaves, activeEmp, dateStr)) {
+                        displayStatus = 'On Leave';
+                        statusBadgeClass = 'text-blue-700 bg-blue-50 border-blue-200';
                         hoursText = '—';
                       } else if (isFuture) {
                         displayStatus = 'Scheduled';
@@ -2029,7 +2138,7 @@ export const AttendanceReportsSection: React.FC<AttendanceReportsSectionProps> =
                           )}
                           <td className="p-3.5 text-[var(--text-muted)]">{dayName}</td>
                           <td className="p-3.5 text-[var(--text-secondary)]">
-                            {isWeekend ? 'Weekly Off' : activeEmp.workSchedule?.name || 'General Shift (9:00 - 18:00)'}
+                            {isWeeklyOff ? 'Weekly Off' : activeEmp.workSchedule?.name || 'General Shift (9:00 - 18:00)'}
                           </td>
                           {isFieldVisible('day_wise_master', 'checkIn') && (
                             <td className="p-3.5 font-mono text-[var(--text-primary)]">

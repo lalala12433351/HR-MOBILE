@@ -3,6 +3,7 @@ import { frontendUrl, sendEmail } from '../../config/ses.js';
 import { withTenantContext } from '../../db/queryRunner.js';
 import { licenseExpiryEmail } from '../../emails/templates.js';
 import { log } from '../../utils/logger.js';
+import { sendPushToEmployees } from '../push/push.service.js';
 
 const SCAN_MS = 6 * 60 * 60 * 1000;
 const SETTINGS_PATH = '/settings?section=license';
@@ -67,6 +68,7 @@ export async function maybeNotifyExpiry(input: {
         WHERE role = 'super_admin'
           AND COALESCE(employment_status, 'active') NOT IN ('terminated', 'exited')`
     );
+    const notified: string[] = [];
     for (const admin of admins.rows) {
       try {
         await query(
@@ -74,6 +76,7 @@ export async function maybeNotifyExpiry(input: {
            VALUES ($1, $2, $3, 'System', $4, $5, false)`,
           [admin.id, title, message, expired ? 'high' : 'medium', SETTINGS_PATH]
         );
+        notified.push(String(admin.id));
       } catch (err) {
         log.warn('Could not write license expiry notification', err);
       }
@@ -95,6 +98,12 @@ export async function maybeNotifyExpiry(input: {
         log.warn(`Could not email license expiry notice to ${email}`, err);
       }
     }
+    await sendPushToEmployees(query, notified, {
+      title,
+      body: message.slice(0, 180),
+      url: SETTINGS_PATH,
+      tag: `license-${input.tenantId}-${bucket}`,
+    });
   });
 
   await pool.query(

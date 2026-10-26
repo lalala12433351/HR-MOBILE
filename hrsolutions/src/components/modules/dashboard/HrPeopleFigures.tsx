@@ -29,20 +29,17 @@ export const HrPeopleFigures: React.FC = () => {
     };
   }, [dashboardState, state.employees, state.leaves, today]);
 
+  const employeeCount = (dashboardState.employees || []).length;
   const rail = [
-    { label: 'On leave today', value: stats.onLeave, onClick: () => router.push('/leaves') },
-    { label: 'Pending leave', value: stats.pending, onClick: () => router.push('/leaves') },
-    { label: 'Incomplete profiles', value: stats.incomplete, onClick: () => router.push('/hr') },
+    { label: 'Attendance today', tone: 'attendance', value: `${employeeCount ? Math.min(100, Math.round(stats.present / employeeCount * 1000) / 10) : 0}%`, path: '/attendance' },
+    { label: 'People', tone: 'people', value: employeeCount, path: '/hr' },
+    { label: 'Pending leave', tone: 'leave', value: stats.pending, path: '/leaves' },
   ];
 
   return (
-    <div className="dash-figure-rail">
-      <button type="button" onClick={() => router.push('/attendance')} className="dash-figure-item">
-        <span className="dash-kpi-label">Present today</span>
-        <span className="dash-kpi">{stats.present}</span>
-      </button>
+    <div className="dash-hr-metrics">
       {rail.map((card) => (
-        <button key={card.label} type="button" onClick={card.onClick} className="dash-figure-item">
+        <button key={card.label} type="button" onClick={() => router.push(card.path)} className="dash-metric" data-tone={card.tone}>
           <span className="dash-kpi-label">{card.label}</span>
           <span className="dash-kpi">{card.value}</span>
         </button>

@@ -178,10 +178,12 @@ CREATE TABLE IF NOT EXISTS attendance_punches (
     distance_from_office_meters NUMERIC(8, 2),
     is_within_geofence BOOLEAN NOT NULL DEFAULT false,
     device_info VARCHAR(255),
-    ip_address VARCHAR(64)
+    ip_address VARCHAR(64),
+    selfie_photo TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_punches_emp_time ON attendance_punches(employee_id, punch_timestamp);
+ALTER TABLE attendance_punches ADD COLUMN IF NOT EXISTS selfie_photo TEXT;
 
 CREATE TABLE IF NOT EXISTS leave_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -359,6 +361,7 @@ ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS billing_type VARCHAR(16) NOT 
 ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0;
 ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS invoice_id UUID;
 ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES billing_clients(id) ON DELETE SET NULL;
+ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS board_order INTEGER;
 
 CREATE TABLE IF NOT EXISTS project_task_assignees (
     task_id UUID NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,

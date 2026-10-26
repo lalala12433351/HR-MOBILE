@@ -1,4 +1,5 @@
 'use client';
+import { ResponsiveTable } from '@/components/common/ResponsiveTable';
 
 import React, { useState } from 'react';
 import { UserReport } from '@/utils/userReport';
@@ -90,7 +91,7 @@ export function UserReportView({
 
       <div className="people-studio__kpis">
         {[
-          { label: 'Present days', value: String(report.presentDays), note: `${report.lateDays} late · ${report.wfhDays} WFH` },
+          { label: 'Present days', value: String(report.presentDays), note: `${report.holidayDays} holidays · ${report.lateDays} late · ${report.wfhDays} WFH` },
           { label: 'Work hours', value: report.hoursWorked.toFixed(1), note: report.hoursRequired ? `${report.hoursRequired} required` : `${report.attendanceHours} from attendance` },
           { label: 'Leaves', value: String(report.leaveDays), note: `${report.leaves.length} requests` },
           { label: 'LOP', value: `${report.lopDays}d`, note: report.lopAmount ? inr(report.lopAmount) : `${report.absentDays} absent` },
@@ -114,7 +115,7 @@ export function UserReportView({
       <Section title="Tasks">
         {report.tasks.length ? (
           <div className="people-studio__table-wrap">
-            <table>
+            <ResponsiveTable>
               <thead>
                 <tr>
                   {['Task', 'Project', 'Status', 'Due', 'Hours'].map((label) => (
@@ -139,7 +140,7 @@ export function UserReportView({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
         ) : (
           <Empty>No tasks assigned in this workspace.</Empty>
@@ -150,7 +151,7 @@ export function UserReportView({
         <Section title="Leaves">
           {report.leaves.length ? (
             <div className="people-studio__table-wrap">
-              <table>
+              <ResponsiveTable>
                 <thead>
                   <tr>
                     {['Type', 'Dates', 'Days', 'Status'].map((label) => (
@@ -173,7 +174,7 @@ export function UserReportView({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ResponsiveTable>
             </div>
           ) : (
             <Empty>No leave requests for this period.</Empty>
@@ -225,7 +226,7 @@ export function UserReportView({
           </dl>
           {report.payroll.deductionLines.length || report.payroll.incentiveItems.length ? (
             <div className="people-studio__table-wrap">
-              <table>
+              <ResponsiveTable>
                 <thead>
                   <tr>
                     {['Line', 'Type', 'Amount'].map((label) => (
@@ -249,7 +250,7 @@ export function UserReportView({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ResponsiveTable>
             </div>
           ) : null}
         </Section>

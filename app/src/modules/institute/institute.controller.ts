@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { sendEmail } from '../../config/ses.js';
 import { hashPassword } from '../../utils/crypto.js';
 import {
   calculateDistanceMeters,
@@ -979,6 +980,44 @@ export async function recordStudentAttendance(req: Request, res: Response): Prom
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
+  }
+}
+
+export async function alertGuardians(req: Request, res: Response): Promise<void> {
+  try {
+    const ids = Array.isArray(req.body?.studentIds) ? req.body.studentIds.map((id: unknown) => String(id)) : [];
+    const message = String(req.body?.message || 'Please review this attendance notice.').slice(0, 2000);
+    const subject = String(req.body?.subject || 'Attendance notice').slice(0, 180);
+    if (ids.length === 0) {
+      res.status(400).json({ success: false, error: { code: 'VALIDATION', message: 'Choose at least one student.' } });
+      return;
+    }
+    const result = await req.tenantQuery!(
+      `SELECT id, student_id, first_name, last_name, guardian_name, guardian_email
+       FROM students
+       WHERE id::text = ANY($1::text[]) OR student_id = ANY($1::text[])`,
+      [ids]
+    );
+    const emailed: { id: string; name: string }[] = [];
+    const hrNotices: { id: string; name: string; guardianName: string }[] = [];
+    for (const row of result.rows) {
+      const name = `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Student';
+      const email = String(row.guardian_email || '').trim();
+      if (email) {
+        const safe = message.replace(/[&<>]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[char] || char));
+        await sendEmail({ to: email, subject, html: `<p>${safe}</p>`, text: message });
+        emailed.push({ id: String(row.id), name });
+      } else {
+        hrNotices.push({
+          id: String(row.id),
+          name,
+          guardianName: String(row.guardian_name || 'Guardian'),
+        });
+      }
+    }
+    res.json({ success: true, data: { emailed, hrNotices } });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }

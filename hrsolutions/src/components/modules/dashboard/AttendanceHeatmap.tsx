@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { ChevronDown, Check } from 'lucide-react';
 import { useDashboardContext } from './DashboardDataContext';
 import { DashPanel } from './DashPanel';
+import { localDateKey } from '@/utils/dashboardPeople';
 
 type TimeRangeOption = 'this_month' | 'last_month' | 'this_week' | 'this_quarter';
 
@@ -15,6 +17,7 @@ const timeRangeLabels: Record<TimeRangeOption, string> = {
 };
 
 export const AttendanceHeatmap: React.FC<{ className?: string }> = ({ className = '' }) => {
+  const router = useRouter();
   const [timeRange, setTimeRange] = useState<TimeRangeOption>('this_month');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -39,7 +42,7 @@ export const AttendanceHeatmap: React.FC<{ className?: string }> = ({ className 
   }, [dropdownOpen]);
 
   // Filter attendance records by selected time range and compute working days
-  const { filteredAttendance, weekdayOccurrences, totalWorkingDays } = useMemo(() => {
+  const { filteredAttendance, totalWorkingDays, periodStart, periodEnd } = useMemo(() => {
     const now = new Date();
     const currentY = now.getFullYear();
     const currentM = now.getMonth();
@@ -52,7 +55,7 @@ export const AttendanceHeatmap: React.FC<{ className?: string }> = ({ className 
       while (cur <= end) {
         const day = cur.getDay();
         if (day >= 1 && day <= 5) {
-          dates.push(cur.toISOString().split('T')[0]);
+          dates.push(localDateKey(cur));
         }
         cur.setDate(cur.getDate() + 1);
       }
@@ -86,8 +89,8 @@ export const AttendanceHeatmap: React.FC<{ className?: string }> = ({ className 
     }
 
     const workingDayStrs = getWorkingDaysBetween(startDate, endDate);
-    const startStr = startDate.toISOString().split('T')[0];
-    const endStr = endDate.toISOString().split('T')[0];
+    const startStr = localDateKey(startDate);
+    const endStr = localDateKey(endDate);
 
     const records = attendance.filter((a) => a.date && a.date >= startStr && a.date <= endStr);
 
@@ -101,6 +104,8 @@ export const AttendanceHeatmap: React.FC<{ className?: string }> = ({ className 
 
     return {
       filteredAttendance: records,
+      periodStart: startDate,
+      periodEnd: endDate,
       weekdayOccurrences: counts,
       totalWorkingDays: Math.max(1, workingDayStrs.length),
     };
@@ -128,97 +133,87 @@ export const AttendanceHeatmap: React.FC<{ className?: string }> = ({ className 
     return Math.min(100, Math.round((presentInstanceSet.size / totalExpectedAttendance) * 100));
   }, [employees, filteredAttendance, totalWorkingDays]);
 
-  // Group departments dynamically from live employee records
-  const departmentRows = useMemo(() => {
-    const deptEmployeesMap: Record<string, typeof employees> = {};
-    employees.forEach((e) => {
-      const d = e.department || 'Operations';
-      if (!deptEmployeesMap[d]) deptEmployeesMap[d] = [];
-      deptEmployeesMap[d].push(e);
+  const weekRows = useMemo(() => {
+    const now = new Date();
+    const monthStart = periodStart;
+    const monthEnd = periodEnd;
+    const todayKey = localDateKey(now);
+    const total = Math.max(employees.length, 1);
+
+    const presentByDate = new Map<string, Set<string>>();
+    filteredAttendance.forEach((record) => {
+      const status = String(record.status || '').toLowerCase();
+      const present = status === 'present' || status === 'late' || status.includes('home') || status === 'wfh';
+      if (!present || !record.date) return;
+      const key = record.employeeId || record.employeeName?.toLowerCase() || 'emp';
+      const set = presentByDate.get(record.date) || new Set<string>();
+      set.add(key);
+      presentByDate.set(record.date, set);
     });
 
-    const depts = Object.keys(deptEmployeesMap);
-    if (depts.length === 0) {
-      return [];
-    }
+    const cursor = new Date(monthStart);
+    const mondayOffset = (cursor.getDay() + 6) % 7;
+    cursor.setDate(cursor.getDate() - mondayOffset);
 
-    return depts.slice(0, 5).map((deptName) => {
-      const emps = deptEmployeesMap[deptName];
-      const totalInDept = emps.length;
-
-      // Build employee identifier set for fast lookup
-      const empIdentifierSet = new Set<string>();
-      emps.forEach((e) => {
-        if (e.id) empIdentifierSet.add(e.id);
-        if (e.employeeId) empIdentifierSet.add(e.employeeId);
-        if (e.name) empIdentifierSet.add(e.name.toLowerCase());
-        if (e.fullName) empIdentifierSet.add(e.fullName.toLowerCase());
-        if (e.email) empIdentifierSet.add(e.email.toLowerCase());
-      });
-
-      // Map weekday (1=Mon..5=Fri) -> Set of unique `empKey_date`
-      const weekdayPunchesMap: Record<number, Set<string>> = {
-        1: new Set(),
-        2: new Set(),
-        3: new Set(),
-        4: new Set(),
-        5: new Set(),
-      };
-
-      filteredAttendance.forEach((att) => {
-        const isMatch =
-          (att.employeeId && empIdentifierSet.has(att.employeeId)) ||
-          (att.employeeName && empIdentifierSet.has(att.employeeName.toLowerCase()));
-
-        if (isMatch && att.date) {
-          const s = String(att.status || '').toLowerCase();
-          const isPresent = s === 'present' || s === 'late' || s.includes('home') || s === 'wfh';
-          if (isPresent) {
-            const dayOfWeek = new Date(att.date + 'T00:00:00').getDay();
-            if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-              const empKey = att.employeeId || att.employeeName?.toLowerCase() || 'emp';
-              weekdayPunchesMap[dayOfWeek].add(`${empKey}_${att.date}`);
-            }
-          }
+    const rows: Array<{ label: string; cells: Array<{ key: string; label: string; tone: 'high' | 'mid' | 'empty' }> }> = [];
+    while (cursor <= monthEnd) {
+      const weekStart = new Date(cursor);
+      const cells = [];
+      for (let day = 0; day < 5; day += 1) {
+        const date = new Date(weekStart);
+        date.setDate(weekStart.getDate() + day);
+        const key = localDateKey(date);
+        const inMonth = date >= periodStart;
+        const future = key > todayKey;
+        if (!inMonth || future || date > monthEnd) {
+          cells.push({ key, label: '—', tone: 'empty' as const });
+          continue;
         }
+        const count = presentByDate.get(key)?.size || 0;
+        if (employees.length === 0 || count === 0) {
+          cells.push({ key, label: '—', tone: 'empty' as const });
+          continue;
+        }
+        const rate = Math.min(100, Math.round((count / total) * 1000) / 10);
+        cells.push({
+          key,
+          label: `${rate}%`,
+          tone: rate >= 75 ? 'high' as const : 'mid' as const,
+        });
+      }
+      const labelDate = cells.find((cell) => cell.label !== '—');
+      const labelSource = labelDate ? new Date(`${labelDate.key}T00:00:00`) : weekStart;
+      rows.push({
+        label: labelSource.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+        cells,
       });
+      cursor.setDate(cursor.getDate() + 7);
+    }
+    return rows;
+  }, [employees.length, filteredAttendance, periodStart, periodEnd]);
 
-      const getRate = (dayNum: number) => {
-        if (totalInDept === 0) return 0;
-        const occurrences = Math.max(1, weekdayOccurrences[dayNum] || 0);
-        const expectedForWeekday = totalInDept * occurrences;
-        if (expectedForWeekday === 0) return 0;
-
-        const actualPresent = weekdayPunchesMap[dayNum].size;
-        return Math.min(100, Math.round((actualPresent / expectedForWeekday) * 100));
-      };
-
-      return {
-        name: deptName,
-        mon: getRate(1),
-        tue: getRate(2),
-        wed: getRate(3),
-        thu: getRate(4),
-        fri: getRate(5),
-      };
+  const scheduledToday = useMemo(() => {
+    const todayKey = localDateKey(new Date());
+    const present = new Set<string>();
+    attendance.forEach((record) => {
+      if (record.date !== todayKey) return;
+      const status = String(record.status || '').toLowerCase();
+      const isPresent = status === 'present' || status === 'late' || status.includes('home') || status === 'wfh';
+      if (!isPresent) return;
+      present.add(record.employeeId || record.employeeName?.toLowerCase() || 'emp');
     });
-  }, [employees, filteredAttendance, weekdayOccurrences]);
-
-  const getCellBadgeClass = (score: number) => {
-    if (score > 85) return 'bg-[var(--primary-blue)] text-white';
-    if (score >= 61) return 'bg-[color-mix(in_srgb,var(--primary-blue)_42%,var(--bg-surface))] text-[var(--text-primary)]';
-    if (score >= 25) return 'bg-[color-mix(in_srgb,var(--primary-blue)_14%,var(--bg-surface))] text-[var(--text-secondary)]';
-    return 'bg-[var(--bg-surface-subtle)] text-[var(--text-muted)]';
-  };
+    return { present: present.size, total: employees.length };
+  }, [employees.length, attendance]);
 
   const rangeControl = (
     <div className="flex items-center gap-3">
-      <span className="dash-kpi">{attendanceRate}%</span>
+      <span className="sr-only">Period attendance: {attendanceRate}%</span>
       <div className="relative" ref={dropdownRef}>
         <button
           type="button"
           onClick={() => setDropdownOpen(!dropdownOpen)}
-          className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium rounded-[7px] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] cursor-pointer"
+          aria-expanded={dropdownOpen}
+          className="inline-flex h-10 items-center gap-1.5 px-2.5 text-xs font-medium rounded-[7px] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] cursor-pointer"
         >
           <span>{timeRangeLabels[timeRange]}</span>
           <ChevronDown className={`w-3.5 h-3.5 text-[var(--text-muted)] transition-transform ${dropdownOpen ? 'rotate-180 text-[var(--studio-navy)]' : ''}`} />
@@ -250,91 +245,48 @@ export const AttendanceHeatmap: React.FC<{ className?: string }> = ({ className 
     </div>
   );
 
+  const monthLabel = new Date().toLocaleDateString('en-GB', { month: 'long' });
+
   return (
-    <DashPanel title="Attendance overview" action={rangeControl} className={className} purpose="attendance-heatmap">
-
-      {/* Heatmap Department Matrix */}
-      <div className="mt-3 overflow-x-auto">
-        <div>
-          {/* Header */}
-          <div className="grid grid-cols-6 gap-2 text-center text-[11px] font-medium text-[var(--text-muted)] mb-2">
-            <span className="text-left pl-1">Department</span>
-            <span>Mon</span>
-            <span>Tue</span>
-            <span>Wed</span>
-            <span>Thu</span>
-            <span>Fri</span>
-          </div>
-
-          {departmentRows.length === 0 ? (
-            <div className="dash-empty-state">
-              <p>No department records found</p>
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {departmentRows.map((row) => (
-                <div key={row.name} className="grid grid-cols-6 gap-2 items-center text-xs">
-                  <span className="text-[var(--text-primary)] font-medium truncate pr-1" title={row.name}>
-                    {row.name}
-                  </span>
-                  <div
-                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.mon)}`}
-                    title={`Mon: ${row.mon}%`}
-                  >
-                    {row.mon}%
-                  </div>
-                  <div
-                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.tue)}`}
-                    title={`Tue: ${row.tue}%`}
-                  >
-                    {row.tue}%
-                  </div>
-                  <div
-                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.wed)}`}
-                    title={`Wed: ${row.wed}%`}
-                  >
-                    {row.wed}%
-                  </div>
-                  <div
-                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.thu)}`}
-                    title={`Thu: ${row.thu}%`}
-                  >
-                    {row.thu}%
-                  </div>
-                  <div
-                    className={`h-8 rounded-md flex items-center justify-center text-[11px] font-medium ${getCellBadgeClass(row.fri)}`}
-                    title={`Fri: ${row.fri}%`}
-                  >
-                    {row.fri}%
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+    <DashPanel
+      title="Attendance heatmap"
+      action={
+        <button type="button" className="dash-quiet-link" onClick={() => router.push('/attendance')}>
+          Attendance ›
+        </button>
+      }
+      className={className}
+      purpose="attendance-heatmap"
+    >
+      <div className="heat-meta">
+        <span>{timeRange === 'last_month' ? periodStart.toLocaleDateString('en-GB', { month: 'long' }) : monthLabel}, Daily attendance (%)</span>
+        <span className="heat-today">
+          {scheduledToday.present} / {scheduledToday.total} in today
+        </span>
       </div>
-
-      <div className="mt-3 pt-2.5 border-t border-[var(--border-color)] flex flex-wrap items-center justify-between gap-2 text-[10px] text-[var(--text-muted)]">
-        <span className="font-medium text-[var(--text-secondary)]">Density</span>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5">
-            <span className="w-4 h-2.5 rounded-sm bg-[var(--bg-surface-subtle)] border border-[var(--border-color)]" />
-            &lt;25%
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-4 h-2.5 rounded-sm bg-[color-mix(in_srgb,var(--primary-blue)_14%,var(--bg-surface))]" />
-            25%–60%
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-4 h-2.5 rounded-sm bg-[color-mix(in_srgb,var(--primary-blue)_42%,var(--bg-surface))]" />
-            61%–85%
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-4 h-2.5 rounded-sm bg-[var(--primary-blue)]" />
-            &gt;85%
-          </span>
-        </div>
+      <div className="heat-grid" aria-hidden>
+        <span />
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((day) => (
+          <span key={day} className="heat-day">{day}</span>
+        ))}
       </div>
+      {weekRows.map((row) => (
+        <div key={row.label + row.cells[0]?.key} className="heat-grid">
+          <span className="heat-label">{row.label}</span>
+          {row.cells.map((cell, index) => (
+            <span key={cell.key + index} className={`heat-cell heat-cell--${cell.tone}`} title={`${cell.key}: ${cell.label === '-' ? 'No data' : cell.label + ' attendance'}`}>
+              {cell.label}
+            </span>
+          ))}
+        </div>
+      ))}
+      <div className="heat-legend">
+        <span>Attendance</span>
+        <span><i className="heat-cell--mid" />0–74%</span>
+        <span><i className="heat-cell--high" />75–100%</span>
+        <span><i className="heat-cell--empty" />No data</span>
+      </div>
+      <div className="heat-footer"><span>Checked in ÷ people. Weekdays only.</span>{rangeControl}</div>
     </DashPanel>
   );
 };

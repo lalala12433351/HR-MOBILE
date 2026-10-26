@@ -1,17 +1,19 @@
 'use client';
+import { ResponsiveTable } from '@/components/common/ResponsiveTable';
 
 import React, { useState, useMemo } from 'react';
 import { Search } from 'lucide-react';
+import Link from 'next/link';
 import { useDashboardContext } from './DashboardDataContext';
 import { AttendanceRecord } from '@/types';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { DashPanel } from './DashPanel';
-import { isLeaveActiveOn, localDateKey } from '@/utils/dashboardPeople';
+import { approvedAbsenceOnDay, localDateKey } from '@/utils/dashboardPeople';
 
 export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ className = '' }) => {
   const dashboardState = useDashboardContext();
   const [currentPage, setCurrentPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'On-Time' | 'Late' | 'On-Leave' | 'Absent'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'On-Time' | 'Late' | 'Remote' | 'On-Leave' | 'Absent'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const pageSize = 5;
 
@@ -37,24 +39,15 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
       }
     });
 
-    const activeLeavesSet = new Set<string>();
-    leaves.forEach((l) => {
-      if (isLeaveActiveOn(l, todayStr) && l.employeeId) {
-        activeLeavesSet.add(l.employeeId);
-      }
-    });
-
     return employees.map((emp) => {
       const att = attendanceMap.get(emp.id) || attendanceMap.get(emp.employeeId);
-      const onLeave = activeLeavesSet.has(emp.id) || activeLeavesSet.has(emp.employeeId);
+      const onLeave = Boolean(approvedAbsenceOnDay(leaves, emp, todayStr));
 
-      let status: 'On-Time' | 'Late' | 'On-Leave' | 'Absent' = 'Absent';
+      let status: 'On-Time' | 'Late' | 'Remote' | 'On-Leave' | 'Absent' = 'Absent';
       let checkIn = '—';
       let checkOut = '—';
 
-      if (onLeave) {
-        status = 'On-Leave';
-      } else if (att) {
+      if (att?.checkIn) {
         const formatTime = (tStr?: string) => {
           if (!tStr || tStr === '—' || !tStr.trim()) return '—';
           const clean = tStr.replace(/\s*\(GMT[^)]*\)/gi, '').trim();
@@ -70,10 +63,12 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
 
         checkIn = formatTime(att.checkIn);
         checkOut = att.checkOut ? formatTime(att.checkOut) : '—';
-
-        const rawIn = att.checkIn ? att.checkIn.slice(0, 5) : '09:00';
-        const isLate = att.status === 'Late' || rawIn > '09:15';
-        status = isLate ? 'Late' : 'On-Time';
+        const rawStatus = String(att.status || '').toLowerCase();
+        if (rawStatus === 'late') status = 'Late';
+        else if (rawStatus.includes('home') || rawStatus === 'wfh' || rawStatus === 'remote') status = 'Remote';
+        else status = 'On-Time';
+      } else if (onLeave) {
+        status = 'On-Leave';
       }
 
       const nameParts = (emp.name || emp.fullName || 'User').split(' ');
@@ -102,10 +97,11 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
   const summaryCounts = useMemo(() => {
     const onTime = allRows.filter((r) => r.status === 'On-Time').length;
     const late = allRows.filter((r) => r.status === 'Late').length;
+    const remote = allRows.filter((r) => r.status === 'Remote').length;
     const onLeave = allRows.filter((r) => r.status === 'On-Leave').length;
     const absent = allRows.filter((r) => r.status === 'Absent').length;
 
-    return { onTime, late, onLeave, absent };
+    return { onTime, late, remote, onLeave, absent };
   }, [allRows]);
 
   const filteredRows = useMemo(() => {
@@ -141,12 +137,16 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
       purpose="employee-attendance-table"
       padded={false}
       action={
-        <span className="text-[11px] font-semibold text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] px-2.5 py-1 rounded-[7px]">
-          {formattedDate}
-        </span>
+        <Link href="/attendance" className="dash-quiet-link">Team attendance ↗</Link>
       }
     >
-      <div className="px-4 pb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div className="dash-attendance-summary">
+        <span>{summaryCounts.onTime + summaryCounts.late + summaryCounts.remote} checked in, {summaryCounts.absent} not in yet, {summaryCounts.onLeave} on leave</span>
+        <span className="dash-attendance-live">Live attendance</span>
+      </div>
+      <details className="dash-attendance-tools">
+        <summary className="dash-quiet-link cursor-pointer">Search and filter team</summary>
+      <div className="pt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
           {/* Summary Count Pills */}
           <div className="flex flex-wrap items-center gap-2">
@@ -159,7 +159,19 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
               className="dash-chip"
               data-active={statusFilter === 'On-Time' ? 'true' : 'false'}
             >
-              {summaryCounts.onTime} On-Time
+              {summaryCounts.onTime} In office
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStatusFilter(statusFilter === 'Remote' ? 'all' : 'Remote');
+                setCurrentPage(1);
+              }}
+              className="dash-chip"
+              data-active={statusFilter === 'Remote' ? 'true' : 'false'}
+            >
+              {summaryCounts.remote} Remote
             </button>
 
             <button
@@ -183,7 +195,7 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
               className="dash-chip"
               data-active={statusFilter === 'On-Leave' ? 'true' : 'false'}
             >
-              {summaryCounts.onLeave} On Leave
+              {summaryCounts.onLeave} On leave
             </button>
 
             <button
@@ -195,7 +207,7 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
               className="dash-chip"
               data-active={statusFilter === 'Absent' ? 'true' : 'false'}
             >
-              {summaryCounts.absent} Absent
+              {summaryCounts.absent} Not in yet
             </button>
 
             {statusFilter !== 'all' && (
@@ -223,6 +235,7 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
+              aria-label="Search team"
               placeholder="Search team"
               className="pl-8 pr-3 h-9 text-xs rounded-[7px] border border-[var(--border-color)] bg-[var(--bg-surface)] focus:outline-none focus:ring-1 focus:ring-[var(--primary-blue)] focus:border-[var(--primary-blue)] w-40 sm:w-56"
             />
@@ -230,23 +243,23 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
         </div>
       </div>
 
+      </details>
+
       {/* Data Table */}
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse text-xs">
+        <ResponsiveTable className="dash-attendance-table w-full text-left border-collapse text-xs">
           <thead>
             <tr className="border-b border-[var(--border-color)] bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-bold text-[11px]">
-              <th className="py-2.5 px-4" scope="col">Name</th>
-              <th className="py-2.5 px-4" scope="col">Job Title</th>
-              <th className="py-2.5 px-4" scope="col">Date</th>
-              <th className="py-2.5 px-4" scope="col">Check In</th>
-              <th className="py-2.5 px-4" scope="col">Check Out</th>
+              <th className="py-2.5 px-4" scope="col">Person</th>
+              <th className="py-2.5 px-4" scope="col">Department</th>
               <th className="py-2.5 px-4" scope="col">Status</th>
+              <th className="py-2.5 px-4" scope="col">Clock in</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border-color)]">
             {paginatedRows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-[var(--text-muted)] text-xs">
+                <td colSpan={4} className="py-8 text-center text-[var(--text-muted)] text-xs">
                   No employee attendance records found
                 </td>
               </tr>
@@ -266,52 +279,33 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
                       </div>
                     </div>
                   </td>
+                  <td className="py-2.5 px-4 text-[var(--text-secondary)] font-medium">{row.department}</td>
                   <td className="py-2.5 px-4">
-                    <span className="font-semibold text-[var(--text-primary)] block">{row.designation}</span>
-                    <span className="text-[11px] text-[var(--text-muted)]">{row.department}</span>
+                    {row.status === 'On-Time' && <span className="dash-pill dash-pill--office">In office</span>}
+                    {row.status === 'Remote' && <span className="dash-pill dash-pill--remote">Remote</span>}
+                    {row.status === 'Late' && <span className="dash-pill dash-pill--away">Late</span>}
+                    {row.status === 'On-Leave' && <span className="dash-pill dash-pill--leave">On leave</span>}
+                    {row.status === 'Absent' && <span className="dash-pill dash-pill--away">Not in yet</span>}
                   </td>
-                  <td className="py-2.5 px-4 text-[var(--text-secondary)] font-medium">{row.date}</td>
-                  <td className={`py-2.5 px-4 tabular-nums ${row.checkInColor || 'text-[var(--text-primary)]'} ${row.checkIn === '—' ? 'text-[var(--text-muted)]' : 'font-semibold'}`}>
+                  <td
+                    className={`py-2.5 px-4 tabular-nums ${row.checkIn === '—' ? 'text-[var(--text-muted)]' : 'font-semibold text-[var(--text-primary)]'}`}
+                    title={row.checkOut !== '—' ? `Clock out ${row.checkOut}` : row.email}
+                  >
                     {row.checkIn}
-                  </td>
-                  <td className={`py-2.5 px-4 tabular-nums text-[var(--text-primary)] ${row.checkOut === '—' ? 'text-[var(--text-muted)]' : 'font-semibold'}`}>
-                    {row.checkOut}
-                  </td>
-                  <td className="py-2.5 px-4">
-                    {row.status === 'On-Time' && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold dash-status-sage">
-                        On time
-                      </span>
-                    )}
-                    {row.status === 'Late' && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold dash-status-error">
-                        Late
-                      </span>
-                    )}
-                    {row.status === 'On-Leave' && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold dash-status-navy">
-                        On leave
-                      </span>
-                    )}
-                    {row.status === 'Absent' && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold dash-status-muted">
-                        Absent
-                      </span>
-                    )}
                   </td>
                 </tr>
               ))
             )}
           </tbody>
-        </table>
+        </ResponsiveTable>
       </div>
 
       {/* Pagination Footer */}
-      <div className="px-4 py-3 border-t border-[var(--border-color)] flex items-center justify-between text-xs text-[var(--text-muted)]">
+      <div className="pt-4 flex flex-wrap gap-3 items-center justify-between text-xs text-[var(--text-muted)]">
         <span>
-          Showing <strong className="text-[var(--text-primary)] font-semibold">{paginatedRows.length}</strong> of <strong className="text-[var(--text-primary)] font-semibold">{totalMembersCount}</strong> team members
+          Showing <strong className="text-[var(--text-primary)] font-semibold">{paginatedRows.length}</strong> of <strong className="text-[var(--text-primary)] font-semibold">{filteredRows.length}</strong> team members
         </span>
-        <div className="flex items-center space-x-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -321,7 +315,7 @@ export const EmployeeAttendanceTable: React.FC<{ className?: string }> = ({ clas
             Previous
           </button>
           {Array.from({ length: Math.min(totalPages, 5) }).map((_, i) => {
-            const pageNum = i + 1;
+            const pageNum = Math.min(Math.max(1, currentPage - 2), Math.max(1, totalPages - 4)) + i;
             return (
               <button
                 key={pageNum}

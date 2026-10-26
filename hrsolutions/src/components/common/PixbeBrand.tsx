@@ -10,6 +10,17 @@ export interface PixbeWordmarkProps {
   label?: string;
 }
 
+/** Pixel wordmark from the Pixbe design foundation: navy stem and two blocks. */
+export const PixbePixelMark: React.FC<{ className?: string }> = ({ className = '' }) => (
+  <span className={`pixbe-pixel ${className}`} aria-hidden>
+    <span className="pixbe-pixel__stem" />
+    <span className="pixbe-pixel__col">
+      <span className="pixbe-pixel__a" />
+      <span className="pixbe-pixel__b" />
+    </span>
+  </span>
+);
+
 /** A monochrome lockup: color is inherited so it works on both light and sapphire surfaces. */
 export const PixbeWordmark: React.FC<PixbeWordmarkProps> = ({
   className = '',
@@ -20,6 +31,11 @@ export const PixbeWordmark: React.FC<PixbeWordmarkProps> = ({
     <KiteLogoMark className={markClassName} />
     <span className="font-bold tracking-[-0.045em] leading-none">{label}</span>
   </span>
+);
+
+/** Exact 28px pixel mark and lowercase lockup used by the Figma onboarding screens. */
+export const PixbeDesignWordmark: React.FC<{ className?: string; markClassName?: string }> = ({ className = '' }) => (
+  <span className={`figma-wordmark ${className}`} aria-label="Pixbe"><PixbePixelMark/><span>pixbe</span></span>
 );
 
 function isCustomOrgLogo(src?: string | null): src is string {

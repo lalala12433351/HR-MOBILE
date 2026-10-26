@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import { useDashboardContext } from './DashboardDataContext';
+import { useOptionalDashboardContext } from './DashboardDataContext';
 import { isInstitutionMode } from '@/utils/organizationMode';
 
 interface SetupPromptModalProps {
@@ -13,7 +13,7 @@ interface SetupPromptModalProps {
 export const SetupPromptModal: React.FC<SetupPromptModalProps> = ({ forceType }) => {
   const router = useRouter();
   const { state } = useApp();
-  const dashboardState = useDashboardContext();
+  const dashboardState = useOptionalDashboardContext() || { employees: [], students: [] };
 
   const [isDismissed, setIsDismissed] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -109,7 +109,7 @@ export const SetupPromptModal: React.FC<SetupPromptModalProps> = ({ forceType })
   };
 
   return (
-    <div className="w-full bg-[var(--bg-surface)] border border-[#e2e8f0] rounded-xl px-4 py-3 sm:py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs">
+    <div className="w-full bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-[8px] px-4 py-3 sm:py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-none">
       <div className="flex items-center gap-3">
         <span className="text-sm font-medium text-[var(--text-primary)]">
           {messageText}
@@ -120,15 +120,16 @@ export const SetupPromptModal: React.FC<SetupPromptModalProps> = ({ forceType })
         <button
           type="button"
           onClick={() => router.push(setupRoute)}
-          className="h-8 px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center"
+          className="min-h-10 px-4 rounded-[6px] bg-[var(--studio-navy)] hover:bg-[var(--studio-navy-hover)] text-white text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center"
         >
-          Go to Setup
+          Continue setup
         </button>
         <button
           type="button"
           onClick={handleDismiss}
           className="h-8 px-2 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-base leading-none font-bold transition-colors cursor-pointer flex items-center justify-center"
           title="Dismiss"
+          aria-label="Dismiss setup reminder"
         >
           ×
         </button>

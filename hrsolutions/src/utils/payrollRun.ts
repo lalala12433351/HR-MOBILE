@@ -1,3 +1,4 @@
+import { applyHoursMethod, isAlternateOffDay, isScheduledWorkingDay, onOrAfterStart } from '@/utils/attendanceRules';
 import {
   AttendancePaySettings,
   AttendanceRecord,
@@ -14,6 +15,9 @@ import {
   SalaryType,
   TimesheetEntry,
 } from '@/types';
+import { paidHolidayDates, type HolidayLike } from '@/utils/holidays';
+import { leaveBelongsToEmployee } from '@/utils/mapLeaveRow';
+import { isWfhLeaveType } from '@/utils/dashboardPeople';
 import { isPaidLeaveType } from '@/utils/leaveRules';
 
 const round2 = (value: number) => Math.round((Number(value) || 0) * 100) / 100;
@@ -51,8 +55,20 @@ export type PayrollRunInput = {
   salaryComponents?: SalaryComponentDefinition[];
   incentives?: PayrollIncentive[];
   fullDayMinimumHours?: number;
+  companyCreatedAt?: string;
+  workingDays?: string[];
+  holidays?: HolidayLike[];
+  timeZone?: string;
   year: number;
   month: number;
+  periodSlice?: string;
+  attendanceSettings?: {
+    hoursCalculationMethod?: 'every_punch' | 'first_last' | 'strict_shift';
+    fullDayMinimumHours?: number;
+    startDate?: string;
+    enableAlternateSaturdays?: boolean;
+    alternateSaturdaysPolicy?: string;
+  };
 };
 
 const dateKey = (value: Date) => {
@@ -69,15 +85,39 @@ const parseDate = (value?: string) => {
   return Number.isNaN(dt.getTime()) ? null : dt;
 };
 
-export function getPayrollPeriod(year: number, month: number, settings?: PayrollSettings): PayrollPeriod {
+export function getPayrollPeriod(
+  year: number,
+  month: number,
+  settings?: PayrollSettings,
+  periodSlice?: string
+): PayrollPeriod {
   const lastDay = new Date(year, month, 0).getDate();
-  const startDay = Math.min(Math.max(settings?.payCycleStartDay || 1, 1), lastDay);
-  const endDay = Math.min(Math.max(settings?.payCycleEndDay || lastDay, startDay), lastDay);
-  const cutoff = Math.min(Math.max(settings?.attendanceCutoffDay || endDay, startDay), lastDay);
+  const frequency = String(settings?.defaultPayFrequency || 'Monthly').toLowerCase();
+  const today = new Date();
+  const inSelectedMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
+  let startDay = Math.min(Math.max(settings?.payCycleStartDay || 1, 1), lastDay);
+  let endDay = Math.min(Math.max(settings?.payCycleEndDay || lastDay, startDay), lastDay);
+  let labelSuffix = '';
+
+  if (frequency === 'bi-weekly' || frequency === 'biweekly' || frequency === 'semi-monthly') {
+    const secondHalf = periodSlice === 'second' || (periodSlice !== 'first' && inSelectedMonth && today.getDate() > 15);
+    startDay = secondHalf ? 16 : 1;
+    endDay = secondHalf ? lastDay : Math.min(15, lastDay);
+    labelSuffix = secondHalf ? ' · 16–end' : ' · 1–15';
+  } else if (frequency === 'weekly') {
+    const picked = Number(periodSlice);
+    const anchor = Number.isFinite(picked) && picked >= 1 ? Math.min(picked, lastDay) : inSelectedMonth ? today.getDate() : 1;
+    startDay = Math.floor((anchor - 1) / 7) * 7 + 1;
+    endDay = Math.min(startDay + 6, lastDay);
+    labelSuffix = ` · ${startDay}–${endDay}`;
+  }
+
+  const cutoff = Math.min(Math.max(settings?.attendanceCutoffDay || endDay, startDay), endDay);
+  const disbursement = Math.min(Math.max(settings?.disbursementDay || startDay, startDay), endDay);
   const startDate = new Date(year, month - 1, startDay);
   const endDate = new Date(year, month - 1, endDay);
   const attendanceEnd = new Date(year, month - 1, cutoff);
-  const monthYear = startDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  const monthYear = `${startDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}${labelSuffix}`;
   return {
     year,
     month,
@@ -85,14 +125,87 @@ export function getPayrollPeriod(year: number, month: number, settings?: Payroll
     start: dateKey(startDate),
     end: dateKey(endDate),
     attendanceEnd: dateKey(attendanceEnd),
-    disbursementDay: settings?.disbursementDay || 1,
+    disbursementDay: disbursement,
     attendanceCutoffDay: cutoff,
   };
 }
 
 function inRange(value: string | undefined, start: string, end: string) {
   const current = String(value || '').slice(0, 10);
-  return Boolean(current && current >= start && current <= end);
+  return Boolean(current && start <= end && current >= start && current <= end);
+}
+
+const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+export function calendarDateInTimeZone(value?: string | null, timeZone?: string): string | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) {
+    const day = raw.slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+  }
+  const zone = timeZone && timeZone.trim() ? timeZone.trim() : 'UTC';
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(dt);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    if (!year || !month || !day) return dt.toISOString().slice(0, 10);
+    return `${year}-${month}-${day}`;
+  } catch {
+    return dt.toISOString().slice(0, 10);
+  }
+}
+
+function dateOnly(value?: string | null): string | null {
+  const raw = String(value || '').trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+}
+
+function laterDate(current: string, candidate?: string | null): string {
+  const next = dateOnly(candidate);
+  if (!next) return current;
+  return next > current ? next : current;
+}
+
+function earlierDate(current: string, candidate?: string | null): string {
+  const next = dateOnly(candidate);
+  if (!next) return current;
+  return next < current ? next : current;
+}
+
+function workingDayNames(days?: string[]): Set<string> {
+  const source = days && days.length > 0 ? days : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  return new Set(source.map((day) => day.trim().toLowerCase()).filter(Boolean));
+}
+
+function isWorkingDay(day: string, names: Set<string>): boolean {
+  const dt = parseDate(day);
+  if (!dt) return false;
+  return names.has(WEEKDAY_NAMES[dt.getDay()]);
+}
+
+function countWorkingDays(
+  start: string,
+  end: string,
+  names: Set<string>,
+  settings?: PayrollRunInput['attendanceSettings'],
+  workingDays?: string[]
+): number {
+  if (start > end) return 0;
+  return eachDateInclusive(start, end).filter(
+    (day) =>
+      onOrAfterStart(day, settings?.startDate) &&
+      (workingDays
+        ? isScheduledWorkingDay(day, workingDays, settings)
+        : isWorkingDay(day, names) && !isAlternateOffDay(day, settings))
+  ).length;
 }
 
 function eachDateInclusive(start: string, end: string): string[] {
@@ -146,25 +259,47 @@ function computeLine(employee: Employee, period: PayrollPeriod, input: PayrollRu
   const settings = input.settings;
   const group = resolvePayrollGroup(employee, groups);
   const salaryType: SalaryType = employee.salaryType || group?.salaryType || settings?.defaultSalaryType || 'monthly';
-  const requiredDays = Number(group?.workingDaysPerMonth) || 22;
+  const configuredRequired = Number(group?.workingDaysPerMonth) || 22;
+  const dayNames = workingDayNames(input.workingDays);
+  const companyStart = calendarDateInTimeZone(input.companyCreatedAt, input.timeZone);
+  const serviceStart = laterDate(
+    laterDate(period.start, companyStart),
+    employee.joiningDate || employee.joinDate
+  );
+  const serviceEnd = earlierDate(period.attendanceEnd, employee.exitDate);
+  const coversFullWindow = serviceStart <= period.start && serviceEnd >= period.attendanceEnd;
+  const monthWorkingDays = countWorkingDays(period.start, period.attendanceEnd, dayNames, input.attendanceSettings, input.workingDays);
+  const serviceWorkingDays = countWorkingDays(serviceStart, serviceEnd, dayNames, input.attendanceSettings, input.workingDays);
+  const requiredDays = coversFullWindow ? configuredRequired : serviceWorkingDays;
+  const serviceFraction =
+    coversFullWindow || monthWorkingDays <= 0 ? 1 : serviceWorkingDays / monthWorkingDays;
   const hoursPerDay = Number(group?.standardHoursPerDay) || Number(input.fullDayMinimumHours) || 8;
   const requiredHours = round2(requiredDays * hoursPerDay);
   const allowNegative = Boolean(settings?.allowNegativeNetPay);
 
   const attendancePay = resolveAttendancePay(settings);
   const useAttendance = settings?.autoCalculateFromAttendance !== false;
+  const countsTowardQuota = (day: string) =>
+    onOrAfterStart(day, input.attendanceSettings?.startDate) &&
+    !isAlternateOffDay(day, input.attendanceSettings) &&
+    (coversFullWindow || isWorkingDay(day, dayNames));
 
-  const attendance = (input.attendance || []).filter(
-    (row) => row.employeeId === employee.id && inRange(row.date, period.start, period.attendanceEnd)
+  const attendance = applyHoursMethod(input.attendance || [], input.attendanceSettings).filter(
+    (row) =>
+      (row.employeeId === employee.id ||
+        (!!employee.employeeId && row.employeeId === employee.employeeId)) &&
+      inRange(row.date, serviceStart, serviceEnd) &&
+      onOrAfterStart(row.date, input.attendanceSettings?.startDate)
   );
   const leaves = (input.leaves || []).filter(
     (row) =>
-      row.employeeId === employee.id &&
+      leaveBelongsToEmployee(row, employee) &&
       row.status === 'Approved' &&
-      overlapDays(row.startDate, row.endDate, period.start, period.attendanceEnd).length > 0
+      overlapDays(row.startDate, row.endDate, serviceStart, serviceEnd).length > 0
   );
 
   const creditedDates = new Set<string>();
+  const halfDates = new Set<string>();
   const lopDates = new Set<string>();
   let hoursWorked = 0;
   let creditDays = 0;
@@ -173,6 +308,7 @@ function computeLine(employee: Employee, period: PayrollPeriod, input: PayrollRu
     const day = String(row.date || '').slice(0, 10);
     if (!day) continue;
     hoursWorked += Number(row.workingHours) || 0;
+    if (!countsTowardQuota(day)) continue;
     if (row.status === 'On Leave') continue;
     if (row.status === 'Absent') {
       if (useAttendance && attendancePay.lopFromAbsent) lopDates.add(day);
@@ -181,6 +317,7 @@ function computeLine(employee: Employee, period: PayrollPeriod, input: PayrollRu
     if (row.status === 'Half Day') {
       creditDays += 0.5;
       creditedDates.add(day);
+      halfDates.add(day);
       if (useAttendance && attendancePay.lopFromHalfDay) lopDates.add(`${day}:half`);
       continue;
     }
@@ -190,15 +327,39 @@ function computeLine(employee: Employee, period: PayrollPeriod, input: PayrollRu
 
   if (settings?.autoCalculateFromTimesheets !== false && salaryType === 'hourly') {
     const tsHours = (input.timesheets || [])
-      .filter((row) => row.employeeId === employee.id && inRange(row.date, period.start, period.attendanceEnd))
+      .filter((row) => row.employeeId === employee.id && inRange(row.date, serviceStart, serviceEnd))
       .reduce((sum, row) => sum + (Number(row.hours) || 0), 0);
     if (tsHours > hoursWorked) hoursWorked = tsHours;
   }
 
+  let holidayCreditDays = 0;
+  for (const holiday of paidHolidayDates({
+    holidays: input.holidays,
+    start: serviceStart,
+    end: serviceEnd,
+    workingDays: input.workingDays,
+  })) {
+    const day = holiday.date;
+    if (halfDates.has(day)) {
+      creditDays += 0.5;
+      holidayCreditDays += 0.5;
+      halfDates.delete(day);
+      lopDates.delete(`${day}:half`);
+      continue;
+    }
+    if (creditedDates.has(day)) continue;
+    lopDates.delete(day);
+    creditDays += 1;
+    holidayCreditDays += 1;
+    creditedDates.add(day);
+  }
+
   for (const leave of leaves) {
-    const days = overlapDays(leave.startDate, leave.endDate, period.start, period.attendanceEnd);
+    if (isWfhLeaveType(leave.leaveType)) continue;
+    const days = overlapDays(leave.startDate, leave.endDate, serviceStart, serviceEnd);
     const paid = isPaidLeaveType(leave.leaveType, leave.isPaid);
     for (const day of days) {
+      if (!countsTowardQuota(day)) continue;
       if (creditedDates.has(day) || lopDates.has(day)) continue;
       if (paid) {
         creditDays += 1;
@@ -242,7 +403,7 @@ function computeLine(employee: Employee, period: PayrollPeriod, input: PayrollRu
     Number(group?.overtimeMultiplier) || settings?.salaryComponentRules?.overtimeRateMultiplier || 1.5;
   const overtimeHours = salaryType === 'hourly' ? Math.max(0, round2(hoursWorked - requiredHours)) : 0;
   const regularHours = salaryType === 'hourly' ? Math.min(hoursWorked, requiredHours) : 0;
-  const overtimePay = salaryType === 'hourly' ? round2(hourlyRate * overtimeMultiplier * overtimeHours) : 0;
+  let overtimePay = salaryType === 'hourly' ? round2(hourlyRate * overtimeMultiplier * overtimeHours) : 0;
 
   let earningsBasic = basic;
   let allowances = round2(hra + special + conveyance + medical + other + customAllowanceSum + groupAllowanceSum);
@@ -251,9 +412,10 @@ function computeLine(employee: Employee, period: PayrollPeriod, input: PayrollRu
     allowances = round2(groupAllowanceSum + customAllowanceSum);
   }
 
-  let grossBeforeIncentives = round2(earningsBasic + allowances + overtimePay);
+  const fullGrossBeforeIncentives = round2(earningsBasic + allowances + overtimePay);
+  let grossBeforeIncentives = fullGrossBeforeIncentives;
   const calendarDayCount = Math.max(1, eachDateInclusive(period.start, period.end).length);
-  const expectedHoursFromCredit = round2(creditDays * hoursPerDay);
+  const expectedHoursFromCredit = round2(Math.max(0, creditDays - holidayCreditDays) * hoursPerDay);
   const missingHours =
     salaryType === 'hourly' ? 0 : Math.max(0, round2(expectedHoursFromCredit - hoursWorked));
 
@@ -270,11 +432,18 @@ function computeLine(employee: Employee, period: PayrollPeriod, input: PayrollRu
     }
   }
 
-  let dayDivisor = requiredDays;
+  let dayDivisor = configuredRequired;
   if (attendancePay.lopDayRate === 'gross_per_calendar_day') dayDivisor = calendarDayCount;
   const dayBase =
-    attendancePay.lopDayRate === 'basic_per_working_day' ? earningsBasic : grossBeforeIncentives;
+    attendancePay.lopDayRate === 'basic_per_working_day' ? earningsBasic : fullGrossBeforeIncentives;
   const dailyRate = dayDivisor > 0 ? dayBase / dayDivisor : 0;
+
+  if (salaryType !== 'hourly' && serviceFraction < 1) {
+    earningsBasic = round2(earningsBasic * serviceFraction);
+    allowances = round2(allowances * serviceFraction);
+    overtimePay = round2(overtimePay * serviceFraction);
+    grossBeforeIncentives = round2(earningsBasic + allowances + overtimePay);
+  }
 
   let skipLopDeduction = false;
   let lopAmount = round2(dailyRate * lopDays);
@@ -416,7 +585,7 @@ export function buildPayrollRun(input: PayrollRunInput): {
   lines: PayrollRecord[];
   totals: PayrollCompanyTotals;
 } {
-  const period = getPayrollPeriod(input.year, input.month, input.settings);
+  const period = getPayrollPeriod(input.year, input.month, input.settings, input.periodSlice);
   const lines = (input.employees || [])
     .filter(isActiveEmployee)
     .map((employee) => computeLine(employee, period, input))

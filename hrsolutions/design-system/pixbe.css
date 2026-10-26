@@ -1,0 +1,306 @@
+/**
+ * Pixbe design system, saved from Figma.
+ * File: HR Solutions App
+ * https://www.figma.com/design/3WBnpJRZWuIwgDDSOWLQ5A/HR-Solutions-App
+ * Section: 01 · Design system (foundations, actions, forms).
+ *
+ * Not imported by the app. Wrap a surface in class "pixbe" to use it.
+ */
+
+.pixbe {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --studio-ink: #172234;
+  --studio-navy: #17324e;
+  --studio-navy-hover: #285275;
+  --primary-blue: #2d628e;
+  --primary-blue-soft: #f8fbfe;
+  --studio-focus: #d8e8f2;
+  --text-secondary: #5e6c7b;
+  --text-muted: #687789;
+  --bg-app: #f3f5f7;
+  --bg-surface: #ffffff;
+  --bg-surface-subtle: #e8eef2;
+  --border-color: #dde4e9;
+  --studio-sage: #53886b;
+  --studio-sage-surface: #eaf1ee;
+  --prio-high: #8a5a12;
+  --prio-high-surface: #f8f1e4;
+  --studio-error: #8b3133;
+  --studio-error-surface: #faeeee;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-inline: 8px;
+  --space-related: 12px;
+  --space-field: 16px;
+  --space-card: 24px;
+  --space-section: 32px;
+  --space-page: 48px;
+
+  --radius-badge: 4px;
+  --radius-control: 6px;
+  --radius-card: 10px;
+  --radius-panel: 12px;
+  --radius-avatar: 999px;
+
+  --control-height: 40px;
+  --control-height-compact: 32px;
+  --row-height: 56px;
+  --focus-ring: 0 0 0 3px var(--studio-focus);
+
+  --type-page-size: 28px;
+  --type-page-line: 36px;
+  --type-section-size: 20px;
+  --type-section-line: 28px;
+  --type-card-size: 16px;
+  --type-card-line: 24px;
+  --type-body-size: 14px;
+  --type-body-line: 22px;
+  --type-label-size: 13px;
+  --type-label-line: 20px;
+  --type-caption-size: 12px;
+  --type-caption-line: 18px;
+
+  color: var(--studio-ink);
+  background: var(--bg-app);
+  font-family: var(--font-sans);
+  font-size: var(--type-body-size);
+  line-height: 1.5;
+  font-feature-settings: "ss01" on;
+}
+
+.pixbe .type-page {
+  font-size: var(--type-page-size);
+  line-height: var(--type-page-line);
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+
+.pixbe .type-section {
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: 600;
+}
+
+.pixbe .type-card {
+  font-size: var(--type-card-size);
+  line-height: var(--type-card-line);
+  font-weight: 600;
+}
+
+.pixbe .type-body {
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+  font-weight: 400;
+}
+
+.pixbe .type-label {
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  font-weight: 500;
+}
+
+.pixbe .type-caption {
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-line);
+  font-weight: 400;
+}
+
+.pixbe .type-data {
+  font-variant-numeric: tabular-nums;
+}
+
+.pixbe .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--studio-ink);
+  font: 600 13px/1 var(--font-sans);
+  cursor: pointer;
+}
+
+.pixbe .button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.pixbe .button:disabled {
+  background: var(--bg-surface-subtle);
+  border-color: var(--bg-surface-subtle);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.pixbe .button-primary {
+  background: var(--studio-navy);
+  border-color: var(--primary-blue);
+  color: var(--bg-surface);
+}
+
+.pixbe .button-primary:hover:not(:disabled) {
+  background: var(--studio-navy-hover);
+  border-color: var(--studio-navy-hover);
+}
+
+.pixbe .button-secondary {
+  background: var(--bg-surface);
+  border-color: var(--border-color);
+  color: var(--studio-ink);
+}
+
+.pixbe .button-secondary:hover:not(:disabled) {
+  background: var(--bg-surface-subtle);
+}
+
+.pixbe .button-tertiary {
+  background: var(--bg-surface);
+  border-color: var(--bg-surface);
+  color: var(--primary-blue);
+}
+
+.pixbe .button-tertiary:hover:not(:disabled) {
+  background: var(--bg-surface-subtle);
+  border-color: var(--bg-surface-subtle);
+}
+
+.pixbe .button-destructive {
+  background: var(--studio-error);
+  border-color: var(--studio-error);
+  color: var(--bg-surface);
+}
+
+.pixbe .button-compact {
+  height: var(--control-height-compact);
+  padding: 0 var(--space-3);
+  border-color: var(--border-color);
+  background: var(--bg-surface);
+  font-size: 12px;
+}
+
+.pixbe .field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.pixbe .field-label {
+  color: var(--studio-ink);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.pixbe .field-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+  color: var(--studio-ink);
+  font: 400 13px/1 var(--font-sans);
+}
+
+.pixbe .field-control:focus {
+  outline: none;
+  border-color: var(--primary-blue);
+  box-shadow: var(--focus-ring);
+}
+
+.pixbe .field-control:disabled {
+  background: var(--bg-surface-subtle);
+  color: var(--text-muted);
+}
+
+.pixbe .field-help {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.pixbe .field-error .field-control {
+  border-color: var(--studio-error);
+}
+
+.pixbe .field-error .field-help {
+  color: var(--studio-error);
+}
+
+.pixbe .field-valid .field-help {
+  color: var(--studio-sage);
+}
+
+.pixbe .alert {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pixbe .alert-error {
+  background: var(--studio-error-surface);
+  color: var(--studio-error);
+}
+
+.pixbe .alert-success {
+  background: var(--studio-sage-surface);
+  color: var(--studio-sage);
+}
+
+.pixbe .choice-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+}
+
+.pixbe .choice-tile[aria-checked="true"] {
+  border-color: var(--primary-blue);
+  background: var(--primary-blue-soft);
+}
+
+.pixbe .segmented {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface-subtle);
+}
+
+.pixbe .segmented button {
+  height: var(--control-height-compact);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-badge);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 12px/1 var(--font-sans);
+}
+
+.pixbe .segmented button[aria-pressed="true"] {
+  border-color: var(--border-color);
+  background: var(--bg-surface);
+  color: var(--studio-ink);
+}

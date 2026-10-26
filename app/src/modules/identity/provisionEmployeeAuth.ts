@@ -129,15 +129,17 @@ export async function provisionEmployeeAuth(input: ProvisionEmployeeAuthInput): 
 
   if (tenantUuid) {
     const passwordHash = explicitPassword ? hashPassword(explicitPassword) : null;
+    // No password yet means the login stays off until the invite is accepted.
+    const accountIsLive = Boolean(explicitPassword);
     await pool.query(
       `INSERT INTO public.global_auth_mapping (cognito_sub, email, password_hash, tenant_id, role, is_active)
-       VALUES ($1, $2, $3, $4, $5, true)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (cognito_sub, tenant_id) DO UPDATE SET
          email = EXCLUDED.email,
          password_hash = COALESCE(EXCLUDED.password_hash, public.global_auth_mapping.password_hash),
          role = EXCLUDED.role,
-         is_active = true`,
-      [cognitoSub, cleanEmail, passwordHash, tenantUuid, role]
+         is_active = CASE WHEN $6 THEN true ELSE public.global_auth_mapping.is_active END`,
+      [cognitoSub, cleanEmail, passwordHash, tenantUuid, role, accountIsLive]
     );
   } else {
     log.warn(`No tenant UUID resolved while provisioning ${cleanEmail}; Cognito user created without global_auth_mapping`);

@@ -133,7 +133,7 @@ export function NewHrRequestDialog({ open, onClose, onCreated }: NewHrRequestDia
 
         <div>
           <label htmlFor="hr-body" className={labelClass}>
-            Details
+            What do you need?
           </label>
           <textarea
             id="hr-body"
@@ -152,8 +152,7 @@ export function NewHrRequestDialog({ open, onClose, onCreated }: NewHrRequestDia
             ref={fileRef}
             type="file"
             multiple
-            className="sr-only"
-            tabIndex={-1}
+            className="hidden"
             onChange={(e) => {
               const list = Array.from(e.target.files || []);
               setFiles((prev) => [...prev, ...list].slice(0, 10));
@@ -162,7 +161,7 @@ export function NewHrRequestDialog({ open, onClose, onCreated }: NewHrRequestDia
           />
           <button type="button" className={buttonSecondary} onClick={() => fileRef.current?.click()}>
             <Paperclip className="h-4 w-4" />
-            Attach documents
+            Attach file
           </button>
           {files.length > 0 && (
             <ul className="mt-2 space-y-1">

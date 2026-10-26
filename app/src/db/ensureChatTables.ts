@@ -27,9 +27,10 @@ function loadMigrationSql(filename: string): string {
 }
 
 /**
- * Applies the chat DDL (Migration 006) and the org-name dedupe (Migration 007)
- * to a tenant schema once per process. Both are idempotent, so existing tenant
- * schemas pick them up on first chat use.
+ * Applies the chat DDL (Migration 006), the org-name dedupe (Migration 007),
+ * and chat mentions / push subscriptions (Migration 013) to a tenant schema
+ * once per process. All are idempotent, so existing tenant schemas pick them
+ * up on first chat or push use.
  */
 export async function ensureChatTables(schemaName: string): Promise<void> {
   const sanitized = sanitizeSchemaName(schemaName);
@@ -44,6 +45,7 @@ export async function ensureChatTables(schemaName: string): Promise<void> {
       await client.query(`SET search_path TO "${sanitized}", public`);
       await client.query(loadMigrationSql('006_chat.sql'));
       await client.query(loadMigrationSql('007_unique_org_names.sql'));
+      await client.query(loadMigrationSql('013_chat_mentions_push.sql'));
       ensuredSchemas.add(sanitized);
       log.success(`Chat tables verified for tenant schema "${sanitized}".`);
     } finally {

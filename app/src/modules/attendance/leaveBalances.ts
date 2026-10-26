@@ -279,7 +279,8 @@ export async function getPendingDaysByType(
   query: QueryFn,
   employeeId: string,
   leaveType: BalanceLeaveType,
-  year?: number
+  year?: number,
+  excludeRequestId?: string
 ): Promise<number> {
   const y = currentYear(year);
   const res = await query(
@@ -288,8 +289,9 @@ export async function getPendingDaysByType(
      WHERE employee_id = $1
        AND leave_type = $2
        AND status = 'pending'
-       AND EXTRACT(YEAR FROM start_date) = $3`,
-    [employeeId, leaveType, y]
+       AND EXTRACT(YEAR FROM start_date) = $3
+       AND ($4::uuid IS NULL OR id <> $4::uuid)`,
+    [employeeId, leaveType, y, excludeRequestId || null]
   );
   return Number(res.rows[0]?.pending_days || 0);
 }
@@ -297,7 +299,8 @@ export async function getPendingDaysByType(
 export async function getPendingDaysThisMonthByType(
   query: QueryFn,
   employeeId: string,
-  leaveType: BalanceLeaveType
+  leaveType: BalanceLeaveType,
+  excludeRequestId?: string
 ): Promise<number> {
   const res = await query(
     `SELECT COALESCE(SUM(days_count), 0)::float AS pending_days
@@ -306,8 +309,9 @@ export async function getPendingDaysThisMonthByType(
        AND leave_type = $2
        AND status = 'pending'
        AND start_date >= date_trunc('month', CURRENT_DATE)
-       AND start_date < date_trunc('month', CURRENT_DATE) + interval '1 month'`,
-    [employeeId, leaveType]
+       AND start_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
+       AND ($3::uuid IS NULL OR id <> $3::uuid)`,
+    [employeeId, leaveType, excludeRequestId || null]
   );
   return Number(res.rows[0]?.pending_days || 0);
 }
@@ -317,7 +321,8 @@ export async function assertSufficientBalance(
   employeeId: string,
   leaveType: string,
   daysCount: number,
-  year?: number
+  year?: number,
+  options?: { excludeRequestId?: string }
 ): Promise<void> {
   if (!isDebitableLeaveType(leaveType)) return;
   const leaveSettings = await loadLeaveSettings(query);
@@ -349,8 +354,8 @@ export async function assertSufficientBalance(
   const policyRemaining = Math.max(0, roundHalf(entitlement - usedPeriod));
   const remaining = roundHalf(Math.min(stored, policyRemaining));
   const pending = expireMonthly
-    ? await getPendingDaysThisMonthByType(query, employeeId, leaveType)
-    : await getPendingDaysByType(query, employeeId, leaveType, y);
+    ? await getPendingDaysThisMonthByType(query, employeeId, leaveType, options?.excludeRequestId)
+    : await getPendingDaysByType(query, employeeId, leaveType, y, options?.excludeRequestId);
   if (remaining - pending < daysCount - 1e-9) {
     throw Object.assign(new Error(`Insufficient ${leaveType} leave balance`), {
       code: 'INSUFFICIENT_BALANCE',

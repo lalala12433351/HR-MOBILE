@@ -41,7 +41,7 @@ export function AttendanceStatCards({
         : 'grid-cols-1 sm:grid-cols-3';
 
   return (
-    <div className={`grid ${colClass} gap-3 h-full ${className}`}>
+    <div className={`attendance-stat-grid grid ${colClass} gap-3 h-full ${className}`}>
       {items.map((item) => {
         const interactive = Boolean(item.onClick);
         const Comp = interactive ? 'button' : 'div';
@@ -52,6 +52,8 @@ export function AttendanceStatCards({
             key={item.id}
             type={interactive ? 'button' : undefined}
             onClick={item.onClick}
+            data-tone={item.tone || 'neutral'}
+            aria-pressed={interactive ? Boolean(item.active) : undefined}
             className={`att-stat${item.active ? ' is-active' : ''}`}
           >
             <div className="att-stat-label">{item.label}</div>

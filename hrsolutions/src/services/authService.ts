@@ -1,4 +1,5 @@
 import { api } from './apiClient';
+import { clearDesktopPushLoginAsk, markDesktopPushLoginAsk } from './desktopPush';
 import { DISABLE_LOCAL_STORAGE } from './store';
 
 export type AuthSessionRole = 'platform_admin' | 'super_admin' | 'hr_manager' | 'manager' | 'employee' | 'student';
@@ -91,6 +92,7 @@ export class AuthService {
         refreshToken: params.refreshToken,
         email: params.email,
       });
+      markDesktopPushLoginAsk();
     }
 
     return session;
@@ -128,6 +130,7 @@ export class AuthService {
         } catch (_) {}
       }
       api.clearAuth();
+      clearDesktopPushLoginAsk();
     }
   }
 }

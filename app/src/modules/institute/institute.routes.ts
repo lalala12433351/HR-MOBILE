@@ -17,6 +17,7 @@ import {
   bulkSyncTimetableSlots,
   getStudentAttendance,
   recordStudentAttendance,
+  alertGuardians,
 } from './institute.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 import { requireTenantContext } from '../../middleware/tenant.middleware.js';
@@ -54,4 +55,5 @@ instituteRoutes.delete('/timetable-slots/:id', requireRole([...ADMIN_FACULTY_ROL
 // Student Attendance
 instituteRoutes.get('/attendance', requireRole([...ALL_INSTITUTE_ROLES]), getStudentAttendance);
 instituteRoutes.post('/attendance', requireRole([...ALL_INSTITUTE_ROLES]), recordStudentAttendance);
+instituteRoutes.post('/guardian-alerts', requireRole([...ADMIN_FACULTY_ROLES]), alertGuardians);
 

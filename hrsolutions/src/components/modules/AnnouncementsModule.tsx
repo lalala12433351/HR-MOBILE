@@ -568,7 +568,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                         className="h-10 w-10 rounded-full object-cover ring-2 ring-slate-100 shrink-0"
                       />
                     ) : (
-                      <div className="h-10 w-10 rounded-full bg-blue-100 text-blue-700 font-bold text-sm flex items-center justify-center shrink-0">
+                      <div className="h-10 w-10 person-avatar rounded-full font-semibold text-sm flex items-center justify-center shrink-0">
                         {ann.authorName.slice(0, 2).toUpperCase()}
                       </div>
                     )}
@@ -750,7 +750,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                                 className="h-7 w-7 rounded-full object-cover ring-1 ring-slate-200 shrink-0 mt-0.5"
                               />
                             ) : (
-                              <div className="h-7 w-7 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                              <div className="h-7 w-7 person-avatar rounded-full font-semibold text-xs flex items-center justify-center shrink-0 mt-0.5">
                                 {comm.authorName.slice(0, 2).toUpperCase()}
                               </div>
                             )}
@@ -784,7 +784,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                           className="h-7 w-7 rounded-full object-cover ring-1 ring-slate-200 shrink-0"
                         />
                       ) : (
-                        <div className="h-7 w-7 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0">
+                        <div className="h-7 w-7 person-avatar rounded-full font-semibold text-xs flex items-center justify-center shrink-0">
                           {currentPersona.name.slice(0, 2).toUpperCase()}
                         </div>
                       )}
@@ -976,8 +976,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                     ref={fileInputRef}
                     onChange={handleFileSelect}
                     accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
-                    className="sr-only"
-                    tabIndex={-1}
+                    className="hidden"
                   />
 
                   {attachedFile || newAttachmentName ? (

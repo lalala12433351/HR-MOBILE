@@ -452,7 +452,20 @@ export async function setupTeam(req: Request, res: Response): Promise<void> {
             resolvedDepartmentId = departmentResult.rows[0]?.id || null;
           }
           if (!resolvedJobRoleId && designation) {
-            const jobRole = await query('SELECT id, level FROM job_roles WHERE title ILIKE $1 LIMIT 1', [designation]);
+            const jobRole = resolvedDepartmentId
+              ? await query(
+                  `SELECT id, level FROM job_roles
+                   WHERE title ILIKE $1 AND department_id = $2
+                   LIMIT 1`,
+                  [designation, resolvedDepartmentId]
+                )
+              : await query(
+                  `SELECT id, level FROM job_roles
+                   WHERE title ILIKE $1
+                   ORDER BY CASE WHEN department_id IS NULL THEN 1 ELSE 0 END
+                   LIMIT 1`,
+                  [designation]
+                );
             resolvedJobRoleId = jobRole.rows[0]?.id || null;
           }
 

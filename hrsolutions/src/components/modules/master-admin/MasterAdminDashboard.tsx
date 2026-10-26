@@ -1,4 +1,5 @@
 'use client';
+import { ResponsiveTable } from '@/components/common/ResponsiveTable';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
@@ -347,6 +348,7 @@ export const MasterAdminDashboard: React.FC = () => {
   const [licenseEvents, setLicenseEvents] = useState<LicenseEvent[]>([]);
   const [editExtendDays, setEditExtendDays] = useState(0);
   const [editRevoke, setEditRevoke] = useState(false);
+  const [editLicenseTerm, setEditLicenseTerm] = useState<'trial' | 'monthly' | 'annual'>('monthly');
 
   // New Tenant State
   const [newTenantName, setNewTenantName] = useState('');
@@ -654,7 +656,24 @@ export const MasterAdminDashboard: React.FC = () => {
     if (!selectedTenantForPlan) return;
 
     setTenants((prev) =>
-      prev.map((t) => (t.id === selectedTenantForPlan.id ? { ...t, plan: editPlanTier, maxSeats: Number(editPlanSeats) } : t))
+      prev.map((t) =>
+        t.id === selectedTenantForPlan.id
+          ? {
+              ...t,
+              plan: editPlanTier,
+              maxSeats: Number(editPlanSeats),
+              billingCycle: editLicenseTerm === 'annual' ? 'annual' : 'monthly',
+              status: editRevoke
+                ? t.status
+                : editLicenseTerm === 'trial'
+                  ? 'trial'
+                  : t.status === 'suspended'
+                    ? 'suspended'
+                    : 'active',
+              licenseStatus: editRevoke ? 'canceled' : editLicenseTerm === 'trial' ? 'trialing' : 'active',
+            }
+          : t
+      )
     );
 
     setShowPlanModal(false);
@@ -664,6 +683,7 @@ export const MasterAdminDashboard: React.FC = () => {
       await api.controlPlane.updateTenantPlan(selectedTenantForPlan.id, {
         plan: editPlanTier,
         maxSeats: Number(editPlanSeats),
+        term: editLicenseTerm,
         extendDays: editRevoke || !Number(editExtendDays) ? undefined : Number(editExtendDays),
         revoke: editRevoke || undefined,
       });
@@ -674,7 +694,7 @@ export const MasterAdminDashboard: React.FC = () => {
         action: 'PLAN_UPDATED',
         targetTenant: selectedTenantForPlan.name,
         targetEntity: 'Subscription',
-        details: `Plan changed to ${editPlanTier} with ${editPlanSeats} seats.`,
+        details: `Plan changed to ${editPlanTier} (${editLicenseTerm}) with ${editPlanSeats} seats.`,
         status: 'success',
       };
       setAuditLogs((prev) => [log, ...prev]);
@@ -924,7 +944,7 @@ export const MasterAdminDashboard: React.FC = () => {
             </div>
 
             <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] overflow-hidden text-xs">
-              <table className="w-full text-left border-collapse">
+              <ResponsiveTable className="w-full text-left border-collapse">
                 <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-semibold text-[11px] border-b border-[var(--border-color)]">
                   <tr>
                     <th className="p-3 pl-4">Workspace</th>
@@ -1009,6 +1029,13 @@ export const MasterAdminDashboard: React.FC = () => {
                                 setSelectedTenantForPlan(tenant);
                                 setEditPlanTier(tenant.planId || tenant.plan);
                                 setEditPlanSeats(tenant.maxSeats);
+                                setEditLicenseTerm(
+                                  tenant.status === 'trial' || tenant.licenseStatus === 'trialing'
+                                    ? 'trial'
+                                    : tenant.billingCycle === 'annual'
+                                      ? 'annual'
+                                      : 'monthly'
+                                );
                                 setEditExtendDays(0);
                                 setEditRevoke(false);
                                 setLicenseEvents([]);
@@ -1069,7 +1096,7 @@ export const MasterAdminDashboard: React.FC = () => {
                     ))
                   )}
                 </tbody>
-              </table>
+              </ResponsiveTable>
             </div>
           </div>
         )}
@@ -1156,7 +1183,7 @@ export const MasterAdminDashboard: React.FC = () => {
             </div>
 
             <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] overflow-hidden text-xs">
-              <table className="w-full text-left border-collapse">
+              <ResponsiveTable className="w-full text-left border-collapse">
                 <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-semibold text-[11px] border-b border-[var(--border-color)]">
                   <tr>
                     <th className="p-3 pl-4">Schema & Table Name</th>
@@ -1198,7 +1225,7 @@ export const MasterAdminDashboard: React.FC = () => {
                     ));
                   })()}
                 </tbody>
-              </table>
+              </ResponsiveTable>
             </div>
           </div>
         )}
@@ -1227,7 +1254,7 @@ export const MasterAdminDashboard: React.FC = () => {
             </div>
 
             <div className="bg-[var(--bg-surface)] rounded-lg border border-[var(--border-color)] overflow-hidden text-xs">
-              <table className="w-full text-left border-collapse">
+              <ResponsiveTable className="w-full text-left border-collapse">
                 <thead className="bg-[var(--bg-surface-subtle)] text-[var(--text-muted)] font-semibold text-[11px] border-b border-[var(--border-color)]">
                   <tr>
                     <th className="p-3 pl-4">User</th>
@@ -1311,7 +1338,7 @@ export const MasterAdminDashboard: React.FC = () => {
                     ));
                   })()}
                 </tbody>
-              </table>
+              </ResponsiveTable>
             </div>
           </div>
         )}
@@ -1797,7 +1824,15 @@ export const MasterAdminDashboard: React.FC = () => {
 
             <form onSubmit={handleSavePlanUpdate} className="space-y-3 text-xs">
               <div className="rounded-lg border border-[var(--border-color)] p-3 space-y-1 bg-[var(--bg-surface-subtle)]">
-                <div className="font-semibold capitalize">{selectedTenantForPlan.licenseStatus || 'active'}</div>
+                <div className="font-semibold capitalize">
+                  {selectedTenantForPlan.licenseStatus || 'active'}
+                  {' · '}
+                  {selectedTenantForPlan.status === 'trial' || selectedTenantForPlan.licenseStatus === 'trialing'
+                    ? 'trial'
+                    : selectedTenantForPlan.billingCycle === 'annual'
+                      ? 'yearly'
+                      : 'monthly'}
+                </div>
                 <div className="text-[11px] text-[var(--text-muted)]">
                   {selectedTenantForPlan.periodStart ? String(selectedTenantForPlan.periodStart).substring(0, 10) : '—'}
                   {' → '}
@@ -1829,6 +1864,25 @@ export const MasterAdminDashboard: React.FC = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[var(--text-secondary)] mb-1">Billing</label>
+                <select
+                  value={editLicenseTerm}
+                  onChange={(e) => setEditLicenseTerm(e.target.value as 'trial' | 'monthly' | 'annual')}
+                  className="w-full rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs outline-none focus:border-blue-600 bg-[var(--bg-surface)] font-medium"
+                >
+                  <option value="trial">Trial</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="annual">Yearly</option>
+                </select>
+                {editLicenseTerm !== 'trial' &&
+                  (selectedTenantForPlan.status === 'trial' || selectedTenantForPlan.licenseStatus === 'trialing') && (
+                    <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                      Ends the trial and starts a {editLicenseTerm === 'annual' ? '12-month' : '1-month'} license today.
+                    </p>
+                  )}
               </div>
 
               <div>

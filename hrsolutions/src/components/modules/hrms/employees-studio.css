@@ -781,6 +781,10 @@ button.people-studio__empty {
   background: var(--studio-sage);
 }
 
+.people-studio__att-cal-legend-item.is-holiday::before {
+  background: #2d628e;
+}
+
 .people-studio__att-cal-legend-item.is-late::before {
   background: #c0883a;
 }
@@ -846,6 +850,11 @@ button.people-studio__empty {
   background: var(--studio-sage-surface);
 }
 
+.people-studio__att-cal-day.is-holiday {
+  border-color: #b7d3e4;
+  background: #f3f8fb;
+}
+
 .people-studio__att-cal-day.is-late {
   border-color: #e6d2b0;
   background: #fbf6ee;
@@ -904,6 +913,11 @@ button.people-studio__empty {
 .people-studio__att-cal-day.is-ok .people-studio__att-cal-pill {
   background: rgba(83, 136, 107, 0.14);
   color: var(--studio-sage);
+}
+
+.people-studio__att-cal-day.is-holiday .people-studio__att-cal-pill {
+  background: rgba(45, 98, 142, 0.12);
+  color: #2d628e;
 }
 
 .people-studio__att-cal-day.is-late .people-studio__att-cal-pill {

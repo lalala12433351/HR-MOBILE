@@ -13,3 +13,6 @@ export const useDashboardContext = () => {
   if (!ctx) throw new Error('useDashboardContext must be used within DashboardDataProvider');
   return ctx;
 };
+
+/** Setup prompts are also used outside dashboard screens. */
+export const useOptionalDashboardContext = () => useContext(DashboardContext);

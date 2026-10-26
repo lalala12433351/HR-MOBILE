@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, X, ArrowUp, ArrowDown, CornerDownLeft } from 'lucide-react';
 import { AppState } from '../../services/store';
 import { PixbeIcon, PixbeIconName } from '@/components/common/PixbeIcon';
-import { isExecutiveOrAdmin } from '@/utils/teamAccess';
+import { canManageTask, isExecutiveOrAdmin } from '@/utils/teamAccess';
 import { flattenWorkspaceNav, getWorkspaceModeLabel } from '@/utils/workspaceNav';
 
 interface CommandPaletteProps {
@@ -200,7 +200,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     }
 
     if (isCompany) {
-      (state.tasks || []).forEach((task) => {
+      (state.tasks || [])
+        .filter((task) => canManageTask(state.currentPersona, task, state.employees || []))
+        .forEach((task) => {
         items.push({
           id: `task_${task.id}`,
           title: task.title,

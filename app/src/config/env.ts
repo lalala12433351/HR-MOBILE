@@ -41,6 +41,11 @@ const envSchema = z.object({
   SES_CONFIGURATION_SET: z.string().optional(),
   EMAIL_BRAND_NAME: z.string().default('Pixbe'),
   SUPPORT_EMAIL: z.string().default('support@pixbe.in'),
+
+  // Web Push (desktop notifications). Empty keys disable push; chat still works.
+  VAPID_PUBLIC_KEY: z.string().optional().default(''),
+  VAPID_PRIVATE_KEY: z.string().optional().default(''),
+  VAPID_SUBJECT: z.string().optional().default('mailto:support@pixbe.in'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

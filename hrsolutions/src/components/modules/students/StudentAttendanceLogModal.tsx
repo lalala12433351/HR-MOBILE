@@ -73,7 +73,7 @@ export const StudentAttendanceLogModal: React.FC<StudentAttendanceLogModalProps>
     try {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleDateString('en-US', {
+      return d.toLocaleDateString('en-GB', {
         weekday: 'short',
         month: 'short',
         day: 'numeric',

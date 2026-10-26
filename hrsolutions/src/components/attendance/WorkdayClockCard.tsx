@@ -1,6 +1,8 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
+import { useMobileViewport } from '@/hooks/useMobileViewport';
 
 export type WorkdayStatusKind = 'idle' | 'live' | 'break' | 'done';
 
@@ -35,7 +37,16 @@ const STATUS_COPY: Record<WorkdayStatusKind, string> = {
   done: 'Clocked out',
 };
 
+function WorkdayStatus({ kind, label }: { kind: WorkdayStatusKind; label: string }) {
+  return (
+    <span className={`workday-chip is-${kind}`}>
+      {label}
+    </span>
+  );
+}
+
 interface WorkdayClockCardProps {
+  compact?: boolean;
   statusKind: WorkdayStatusKind;
   statusLabel?: string;
   elapsedSeconds: number;
@@ -48,6 +59,7 @@ interface WorkdayClockCardProps {
 }
 
 export function WorkdayClockCard({
+  compact = false,
   statusKind,
   statusLabel,
   elapsedSeconds,
@@ -58,6 +70,7 @@ export function WorkdayClockCard({
   secondaryAction,
   primaryAction,
 }: WorkdayClockCardProps) {
+  const mobile = useMobileViewport();
   const safeTarget = Math.max(1, targetSeconds);
   const progress = Math.max(0, Math.min(100, (elapsedSeconds / safeTarget) * 100));
   const dashOffset = RING_CIRCUMFERENCE * (1 - progress / 100);
@@ -67,11 +80,39 @@ export function WorkdayClockCard({
   const chip = statusLabel || STATUS_COPY[statusKind];
   const hasActions = Boolean(locationSelect || secondaryAction || primaryAction);
 
+  if (mobile) {
+    return <section className={'m2-workday' + (compact ? ' m2-workday--home' : '')} aria-label={compact ? "Today's shift" : 'My workday'}>
+      <p className={'m2-workday-status is-' + statusKind}>{compact && statusKind === 'idle' ? 'Today’s shift' : chip}</p>
+      {compact && statusKind === 'idle' ? <strong className="m2-workday-hours">{shiftHours.replace(' - ', ' – ')}</strong> : <strong className="m2-workday-clock" suppressHydrationWarning>{clock.hours}:{clock.minutes}:{clock.seconds}</strong>}
+      <p className="m2-workday-shift">{shiftName}{!(compact && statusKind === 'idle') && ' · ' + shiftHours}</p>
+      {locationSelect && <div className="m2-workday-location">{locationSelect}</div>}
+      {hasActions && <div className="m2-workday-actions">{primaryAction}{secondaryAction}</div>}
+    </section>;
+  }
+
+  if (compact) {
+    return (
+      <section className="dash-workday-card" aria-label="Today's time">
+        <header className="dash-workday-heading">
+          <h2>Today's time</h2>
+          <Link href="/timesheets" className="dash-quiet-link">Timesheet ↗</Link>
+        </header>
+        <div className="dash-workday-time">
+          <span className="dash-workday-elapsed" suppressHydrationWarning>{clock.hours}:{clock.minutes}</span>
+          <WorkdayStatus kind={statusKind} label={chip} />
+        </div>
+        <p className="dash-workday-shift">{shiftHours}, {shiftName}</p>
+        {locationSelect && <div className="dash-workday-location">{locationSelect}</div>}
+        {hasActions && <div className="dash-workday-buttons">{secondaryAction}{primaryAction}</div>}
+      </section>
+    );
+  }
+
   return (
     <section className={`workday-card is-${statusKind}`} aria-label="My workday">
       <header className="workday-card-head">
         <h2 className="workday-card-title">My workday</h2>
-        <span className={`workday-chip is-${statusKind}`}>{chip}</span>
+        <WorkdayStatus kind={statusKind} label={chip} />
       </header>
 
       <div className="workday-ring-wrap">

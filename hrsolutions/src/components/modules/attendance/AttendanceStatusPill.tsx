@@ -36,5 +36,5 @@ interface AttendanceStatusPillProps {
 }
 
 export function AttendanceStatusPill({ kind, label, className = '' }: AttendanceStatusPillProps) {
-  return <span className={`${STYLES[kind]} ${className}`.trim()}>{label}</span>;
+  return <span data-attendance-status={kind} className={`${STYLES[kind]} ${className}`.trim()}>{label}</span>;
 }

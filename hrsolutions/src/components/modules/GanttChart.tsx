@@ -1,4 +1,5 @@
 'use client';
+import { DateInput } from '@/components/common/DateInput';
 
 import { api } from '../../services/apiClient';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
@@ -665,7 +666,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
                     className="shrink-0 border-r border-[#282830] px-3 font-bold text-white"
                     style={{ width: colWidth * (zoomLevel === 'days' ? 7 : 14) }}
                   >
-                    {date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                    {date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}
                   </div>
                 ))}
               </div>
@@ -837,11 +838,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-white font-bold mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    min={new Date().toISOString().split('T')[0]}
-                    value={editingTask.startDate}
-                    onChange={(e) => {
+                  <DateInput min={new Date().toISOString().split('T')[0]} value={editingTask.startDate} onChange={(e) => {
                       const newStart = e.target.value;
                       setEditingTask({
                         ...editingTask,
@@ -855,11 +852,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
 
                 <div>
                   <label className="block text-white font-bold mb-1">Due Date</label>
-                  <input
-                    type="date"
-                    min={editingTask.startDate || new Date().toISOString().split('T')[0]}
-                    value={editingTask.dueDate}
-                    onChange={(e) => setEditingTask({ ...editingTask, dueDate: e.target.value })}
+                  <DateInput min={editingTask.startDate || new Date().toISOString().split('T')[0]} value={editingTask.dueDate} onChange={(e) => setEditingTask({ ...editingTask, dueDate: e.target.value })}
                     className="w-full rounded-lg border border-[#282830] bg-[#18181d] p-2.5 font-medium text-white outline-none focus:border-blue-500 cursor-pointer"
                   />
                 </div>

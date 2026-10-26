@@ -5,6 +5,7 @@ export type Queryable = Pool | PoolClient;
 
 export type LicenseStatus = 'trialing' | 'active' | 'expiring' | 'expired' | 'canceled';
 export type BillingCycle = 'monthly' | 'annual';
+export type LicenseTerm = 'trial' | 'monthly' | 'annual';
 export type LicenseAction =
   | 'issued'
   | 'activated'
@@ -484,6 +485,25 @@ export async function listLicenseEvents(db: Queryable, tenantId: string, limit =
   }));
 }
 
+function currentLicenseTerm(row: {
+  status?: string | null;
+  trial_ends_at?: Date | string | null;
+  billing_cycle?: string | null;
+}, now = new Date()): LicenseTerm {
+  const trialEnd = toDate(row.trial_ends_at);
+  const stored = String(row.status || '').toLowerCase();
+  if (stored === 'trialing' || (trialEnd != null && trialEnd.getTime() > now.getTime())) return 'trial';
+  return row.billing_cycle === 'annual' ? 'annual' : 'monthly';
+}
+
+function normalizeLicenseTerm(raw: unknown): LicenseTerm | null {
+  const value = String(raw || '').trim().toLowerCase();
+  if (value === 'trial') return 'trial';
+  if (value === 'monthly' || value === 'month') return 'monthly';
+  if (value === 'annual' || value === 'yearly' || value === 'year') return 'annual';
+  return null;
+}
+
 export async function mutateTenantLicense(
   db: Queryable,
   tenantId: string,
@@ -492,6 +512,7 @@ export async function mutateTenantLicense(
     plan?: string;
     maxSeats?: number;
     billingCycle?: BillingCycle;
+    term?: LicenseTerm | string;
     extendDays?: number;
     periodEnd?: string;
     revoke?: boolean;
@@ -536,16 +557,37 @@ export async function mutateTenantLicense(
   const nextSeats = payload.maxSeats != null
     ? Math.max(1, Number(payload.maxSeats) || nextPlan.maxSeats)
     : Number(current.max_employees) || nextPlan.maxSeats;
-  const nextCycle: BillingCycle =
-    payload.billingCycle === 'annual' || payload.billingCycle === 'monthly'
+  const currentTerm = currentLicenseTerm(current);
+  const requestedTerm = normalizeLicenseTerm(payload.term);
+  const termChanged = Boolean(requestedTerm && requestedTerm !== currentTerm);
+  const nextCycle: BillingCycle = termChanged
+    ? requestedTerm === 'annual'
+      ? 'annual'
+      : 'monthly'
+    : payload.billingCycle === 'annual' || payload.billingCycle === 'monthly'
       ? payload.billingCycle
       : current.billing_cycle === 'annual'
         ? 'annual'
         : 'monthly';
 
+  let periodStart = toDate(current.current_period_start) || new Date();
   let periodEnd = toDate(current.current_period_end) || new Date();
+  let trialEndsAt = toDate(current.trial_ends_at);
   let action: LicenseAction = 'activated';
-  if (payload.periodEnd) {
+  if (termChanged && requestedTerm === 'trial') {
+    const days = nextPlan.trialDays > 0 ? nextPlan.trialDays : 14;
+    periodStart = new Date();
+    trialEndsAt = addDays(periodStart, days);
+    periodEnd = trialEndsAt;
+    action = 'trial_started';
+  } else if (termChanged && (requestedTerm === 'monthly' || requestedTerm === 'annual')) {
+    periodStart = new Date();
+    trialEndsAt = null;
+    periodEnd = requestedTerm === 'annual' ? addMonths(periodStart, 12) : addMonths(periodStart, 1);
+    const extra = Number(payload.extendDays);
+    if (Number.isFinite(extra) && extra !== 0) periodEnd = addDays(periodEnd, extra);
+    action = currentTerm === 'trial' ? 'activated' : 'renewed';
+  } else if (payload.periodEnd) {
     const explicit = toDate(payload.periodEnd);
     if (!explicit) throw new LicenseError('BAD_REQUEST', 'periodEnd must be a valid date.');
     periodEnd = explicit;
@@ -566,21 +608,28 @@ export async function mutateTenantLicense(
     action = 'renewed';
   }
 
-  const nextStatusStored =
-    periodEnd.getTime() < Date.now()
-      ? 'expired'
-      : current.status === 'canceled'
-        ? 'active'
-        : current.trial_ends_at && toDate(current.trial_ends_at)!.getTime() > Date.now()
-          ? 'trialing'
-          : 'active';
+  const stillOnTrial = trialEndsAt != null && trialEndsAt.getTime() > Date.now();
+  const nextStatusStored = termChanged && requestedTerm === 'trial'
+    ? 'trialing'
+    : termChanged
+      ? periodEnd.getTime() < Date.now()
+        ? 'expired'
+        : 'active'
+      : periodEnd.getTime() < Date.now()
+        ? 'expired'
+        : current.status === 'canceled'
+          ? 'active'
+          : stillOnTrial
+            ? 'trialing'
+            : 'active';
 
   await db.query(
     `UPDATE public.tenant_subscriptions
         SET plan_id = $1, tier = $2, max_employees = $3, billing_cycle = $4,
-            current_period_end = $5, status = $6, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $7`,
-    [nextPlan.id, nextPlan.key, nextSeats, nextCycle, periodEnd, nextStatusStored, current.id]
+            current_period_start = $5, current_period_end = $6, trial_ends_at = $7,
+            status = $8, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $9`,
+    [nextPlan.id, nextPlan.key, nextSeats, nextCycle, periodStart, periodEnd, trialEndsAt, nextStatusStored, current.id]
   );
   await db.query(
     `UPDATE public.tenants SET plan = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
@@ -595,11 +644,12 @@ export async function mutateTenantLicense(
     toPlan: nextPlan.key,
     fromStatus: current.status,
     toStatus: nextStatusStored,
-    periodStart: current.current_period_start,
+    periodStart,
     periodEnd,
     details: {
       maxSeats: nextSeats,
       billingCycle: nextCycle,
+      term: requestedTerm,
       extendDays: payload.extendDays ?? null,
     },
   });

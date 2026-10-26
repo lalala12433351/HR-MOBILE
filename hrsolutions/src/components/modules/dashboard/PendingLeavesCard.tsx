@@ -2,7 +2,7 @@
 
 import React, { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { GoogleIcon } from '@/components/ui/GoogleIcon';
+import { ArrowUpRight } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
 import { DashPanel } from './DashPanel';
@@ -31,7 +31,7 @@ export const PendingLeavesCard: React.FC<{ className?: string }> = ({ className 
           className="text-xs font-semibold text-[var(--studio-navy)] hover:underline inline-flex items-center gap-1 cursor-pointer"
         >
           Review
-          <GoogleIcon name="arrow_forward" size={15} weight={600} />
+          <ArrowUpRight size={15} aria-hidden="true" />
         </button>
       }
     >

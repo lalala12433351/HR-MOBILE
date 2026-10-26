@@ -3,7 +3,8 @@ import { api } from '@/services/apiClient';
 import { mapApiEmployee, mapApiTask, mapApiTimesheet } from '@/services/backendSync';
 import { safeApiCall } from '@/hooks/safeApiCall';
 import { Employee, Project, Task, AttendanceRecord, LeaveRequest, Student, TimesheetEntry, AuditLogItem } from '@/types';
-import { aggregatePunchesToDaily } from '@/utils/attendancePunches';
+import { aggregateOptionsFromSettings, aggregatePunchesToDaily } from '@/utils/attendancePunches';
+import { subscribeAttendanceCheckout, patchAttendanceCheckout } from '@/utils/attendanceSessionEvents';
 import { mapLeaveRow } from '@/utils/mapLeaveRow';
 import { applyLeaveBalancesToEmployees } from '@/utils/applyLeaveBalances';
 
@@ -23,7 +24,7 @@ export function useDashboardData() {
 
     async function fetchData() {
       try {
-        const [empRes, stuRes, punchRes, leaveRes, projRes, taskRes, timeRes, auditRes, balRes] = await Promise.all([
+        const [empRes, stuRes, punchRes, leaveRes, projRes, taskRes, timeRes, auditRes, balRes, settingsRes] = await Promise.all([
           safeApiCall(api.identity.getEmployees(), [] as any[]),
           safeApiCall(api.institute.getStudents(), [] as any[]),
           safeApiCall(api.attendance.getPunches(), [] as any[]),
@@ -33,6 +34,7 @@ export function useDashboardData() {
           safeApiCall(api.projects.getTimesheets(), [] as any[]),
           safeApiCall(api.auditComms.getAuditLogs(), [] as any[]),
           safeApiCall(api.attendance.getLeaveBalances(), [] as any[]),
+          safeApiCall(api.setup.getSettings(), {} as any),
         ]);
 
         if (!isMounted) return;
@@ -54,7 +56,13 @@ export function useDashboardData() {
           const employeeLookup = Object.fromEntries(
             mappedEmployees.map((e) => [e.id, { name: e.name, avatar: e.avatar }])
           );
-          setAttendance(aggregatePunchesToDaily(punchRes.data, { employeeLookup }));
+          setAttendance(aggregatePunchesToDaily(punchRes.data, {
+            employeeLookup,
+            ...aggregateOptionsFromSettings(
+              settingsRes.success ? settingsRes.data : null,
+              mappedEmployees
+            ),
+          }));
         }
 
         if (leaveRes.success && Array.isArray(leaveRes.data)) {
@@ -108,6 +116,12 @@ export function useDashboardData() {
     return () => {
       isMounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    return subscribeAttendanceCheckout((detail) => {
+      setAttendance((prev) => patchAttendanceCheckout(prev, detail));
+    });
   }, []);
 
   return { employees, students, attendance, setAttendance, leaves, projects, tasks, timesheets, auditLogs, loading };

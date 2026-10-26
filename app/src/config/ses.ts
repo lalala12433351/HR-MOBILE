@@ -60,9 +60,10 @@ export async function sendEmail(message: EmailMessage): Promise<void> {
   }
 }
 
+/** Tenant app origin for invite / reset / impersonate links in emails. Never localhost. */
+export const APP_PIXBE_IN = 'https://app.pixbe.in';
+
 /** Absolute URL into the tenant frontend app, used for links inside emails. */
 export function frontendUrl(path: string): string {
-  const fallback = env.NODE_ENV === 'production' ? 'https://app.pixbe.in' : 'http://localhost:3000';
-  const origin = (env.FRONTEND_APP_ORIGIN || env.APP_ORIGIN || fallback).replace(/\/+$/, '');
-  return `${origin}${path.startsWith('/') ? path : `/${path}`}`;
+  return `${APP_PIXBE_IN}${path.startsWith('/') ? path : `/${path}`}`;
 }

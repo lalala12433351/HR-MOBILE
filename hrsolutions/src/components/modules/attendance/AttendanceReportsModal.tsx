@@ -1,4 +1,5 @@
 'use client';
+import { DateInput } from '@/components/common/DateInput';
 
 import React, { useState, useMemo } from 'react';
 import { X, Printer } from 'lucide-react';
@@ -54,8 +55,14 @@ export const AttendanceReportsModal: React.FC<AttendanceReportsModalProps> = ({
       return {
         emp,
         checkIn: att?.checkIn || '—',
-        checkOut: att?.checkOut || '—',
-        workingHours: att?.workingHours ? `${att.workingHours}h` : att?.checkIn ? 'In Progress' : '0h',
+        checkOut: att?.checkOut || (att?.checkIn && !att?.missedPunchOut ? 'In Progress' : '—'),
+        workingHours: att?.missedPunchOut
+          ? '—'
+          : att?.workingHours
+            ? `${att.workingHours}h`
+            : att?.checkIn && !att?.missedPunchOut
+              ? 'In Progress'
+              : '0h',
         status: att?.status || (att?.checkIn ? 'Present' : 'Not Checked In'),
         location: att?.locationName || 'Main Office',
       };
@@ -557,10 +564,7 @@ export const AttendanceReportsModal: React.FC<AttendanceReportsModalProps> = ({
             {reportType === 'daily' ? (
               <div>
                 <label className="text-[11px] font-[740] text-[var(--text-secondary)]">Date</label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
+                <DateInput value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}
                   className="work-field mt-1 w-full"
                 />
               </div>

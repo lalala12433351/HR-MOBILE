@@ -1,5 +1,6 @@
 'use client';
 
+import '@/components/chat/chat.css';
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Info, MessageSquarePlus, LifeBuoy, WifiOff } from 'lucide-react';
@@ -131,7 +132,7 @@ function ThreadHeader({
           name={conversation.type === 'hr_ticket' ? 'HR' : title}
           src={other?.avatarUrl}
           size={36}
-          square={conversation.type === 'hr_ticket'}
+          square={conversation.type === 'hr_ticket' || conversation.type === 'group'}
           online={other ? online.has(other.employeeId) : undefined}
         />
       )}
@@ -287,7 +288,7 @@ function ChatPageInner() {
     if (!conversation || syncedTabFor.current === conversation.id) return;
     syncedTabFor.current = conversation.id;
     setTab(tabFor(conversation, meId, isHr));
-    setDetailsOpen(conversation.type === 'hr_ticket');
+    setDetailsOpen(window.matchMedia('(min-width: 1280px)').matches && conversation.type !== 'direct');
   }, [conversation, meId, isHr]);
 
   const openAttachment = useCallback(
@@ -348,9 +349,13 @@ function ChatPageInner() {
       >
         <ConversationList
           tab={tab}
-          onTabChange={setTab}
+          onTabChange={(nextTab) => {
+            setTab(nextTab);
+            select(null);
+            setDetailsOpen(false);
+          }}
           activeId={selectedId}
-          onSelect={(id) => select(id)}
+          onSelect={select}
           onNewChat={() => setNewChatOpen(true)}
           onNewHrRequest={() => setHrRequestOpen(true)}
         />
@@ -383,7 +388,7 @@ function ChatPageInner() {
 
         {conversation && (
           <div className="flex min-h-0 flex-1">
-            <div className={`${detailsOpen ? 'hidden lg:flex' : 'flex'} chat-thread`}>
+            <div className={`${detailsOpen ? 'chat-thread--with-details' : ''} chat-thread flex`}>
               <ThreadHeader
                 conversation={conversation}
                 onBack={() => select(null)}
@@ -410,6 +415,8 @@ function ChatPageInner() {
                 placeholder={placeholder}
                 disabledReason={disabledReason}
                 replyTo={replyTo}
+                participants={conversation.participants}
+                meId={me.employeeId}
                 onCancelReply={() => setReplyTo(null)}
                 onSend={({ body, parentMessageId, files }) => {
                   setReplyTo(null);

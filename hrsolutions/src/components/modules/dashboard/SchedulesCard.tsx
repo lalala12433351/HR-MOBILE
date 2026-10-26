@@ -2,13 +2,14 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, ChevronDown, Check, ArrowRight, Video, ExternalLink } from 'lucide-react';
+import { Calendar, ChevronDown, Check, ArrowRight, Video, ExternalLink, Clock3 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { TimesheetEntry } from '@/types';
 import { DashPanel } from './DashPanel';
+import { localDateKey } from '@/utils/dashboardPeople';
 
 type ScheduleFilter = 'all' | 'today' | 'this_week';
 
@@ -20,11 +21,11 @@ export const SchedulesCard: React.FC<{ className?: string }> = ({ className = ''
   const router = useRouter();
   const { state } = useApp();
   const dashboardState = useDashboardContext();
-  const [filter, setFilter] = useState<ScheduleFilter>('all');
+  const [filter, setFilter] = useState<ScheduleFilter>('today');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = useMemo(() => localDateKey(), []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -67,7 +68,7 @@ export const SchedulesCard: React.FC<{ className?: string }> = ({ className = ''
       const diffToMonday = now.getDate() - day + (day === 0 ? -6 : 1);
       const monday = new Date(now);
       monday.setDate(diffToMonday);
-      const mondayStr = monday.toISOString().split('T')[0];
+      const mondayStr = localDateKey(monday);
       filtered = all.filter((ts) => ts.date && ts.date >= mondayStr);
     }
     return [...filtered]
@@ -110,7 +111,8 @@ export const SchedulesCard: React.FC<{ className?: string }> = ({ className = ''
       <button
         type="button"
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium rounded-[7px] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] transition-[background-color,border-color] duration-150 cursor-pointer"
+        aria-expanded={dropdownOpen}
+        className="inline-flex h-10 items-center gap-1.5 px-2.5 text-xs font-medium rounded-[7px] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-subtle)] border border-[var(--border-color)] transition-[background-color,border-color] duration-150 cursor-pointer"
       >
         <Calendar className="w-3.5 h-3.5 text-[var(--text-muted)]" />
         <span>{filterLabels[filter]}</span>
@@ -156,7 +158,22 @@ export const SchedulesCard: React.FC<{ className?: string }> = ({ className = ''
   );
 
   return (
-    <DashPanel title="Schedules" action={filterControl} className={className} purpose="schedules-list">
+    <DashPanel
+      title="Today's schedules"
+      action={
+        <div className="flex items-center gap-3">
+          <button type="button" className="dash-quiet-link" onClick={() => router.push('/timesheets')}>
+            View all ›
+          </button>
+        </div>
+      }
+      className={className}
+      purpose="schedules-list"
+    >
+      <details className="mb-3">
+        <summary className="dash-quiet-link cursor-pointer">Filter schedules</summary>
+        <div className="mt-2">{filterControl}</div>
+      </details>
       {dashboardState.loading ? (
         <div className="space-y-3">
           <Skeleton height="48px" borderRadius="8px" />
@@ -180,20 +197,16 @@ export const SchedulesCard: React.FC<{ className?: string }> = ({ className = ''
                   : 'Scheduled';
 
             return (
-              <button
-                key={ts.id}
-                type="button"
-                onClick={() => router.push('/timesheets')}
-                className="dash-row dash-row--clickable"
-              >
-                <div className="min-w-0">
+              <div key={ts.id} className="dash-row">
+                <Clock3 size={18} className="shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
+                <button type="button" onClick={() => router.push('/timesheets')} className="min-w-0 flex-1 text-left cursor-pointer">
                   <p className="text-xs font-bold text-[var(--text-primary)] truncate">
                     {ts.taskTitle || ts.description || 'Scheduled activity'}
                   </p>
                   <p className="mt-1 text-[11px] text-[var(--text-muted)] truncate">
                     {ts.projectName || 'Operations'} · {timeLabel} · {formattedDate}
                   </p>
-                </div>
+                </button>
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   {ts.meetingLink && (
@@ -215,7 +228,7 @@ export const SchedulesCard: React.FC<{ className?: string }> = ({ className = ''
                     className="w-5 h-5 text-[9px] shrink-0"
                   />
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

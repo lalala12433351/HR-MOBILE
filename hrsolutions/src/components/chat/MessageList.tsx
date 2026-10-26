@@ -145,78 +145,80 @@ export function MessageList({
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="min-h-0 flex-1 overflow-y-auto custom-scrollbar pb-3"
+      className="chat-message-log min-h-0 flex-1 overflow-y-auto custom-scrollbar pb-3"
       role="log"
       aria-live="polite"
       aria-label="Messages"
     >
-      {bucket.hasMore ? (
-        <div className="flex justify-center py-3">
-          <button
-            type="button"
-            disabled={bucket.loading}
-            onClick={onLoadOlder}
-            className="rounded-full px-3 py-1 text-[12px] font-semibold text-[#2d628e] dark:text-sky-300 hover:bg-[var(--bg-surface-hover)] disabled:opacity-60"
-          >
-            {bucket.loading ? 'Loading earlier messages…' : 'Load earlier messages'}
-          </button>
-        </div>
-      ) : (
-        <div className="px-6 pt-8 pb-4 text-center">
-          <p className="text-[13px] font-semibold text-[var(--text-primary)]">
-            {conversation.type === 'hr_ticket' ? 'Your request was shared privately with HR.' : 'This is the start of the conversation.'}
-          </p>
-          {conversation.description && (
-            <p className="mt-1 text-[12px] text-[var(--text-secondary)]">{conversation.description}</p>
-          )}
-        </div>
-      )}
-
-      {items.map((message, index) => {
-        const prev = items[index - 1];
-        const newDay = !prev || dayKey(prev.createdAt) !== dayKey(message.createdAt);
-        const compact =
-          !newDay &&
-          !!prev &&
-          prev.type !== 'system' &&
-          message.type !== 'system' &&
-          prev.senderId === message.senderId &&
-          !message.parentMessageId &&
-          !!prev.createdAt &&
-          !!message.createdAt &&
-          Date.parse(message.createdAt) - Date.parse(prev.createdAt) < GROUP_WINDOW_MS;
-
-        return (
-          <React.Fragment key={message.clientId && message.status ? message.clientId : message.id}>
-            {newDay && (
-              <div className="flex items-center gap-3 px-4 pt-4 pb-1" role="separator">
-                <span className="h-px flex-1 bg-[var(--border-color)]" />
-                <span className="text-[11px] font-semibold text-[var(--text-muted)]">{formatDayLabel(message.createdAt)}</span>
-                <span className="h-px flex-1 bg-[var(--border-color)]" />
-              </div>
+      <div className="chat-message-history">
+        {bucket.hasMore ? (
+          <div className="flex justify-center py-3">
+            <button
+              type="button"
+              disabled={bucket.loading}
+              onClick={onLoadOlder}
+              className="rounded-full px-3 py-1 text-[12px] font-semibold text-[#2d628e] dark:text-sky-300 hover:bg-[var(--bg-surface-hover)] disabled:opacity-60"
+            >
+              {bucket.loading ? 'Loading earlier messages…' : 'Load earlier messages'}
+            </button>
+          </div>
+        ) : (
+          <div className="chat-conversation-start px-4 py-3 text-center">
+            <p className="text-[12px] text-[var(--text-muted)]">
+              {conversation.type === 'hr_ticket' ? 'Your request was shared privately with HR.' : 'This is the start of the conversation.'}
+            </p>
+            {conversation.description && (
+              <p className="mt-1 text-[12px] text-[var(--text-secondary)]">{conversation.description}</p>
             )}
-            <MessageItem
-              message={message}
-              meId={meId}
-              compact={compact}
-              canInteract={canInteract}
-              participantsById={participantsById}
-              onJumpTo={jumpTo}
-              {...handlers}
-            />
-            {seenBy?.messageId === message.id && (
-              <p className="px-4 pl-[60px] pt-0.5 text-[11px] text-[var(--text-muted)]">{seenBy.label}</p>
-            )}
-          </React.Fragment>
-        );
-      })}
+          </div>
+        )}
 
-      {bucket.error && bucket.loaded && (
-        <p className="px-4 pt-2 text-[12px] text-[#8b3133] dark:text-red-300">{bucket.error}</p>
-      )}
+        {items.map((message, index) => {
+          const prev = items[index - 1];
+          const newDay = !prev || dayKey(prev.createdAt) !== dayKey(message.createdAt);
+          const compact =
+            !newDay &&
+            !!prev &&
+            prev.type !== 'system' &&
+            message.type !== 'system' &&
+            prev.senderId === message.senderId &&
+            !message.parentMessageId &&
+            !!prev.createdAt &&
+            !!message.createdAt &&
+            Date.parse(message.createdAt) - Date.parse(prev.createdAt) < GROUP_WINDOW_MS;
 
-      <div className="h-5 px-4 pl-[60px] pt-1 text-[11.5px] italic text-[var(--text-muted)]" aria-live="polite">
-        {typing.length > 0 ? typingLabel(typing) : ''}
+          return (
+            <React.Fragment key={message.clientId && message.status ? message.clientId : message.id}>
+              {newDay && (
+                <div className="chat-day-divider flex items-center gap-3 px-4 pt-4 pb-1" role="separator">
+                  <span className="h-px flex-1 bg-[var(--border-color)]" />
+                  <span className="text-[11px] font-semibold text-[var(--text-muted)]">{formatDayLabel(message.createdAt)}</span>
+                  <span className="h-px flex-1 bg-[var(--border-color)]" />
+                </div>
+              )}
+              <MessageItem
+                message={message}
+                meId={meId}
+                compact={compact}
+                canInteract={canInteract}
+                participantsById={participantsById}
+                onJumpTo={jumpTo}
+                {...handlers}
+              />
+              {seenBy?.messageId === message.id && (
+                <p className="px-4 pl-[60px] pt-0.5 text-[11px] text-[var(--text-muted)]">{seenBy.label}</p>
+              )}
+            </React.Fragment>
+          );
+        })}
+
+        {bucket.error && bucket.loaded && (
+          <p className="px-4 pt-2 text-[12px] text-[#8b3133] dark:text-red-300">{bucket.error}</p>
+        )}
+
+        <div className="h-5 px-4 pl-[60px] pt-1 text-[11.5px] italic text-[var(--text-muted)]" aria-live="polite">
+          {typing.length > 0 ? typingLabel(typing) : ''}
+        </div>
       </div>
     </div>
   );

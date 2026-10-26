@@ -59,8 +59,8 @@ export function MyAttendanceLogTable({
   const pageButtons = Array.from({ length: Math.min(totalPages, 3) }, (_, i) => i + 1);
 
   return (
-    <div className={ATT_TABLE_SHELL}>
-      <div className="overflow-x-auto">
+    <div className={`attendance-punch-table ${ATT_TABLE_SHELL}`}>
+      <div className="attendance-log-desktop overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead className={ATT_TABLE_HEAD}>
             <tr>
@@ -174,6 +174,46 @@ export function MyAttendanceLogTable({
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="attendance-log-mobile">
+        {rows.length === 0 ? (
+          <div className="work-empty">No punches in this range. Clock in above, or widen the filters.</div>
+        ) : rows.map((row) => {
+          const rowKey = `${row.date}-${row.in}`;
+          const open = openDate === rowKey;
+          return (
+            <article key={rowKey} className="attendance-punch-card">
+              <header>
+                <button type="button" onClick={() => setOpenDate(open ? null : rowKey)} aria-expanded={open}>
+                  {row.date}<ChevronDown size={14} />
+                </button>
+                <AttendanceStatusPill kind={statusKind(row.status)} label={row.status} />
+              </header>
+              <dl>
+                <div><dt>Clock in / out</dt><dd>{row.in} / {row.out}</dd></div>
+                <div><dt>In / out location</dt><dd>{row.inLoc} / {row.outLoc}</dd></div>
+                {!isStudentMode && (
+                  <>
+                    <div><dt>Schedule / logged</dt><dd>{row.sched} / {row.logged}</dd></div>
+                    <div><dt>Variance</dt><dd className={deficitClass(row.deficit)}>{row.deficit}</dd></div>
+                  </>
+                )}
+              </dl>
+              {open && row.sessions && (
+                <ul className="att-log-sessions">
+                  {row.sessions.map((session) => (
+                    <li key={session.label}>
+                      <strong>{session.label}</strong>
+                      <span>{session.in} to {session.out}</span>
+                      <span>{session.loc}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          );
+        })}
       </div>
 
       <div className="att-log-foot">

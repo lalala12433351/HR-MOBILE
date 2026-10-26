@@ -1,6 +1,7 @@
 'use client';
+import './public-profile.css';
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useId, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Camera, Mail, Phone, User } from 'lucide-react';
 import { Employee } from '@/types';
 import { UserAvatar } from '@/components/common/UserAvatar';
@@ -16,6 +17,7 @@ export interface EmployeePublicProfilePanelProps {
   /** Optional controlled bio editor (Public Profile tab). */
   bioEditable?: boolean;
   bioDraft?: string;
+  bioActions?: React.ReactNode;
   onBioDraftChange?: (value: string) => void;
   /**
    * `peek` — coworker directory / org-chart modal.
@@ -51,8 +53,10 @@ function statusTone(status?: string): { label: string; className: string } | nul
   if (normalized === 'Notice Period') {
     return { label: 'Notice period', className: 'bg-[#faeeee] text-[#8b3133] border-[#8b3133]/25' };
   }
+  if (normalized === 'Not Activated' || normalized === 'Inactive') {
+    return { label: 'Inactive', className: 'bg-[#e8eef2] text-[#17324e] border-[#c5d0d8]' };
+  }
   if (
-    normalized === 'Not Activated' ||
     normalized === 'Invited' ||
     normalized === 'Suspended' ||
     normalized === 'Deactivated' ||
@@ -76,7 +80,8 @@ function PersonChip({
 }) {
   return (
     <div
-      className={`flex items-center gap-3 rounded-[12px] border px-3 py-2.5 ${
+      data-emphasize={emphasize}
+      className={`public-profile-person flex items-center gap-3 rounded-[12px] border px-3 py-2.5 ${
         emphasize
           ? 'border-[#17324e]/20 bg-[#f8fbfe] shadow-[0_8px_20px_-12px_rgba(23,50,78,0.22)]'
           : 'border-[#dde4e9] bg-white'
@@ -118,12 +123,14 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
   isUploadingAvatar = false,
   bioEditable = false,
   bioDraft,
+  bioActions,
   onBioDraftChange,
   variant = 'embedded',
   className = '',
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<ProfileTab>('summary');
+  const panelId = useId();
   const isPeek = variant === 'peek';
   const isPage = variant === 'page' || variant === 'embedded';
 
@@ -175,14 +182,18 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
 
   const avatarBlock = (
     <div
-      className={`relative shrink-0 ${showAvatarEdit ? 'cursor-pointer' : ''}`}
+      role={showAvatarEdit ? 'button' : undefined}
+      tabIndex={showAvatarEdit ? 0 : undefined}
+      aria-label={showAvatarEdit ? `Change photo for ${displayName}` : undefined}
+      onKeyDown={(event) => { if (showAvatarEdit && !isUploadingAvatar && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); fileInputRef.current?.click(); } }}
+      className={`public-profile-avatar relative shrink-0 ${showAvatarEdit ? 'cursor-pointer' : ''}`}
       onClick={() => {
         if (showAvatarEdit && !isUploadingAvatar) fileInputRef.current?.click();
       }}
       title={showAvatarEdit ? (isUploadingAvatar ? 'Uploading…' : 'Change profile picture') : undefined}
     >
       <div
-        className={`overflow-hidden rounded-full border-[3px] border-white bg-[#e8eef2] shadow-[0_12px_28px_-10px_rgba(23,34,52,0.4)] ${avatarSize}`}
+        className={`public-profile-avatar-image overflow-hidden rounded-full border-[3px] border-white bg-[#e8eef2] shadow-[0_12px_28px_-10px_rgba(23,34,52,0.4)] ${avatarSize}`}
       >
         <UserAvatar
           src={employee.avatar}
@@ -194,7 +205,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
       </div>
       {status && (
         <span
-          className={`absolute -bottom-1 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] ${status.className}`}
+          className={`public-profile-identity-status absolute -bottom-1 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] ${status.className}`}
         >
           {status.label}
         </span>
@@ -213,8 +224,8 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
   ];
 
   const summaryContent = (
-    <div className="space-y-8 animate-in fade-in duration-200">
-      <section>
+    <div className="public-profile-summary space-y-8 animate-in fade-in duration-200">
+      <section className="public-profile-about">
         <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">About</h3>
         {bioEditable ? (
           <>
@@ -226,7 +237,8 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
               placeholder="Write a short bio coworkers will see…"
               className="mt-3 min-h-[96px] w-full resize-y rounded-[7px] border border-[#c5d0d8] bg-white px-3 py-2.5 text-[13px] font-medium leading-relaxed text-[#172234] placeholder:text-[#5e6c7b] focus:border-[#17324e] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
             />
-            <p className="mt-1.5 text-right text-[12px] text-[#5e6c7b]">{(bioDraft ?? '').length}/500</p>
+            <p className="public-profile-bio-hint">Write a short bio coworkers will see.</p>
+            <div className="public-profile-bio-footer"><span>{(bioDraft ?? '').length}/500</span>{bioActions}</div>
           </>
         ) : showAbout ? (
           <p className="mt-3 text-[14px] leading-relaxed whitespace-pre-wrap text-[#5e6c7b]">{bioText}</p>
@@ -235,7 +247,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
         )}
 
         {skills.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-1.5">
+          <div className="public-profile-skills mt-4"><h4>Skills</h4><div className="flex flex-wrap gap-1.5">
             {skills.slice(0, 12).map((skill) => (
               <span
                 key={skill}
@@ -244,11 +256,11 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
                 {skill}
               </span>
             ))}
-          </div>
+          </div></div>
         )}
       </section>
 
-      <section>
+      <section className="public-profile-team">
         <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Team</h3>
         <div className="mt-4 max-w-md">
           {nextLevelManager && (
@@ -320,7 +332,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
   const personalContent = (
     <div className="animate-in fade-in duration-200">
       <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Contact & workplace</h3>
-      <dl className="mt-4 divide-y divide-[#dde4e9] border-y border-[#dde4e9]">
+      <dl className="public-profile-contact-grid mt-4 divide-y divide-[#dde4e9] border-y border-[#dde4e9]">
         {[
           {
             label: 'Email',
@@ -355,17 +367,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
             label: isInstitution ? 'Staff lead / HOD' : 'Line manager',
             value: (
               <span className="inline-flex items-center gap-2">
-                {managerDisplayAvatar && !isCartoonAvatar(managerDisplayAvatar) ? (
-                  <img
-                    src={managerDisplayAvatar}
-                    alt=""
-                    className="h-6 w-6 shrink-0 rounded-full border border-[#dde4e9] object-cover"
-                  />
-                ) : (
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#dde4e9] bg-[#e8eef2]">
-                    <User className="h-3 w-3 text-[#5e6c7b]" strokeWidth={2} />
-                  </span>
-                )}
+                {managerDisplayName && <UserAvatar src={managerDisplayAvatar} name={managerDisplayName} className="h-6 w-6 text-[10px]" />}
                 {managerDisplayName || 'None / top level'}
               </span>
             ),
@@ -394,7 +396,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
   );
 
   return (
-    <div className={`text-[#172234] ${className}`}>
+    <div className={`public-profile-panel text-[#172234] ${className}`} data-context={isPeek ? 'peek' : 'record'}>
       {showAvatarEdit && onAvatarFileChange && (
         <input
           type="file"
@@ -408,7 +410,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
 
       {/* Identity hero — light Clean Sheet, no muddy navy/gray slab */}
       <header
-        className={`relative border-b border-[#d8e8f2] bg-[#f8fbfe] ${
+        className={`public-profile-hero relative border-b border-[#d8e8f2] bg-[#f8fbfe] ${
           isPeek ? 'px-6 pb-7 pt-9 sm:px-8' : 'px-6 pb-8 pt-9 sm:px-10'
         }`}
       >
@@ -424,7 +426,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
             </p>
           ) : null}
 
-          <div className="mt-5 flex items-center justify-center gap-2.5">
+          <div className="public-profile-contact-actions mt-5 flex items-center justify-center gap-2.5">
             {email ? (
               <a
                 href={`mailto:${email}`}
@@ -432,7 +434,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
                 aria-label={`Email ${displayName}`}
                 title={email}
               >
-                <Mail className="h-4 w-4" strokeWidth={2} />
+                <Mail size={18} className="h-[18px] w-[18px]" strokeWidth={2} />
               </a>
             ) : null}
             {phone ? (
@@ -441,7 +443,6 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-[7px] bg-[#17324e] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#285275] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
                 aria-label={`Call ${displayName}`}
               >
-                <Phone className="h-3.5 w-3.5" strokeWidth={2} />
                 Call
               </a>
             ) : email ? (
@@ -459,11 +460,19 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
 
       {/* Tabs */}
       <div
-        className={`sticky top-0 z-10 border-b border-[#dde4e9] bg-white ${
+        className={`public-profile-tabs sticky top-0 z-10 border-b border-[#dde4e9] bg-white ${
           isPeek ? 'px-6 sm:px-8' : 'px-6 sm:px-10'
         }`}
       >
-        <nav className="flex gap-6" aria-label="Profile sections" role="tablist">
+        <nav className="flex gap-6" aria-label="Profile sections" role="tablist" onKeyDown={(event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+          const index = buttons.findIndex((button) => button === document.activeElement);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+          event.preventDefault();
+          buttons[next]?.focus();
+          buttons[next]?.click();
+        }}>
           {tabs.map((item) => {
             const active = tab === item.id;
             return (
@@ -471,6 +480,9 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
                 key={item.id}
                 type="button"
                 role="tab"
+                id={`${panelId}-tab-${item.id}`}
+                aria-controls={`${panelId}-content`}
+                tabIndex={active ? 0 : -1}
                 aria-selected={active}
                 onClick={() => setTab(item.id)}
                 className={`relative -mb-px py-3.5 text-[13px] font-bold tracking-[-0.01em] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2] focus-visible:ring-offset-2 ${
@@ -487,7 +499,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
         </nav>
       </div>
 
-      <div className={`px-6 py-6 sm:px-8 sm:py-7 ${isPage ? 'sm:px-10' : ''}`}>
+      <div role="tabpanel" id={`${panelId}-content`} aria-labelledby={`${panelId}-tab-${tab}`} className={`public-profile-body px-6 py-6 sm:px-8 sm:py-7 ${isPage ? 'sm:px-10' : ''}`}>
         {tab === 'summary' ? summaryContent : personalContent}
       </div>
     </div>

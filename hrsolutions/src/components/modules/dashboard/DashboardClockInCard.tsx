@@ -13,8 +13,14 @@ import {
   applyPunchToDailyRecord,
   attendanceElapsedSeconds,
   hasOpenAttendanceSession,
+  isArrivalLate,
+  isRemotePlace,
+  orgGraceMinutes,
+  sessionsFromRecord,
 } from '@/utils/attendancePunches';
-import { isWfhRegularization } from '@/utils/wfhRegularization';
+import { resolveEmployeeShiftTiming } from '@/utils/employeeShift';
+import { ensurePendingWfhRegularization, isWfhRegularization } from '@/utils/wfhRegularization';
+import { useWfhRejectionWatch } from '@/hooks/useWfhRejectionWatch';
 import type { AttendanceRegularization } from '@/types';
 
 function localToday() {
@@ -100,12 +106,15 @@ export const DashboardClockInCard: React.FC = () => {
   }, [offices, selectedLocation]);
 
   const todayStr = localToday();
-  const attendancePool = dashboardState.attendance?.length ? dashboardState.attendance : state.attendance || [];
-  const todayRecord = attendancePool.find(
-    (a) =>
-      a.date === todayStr &&
-      (a.employeeId === persona?.id || a.employeeName?.toLowerCase() === persona?.name?.toLowerCase())
-  );
+  const matchesToday = (a: AttendanceRecord) =>
+    a.date === todayStr &&
+    (a.employeeId === persona?.id || a.employeeName?.toLowerCase() === persona?.name?.toLowerCase());
+  const dashToday = dashboardState.attendance.find(matchesToday);
+  const appToday = (state.attendance || []).find(matchesToday);
+  const appOpen = hasOpenAttendanceSession(appToday, now);
+  const dashOpen = hasOpenAttendanceSession(dashToday, now);
+  const todayRecord =
+    appToday && dashToday && appOpen !== dashOpen ? appToday : dashToday || appToday;
   const hasPunchedToday = Boolean(todayRecord?.checkIn);
   const isCheckedIn = hasOpenAttendanceSession(todayRecord);
   const isCheckedOut = hasPunchedToday && !isCheckedIn;
@@ -148,103 +157,67 @@ export const DashboardClockInCard: React.FC = () => {
     ]);
   };
 
+  useWfhRejectionWatch(isCheckedIn, persona?.id, todayStr, () => {
+    if (!persona || !todayRecord || !hasOpenAttendanceSession(todayRecord)) return;
+    const timeStr = formatClock(new Date());
+    const closed = applyPunchToDailyRecord(todayRecord, {
+      type: 'check_out',
+      time: timeStr,
+      date: todayStr,
+      employeeId: persona.id,
+      employeeName: persona.name,
+      avatar: persona.avatar,
+      locationName: 'Work from home',
+      isWithinGeofence: false,
+      device: 'Dashboard',
+      status: todayRecord.status,
+    });
+    applyLocalRecord(closed);
+    void api.attendance.recordPunch({
+      employeeId: persona.id,
+      punchType: 'check_out',
+      deviceInfo: 'WFH regularization rejected',
+      workFromHome: true,
+    });
+    updateState((prev) => ({
+      ...prev,
+      regularizations: (prev.regularizations || []).map((reg: AttendanceRegularization) =>
+        reg.employeeId === persona.id &&
+        String(reg.date).slice(0, 10) === todayStr &&
+        reg.status === 'Pending' &&
+        isWfhRegularization(reg)
+          ? { ...reg, status: 'Rejected' as const }
+          : reg
+      ),
+    }));
+    void persistClockOutTaskSessions(
+      state.tasks,
+      state.timesheets,
+      persona.id,
+      persona.name,
+      Date.now()
+    ).catch(() => {});
+    triggerToast({
+      title: 'Punched out',
+      message: 'Your manager rejected work from home, so this session was closed.',
+      type: 'info',
+    });
+  });
+
   const submitPunch = async (payload: PunchConfirmPayload) => {
     if (!persona) return;
     setSaving(true);
     try {
       const lat = payload.latitude;
       const lng = payload.longitude;
-      const asRemote = payload.asRemote || selectedLocation === 'wfh';
       const selfiePhoto = payload.selfiePhoto;
       const notes = payload.notes ?? clockOutNotes;
-
-      // WFH / remote requires manager approval via Regularizations
-      if (asRemote) {
-        const today = localToday();
-        const existingPending = (state.regularizations || []).find(
-          (r) =>
-            r.employeeId === persona.id &&
-            r.date === today &&
-            r.status === 'Pending' &&
-            isWfhRegularization(r)
-        );
-        if (existingPending) {
-          triggerToast({
-            title: 'WFH already pending',
-            message: 'You already have a work-from-home request awaiting approval in Regularizations.',
-            type: 'info',
-          });
-          setModalOpen(false);
-          setSaving(false);
-          return;
-        }
-        const shiftStart =
-          attSettings?.workDayStartTime || attPolicies?.workDayStartTime || '09:00 AM';
-        const shiftEnd = attSettings?.workDayEndTime || attPolicies?.workDayEndTime || '06:00 PM';
-        const to24 = (t: string) => {
-          const m = String(t).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-          if (!m) return '09:00';
-          let h = parseInt(m[1], 10);
-          const mins = m[2];
-          const mer = m[3]?.toUpperCase();
-          if (mer === 'PM' && h < 12) h += 12;
-          if (mer === 'AM' && h === 12) h = 0;
-          return `${String(h).padStart(2, '0')}:${mins}`;
-        };
-        const created = await api.attendance.requestRegularization({
-          employeeId: persona.id,
-          date: today,
-          requestedCheckIn: to24(shiftStart),
-          requestedCheckOut: to24(shiftEnd),
-          reason: 'Work From Home',
-          remarks:
-            selectedLocation === 'wfh'
-              ? 'Work from home selected at punch time'
-              : 'Requested while outside office geofence',
-        });
-        if (!created.success) {
-          triggerToast({
-            title: 'Could not request WFH',
-            message: created.error?.message || 'Failed to submit work-from-home request.',
-            type: 'error',
-          });
-          setSaving(false);
-          return;
-        }
-        const newReg: AttendanceRegularization = {
-          id: created.data?.id || `reg_${Date.now()}`,
-          employeeId: created.data?.employee_id || persona.id,
-          employeeName: persona.name,
-          avatar: persona.avatar || '',
-          department: persona.department,
-          date: today,
-          requestedCheckIn: shiftStart,
-          requestedCheckOut: shiftEnd,
-          reason: 'Work From Home',
-          remarks:
-            selectedLocation === 'wfh'
-              ? 'Work from home selected at punch time'
-              : 'Requested while outside office geofence',
-          status: 'Pending',
-          appliedOn: today,
-        };
-        updateState((prev) => ({
-          ...prev,
-          regularizations: [newReg, ...(prev.regularizations || [])],
-        }));
-        setModalOpen(false);
-        setSelectedLocation(offices[0] || '');
-        triggerToast({
-          title: 'WFH request submitted',
-          message: 'Your manager can approve it under Attendance → Regularizations.',
-          type: 'success',
-        });
-        setSaving(false);
-        return;
-      }
-
       const punchType = isCheckedIn ? 'check_out' : 'check_in';
+      const openPlace = sessionsFromRecord(todayRecord).find((session) => !session.checkOut)?.locationName;
+      const asRemote =
+        punchType === 'check_out' ? isRemotePlace(openPlace) : payload.asRemote || selectedLocation === 'wfh';
       const timeStr = formatClock(new Date());
+
       const res = await api.attendance.recordPunch({
         employeeId: persona.id,
         punchType,
@@ -252,13 +225,13 @@ export const DashboardClockInCard: React.FC = () => {
         latitude: lat,
         longitude: lng,
         deviceInfo: [
-          'Dashboard · Web',
+          asRemote ? 'Work From Home' : 'Dashboard · Web',
           punchType === 'check_out' && notes.trim() ? notes.trim() : '',
         ]
           .filter(Boolean)
           .join(' · '),
         selfiePhoto: selfiePhoto || undefined,
-        workFromHome: false,
+        workFromHome: asRemote,
       });
 
       if (!res.success) {
@@ -285,6 +258,78 @@ export const DashboardClockInCard: React.FC = () => {
         }
       }
 
+      let wfhRegularization: AttendanceRegularization | null = null;
+      let waitingOnManager = false;
+      if (asRemote && punchType === 'check_in') {
+        const shiftStart =
+          attSettings?.workDayStartTime || attPolicies?.workDayStartTime || '09:00 AM';
+        const shiftEnd = attSettings?.workDayEndTime || attPolicies?.workDayEndTime || '06:00 PM';
+        try {
+          const filed = await ensurePendingWfhRegularization({
+            employeeId: persona.id,
+            employeeName: persona.name,
+            avatar: persona.avatar,
+            department: persona.department,
+            date: todayStr,
+            shiftStart,
+            shiftEnd,
+            remarks:
+              selectedLocation === 'wfh'
+                ? 'Work from home selected at punch time'
+                : 'Requested while outside office geofence',
+            existing: state.regularizations || [],
+          });
+          if (filed.kind === 'created') wfhRegularization = filed.regularization;
+          waitingOnManager = filed.kind === 'created' || filed.kind === 'pending';
+        } catch (err: any) {
+          triggerToast({
+            title: 'WFH request was not sent',
+            message: err?.message || 'You are punched in. Ask your manager if the request is missing.',
+            type: 'error',
+          });
+        }
+      }
+
+      const me = dashboardState.employees.find((employee) => employee.id === persona.id);
+      const timing = resolveEmployeeShiftTiming(
+        me || { id: persona.id },
+        state.customOptions?.shifts,
+        state.customOptions?.employeeShiftAssignments,
+        {
+          date: todayStr,
+          enableRosterShifts: attSettings?.enableRosterShifts,
+          rosterRotationCycle: attSettings?.rosterRotationCycle,
+          rosterMatrix: state.customOptions?.employeeRosterMatrix,
+        }
+      );
+      const assignedShift = state.customOptions?.shifts?.find((shift) => shift.id === timing?.shiftId);
+      const shiftStart = assignedShift?.startTime || timing?.startTime || attSettings?.workDayStartTime || attPolicies?.workDayStartTime || '09:00 AM';
+      const orgGrace = orgGraceMinutes(attSettings, attPolicies);
+      const graceMinutes = assignedShift
+        ? assignedShift.gracePeriodMinutes != null
+          ? Number(assignedShift.gracePeriodMinutes)
+          : orgGrace
+        : orgGrace;
+      const skipLate =
+        Boolean(timing?.isHourlyShift) ||
+        timing?.shiftId === 'OFF' ||
+        String(timing?.startTime || '').trim().toLowerCase() === 'flexible';
+      const firstPunch = punchType === 'check_in' && !todayRecord?.checkIn;
+      const placeName = asRemote ? 'Work from home' : selectedLocation || 'Office';
+      const places =
+        punchType === 'check_in'
+          ? [...sessionsFromRecord(todayRecord).map((session) => session.locationName), placeName]
+          : sessionsFromRecord(todayRecord).map((session) => session.locationName);
+      const everyLoginRemote = places.length > 0 && places.every((place) => isRemotePlace(place));
+      const lateArrival = firstPunch && !skipLate && isArrivalLate(new Date(), shiftStart, graceMinutes);
+      const punchStatus = lateArrival
+        ? 'Late'
+        : everyLoginRemote
+          ? 'Work From Home'
+          : todayRecord?.status === 'Late'
+            ? 'Late'
+            : 'Present';
+
       const record = applyPunchToDailyRecord(todayRecord, {
         type: punchType,
         time: timeStr,
@@ -292,23 +337,34 @@ export const DashboardClockInCard: React.FC = () => {
         employeeId: persona.id,
         employeeName: persona.name,
         avatar: persona.avatar,
-        locationName: asRemote ? 'Work from home' : selectedLocation || 'Office',
+        locationName:
+          punchType === 'check_out'
+            ? sessionsFromRecord(todayRecord).find((session) => !session.checkOut)?.locationName || placeName
+            : placeName,
         latitude: lat ?? 0,
         longitude: lng ?? 0,
         isWithinGeofence: !asRemote,
         ipAddress: todayRecord?.ipAddress || '',
         device: 'Dashboard',
-        status: asRemote ? 'Work From Home' : todayRecord?.status || 'Present',
+        status: punchStatus,
         selfiePhoto,
       });
       applyLocalRecord(record);
+      if (wfhRegularization) {
+        updateState((prev) => ({
+          ...prev,
+          regularizations: [wfhRegularization, ...(prev.regularizations || [])],
+        }));
+      }
       setModalOpen(false);
       setClockOutNotes('');
       triggerToast({
         title: punchType === 'check_in' ? 'Punched in' : 'Punched out',
         message:
           punchType === 'check_in'
-            ? `Recorded at ${timeStr}${asRemote ? ' · remote' : ''}.`
+            ? waitingOnManager
+              ? `Recorded at ${timeStr}. Waiting on your manager to approve work from home.`
+              : `Recorded at ${timeStr}${asRemote ? ' · work from home' : ''}.`
             : `Shift closed at ${timeStr}.`,
         type: 'success',
       });
@@ -354,6 +410,7 @@ export const DashboardClockInCard: React.FC = () => {
   return (
     <>
       <WorkdayClockCard
+        compact
         statusKind={statusKind}
         elapsedSeconds={elapsedSeconds}
         targetSeconds={shiftTargetSeconds(shiftStart, shiftEnd)}

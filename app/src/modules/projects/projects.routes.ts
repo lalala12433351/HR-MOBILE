@@ -3,6 +3,7 @@ import {
   getProjects,
   createProject,
   updateProject,
+  deleteProject,
   getUnbilledWork,
   listProjectInvoices,
   createProjectInvoice,
@@ -11,6 +12,7 @@ import {
   createTask,
   bulkCreateTasks,
   updateTask,
+  reorderTasks,
   deleteTask,
   verifyTaskTracking,
   logTimesheet,
@@ -29,16 +31,18 @@ projectRoutes.use(authenticateToken);
 projectRoutes.use(requireTenantContext);
 
 projectRoutes.get('/projects', getProjects);
-projectRoutes.post('/projects', requireRole(['super_admin', 'manager']), createProject);
+projectRoutes.post('/projects', createProject);
 projectRoutes.get('/projects/:id/unbilled', requireRole(['super_admin', 'manager', 'hr_manager']), getUnbilledWork);
 projectRoutes.get('/projects/:id/invoices', requireRole(['super_admin', 'manager', 'hr_manager']), listProjectInvoices);
 projectRoutes.post('/projects/:id/invoices', requireRole(['super_admin', 'manager', 'hr_manager']), createProjectInvoice);
 projectRoutes.patch('/invoices/:id', requireRole(['super_admin', 'manager', 'hr_manager']), updateInvoice);
 projectRoutes.patch('/projects/:id', requireRole(['super_admin', 'manager', 'hr_manager']), updateProject);
+projectRoutes.delete('/projects/:id', requireRole(['super_admin', 'manager', 'hr_manager']), deleteProject);
 
 projectRoutes.get('/tasks', getTasks);
 projectRoutes.post('/tasks', createTask);
 projectRoutes.post('/tasks/bulk', bulkCreateTasks);
+projectRoutes.post('/tasks/reorder', reorderTasks);
 projectRoutes.patch('/tasks/:id', updateTask);
 projectRoutes.delete('/tasks/:id', deleteTask);
 projectRoutes.post('/tasks/:id/verify-tracking', verifyTaskTracking);

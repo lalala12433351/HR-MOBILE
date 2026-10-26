@@ -1,0 +1,52 @@
+{
+  "title": "Employee onboarding rework",
+  "question": "Confirm the Operate layout before I rebuild. Documents stay empty until HR adds them either way.",
+  "buildPath": { "value": "code", "toggle": false },
+  "options": [
+    {
+      "id": "setup-rail",
+      "label": "Setup-matched rail",
+      "kicker": "RECOMMENDED",
+      "thesis": "Reuse company-setup structure: left stage rail, right form — Working Studio tokens throughout.",
+      "palette": ["#f3f5f7", "#ffffff", "#172234", "#17324e", "#53886b"],
+      "materials": ["cool mist canvas", "navy stage markers"],
+      "viewport": "Left: Pixbe + numbered stages. Right: task heading and form fields. Footer actions under the form.",
+      "risk": "Rail labels must stay task names, not ledes under the heading.",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          { "label": "stage rail", "x": 0, "y": 0, "w": 4, "h": 10, "accent": true },
+          { "label": "form content", "x": 4, "y": 0, "w": 8, "h": 10 }
+        ]
+      }
+    },
+    {
+      "id": "centered-panel",
+      "label": "Centered single panel",
+      "thesis": "One Quiet Mist page with a top stage strip and a single centered form panel.",
+      "palette": ["#f3f5f7", "#ffffff", "#172234", "#17324e"],
+      "materials": ["centered sheet", "stage strip"],
+      "viewport": "Brand + stages on top; one white panel for the current step; Back/Continue below.",
+      "risk": "Less guidance context between steps.",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          { "label": "brand + stages", "x": 2, "y": 0, "w": 8, "h": 1, "accent": true },
+          { "label": "form panel", "x": 2, "y": 2, "w": 8, "h": 6, "accent": true },
+          { "label": "actions", "x": 2, "y": 8, "w": 8, "h": 1 }
+        ]
+      }
+    },
+    {
+      "id": "proceed-as-specified",
+      "label": "Just build it clean",
+      "thesis": "Use the setup-matched rail, drop default documents, omit the documents step when HR has added none.",
+      "palette": ["#f3f5f7", "#ffffff", "#17324e"],
+      "materials": ["Working Studio"],
+      "viewport": "Same as Setup-matched rail.",
+      "risk": "Less choice, faster ship."
+    }
+  ]
+}

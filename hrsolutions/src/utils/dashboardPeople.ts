@@ -1,4 +1,6 @@
 import type { AttendanceRecord, Employee, Holiday, LeaveRequest } from '@/types';
+import { formatDateShort } from '@/utils/dates';
+import { leaveBelongsToEmployee } from '@/utils/mapLeaveRow';
 
 export function localDateKey(d = new Date()) {
   const y = d.getFullYear();
@@ -19,7 +21,64 @@ export function isLeaveActiveOn(
   if (leave.status !== 'Approved') return false;
   const start = dateKey(leave.startDate);
   const end = dateKey(leave.endDate) || start;
-  return Boolean(start && start <= day && end >= day);
+  const on = dateKey(day);
+  return Boolean(start && on && start <= on && end >= on);
+}
+
+export function isWfhLeaveType(leaveType?: string | null) {
+  const raw = String(leaveType || '').trim().toLowerCase();
+  return raw === 'wfh' || raw === 'home' || raw.includes('work from home');
+}
+
+/** Approved absence covering this calendar day. Work-from-home is not time off. */
+export function approvedAbsenceOnDay(
+  leaves: LeaveRequest[] | null | undefined,
+  person: Parameters<typeof leaveBelongsToEmployee>[1],
+  day: string
+) {
+  return (leaves || []).find(
+    (leave) =>
+      leaveBelongsToEmployee(leave, person) &&
+      isLeaveActiveOn(leave, day) &&
+      !isWfhLeaveType(leave.leaveType)
+  );
+}
+
+export function eachDateKey(start?: string | null, end?: string | null): string[] {
+  const from = dateKey(start);
+  const to = dateKey(end) || from;
+  if (!from || !to || from > to) return [];
+  const dates: string[] = [];
+  const cursor = new Date(`${from}T00:00:00`);
+  const last = new Date(`${to}T00:00:00`);
+  while (cursor <= last) {
+    dates.push(localDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+/** Approved absence days inside a period, skipping days the person also worked. */
+export function absenceDaysInPeriod(
+  leaves: LeaveRequest[] | null | undefined,
+  person: Parameters<typeof leaveBelongsToEmployee>[1],
+  periodStart: string,
+  periodEnd: string,
+  workedDates?: Set<string>
+) {
+  const days = new Set<string>();
+  const start = dateKey(periodStart);
+  const end = dateKey(periodEnd);
+  if (!start || !end) return days;
+  for (const leave of leaves || []) {
+    if (leave.status !== 'Approved' || isWfhLeaveType(leave.leaveType)) continue;
+    if (!leaveBelongsToEmployee(leave, person)) continue;
+    for (const day of eachDateKey(leave.startDate, leave.endDate)) {
+      if (day < start || day > end || workedDates?.has(day)) continue;
+      days.add(day);
+    }
+  }
+  return days;
 }
 
 function inactiveEmployee(emp?: Employee | null) {
@@ -139,9 +198,7 @@ export function joinersThisMonth(employees: Employee[], day?: string) {
 export function formatShortDate(value?: string | null) {
   const key = dateKey(value);
   if (!key) return '';
-  const d = new Date(`${key}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return key;
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return formatDateShort(key) || key;
 }
 
 export function formatWeekday(value?: string | null) {

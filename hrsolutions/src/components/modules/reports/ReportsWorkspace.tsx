@@ -1,8 +1,16 @@
 'use client';
+import { DateInput } from '@/components/common/DateInput';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileRow, MobileSection } from '@/components/mobile/MobilePrimitives';
 import Link from 'next/link';
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { ArrowRight, CalendarDays, ChevronRight, Download, FileSpreadsheet, Search, Settings2, SlidersHorizontal, X } from 'lucide-react';
+import { UserAvatar } from '@/components/common/UserAvatar';
+import { WorkspacePagination } from '@/components/common/WorkspacePagination';
+import styles from './reports-workspace.module.css';
+import { ResponsiveTable } from '@/components/common/ResponsiveTable';
 import { AppState } from '@/services/store';
 import { getDefaultReportSettings } from '@/utils/reportCatalog';
 import { isAdminPersona, isHRPersona, getTeamEmployees } from '@/utils/teamAccess';
@@ -11,6 +19,7 @@ import { UserReportView } from './UserReportView';
 import { buildUserReport } from '@/utils/userReport';
 import { downloadUserReportPdf, downloadUserReportXlsx } from '@/utils/userReportExport';
 import { buildPayrollRun } from '@/utils/payrollRun';
+import { isNamedWorkingDay, paidHolidayDates, workingDayNameSet } from '@/utils/holidays';
 
 type ReportId = 'overview' | 'workforce' | 'attendance' | 'compliance' | 'leave' | 'payroll' | 'delivery' | 'user';
 type Period = 'current' | 'previous' | 'quarter' | 'ytd' | 'custom';
@@ -24,17 +33,17 @@ type ServerSummary = {
 };
 
 const REPORTS: Array<{ id: ReportId; label: string }> = [
-  { id: 'overview', label: 'Executive overview' },
+  { id: 'overview', label: 'Overview' },
   { id: 'workforce', label: 'Workforce' },
-  { id: 'attendance', label: 'Attendance & punctuality' },
+  { id: 'attendance', label: 'Attendance' },
   { id: 'compliance', label: 'Time & compliance' },
-  { id: 'leave', label: 'Leave & availability' },
-  { id: 'payroll', label: 'Payroll readiness' },
-  { id: 'delivery', label: 'Work delivery' },
-  { id: 'user', label: 'User Report' },
+  { id: 'leave', label: 'Leave' },
+  { id: 'payroll', label: 'Payroll' },
+  { id: 'delivery', label: 'Delivery' },
+  { id: 'user', label: 'User report' },
 ];
 
-const dateKey = (value: Date) => value.toISOString().slice(0, 10);
+const dateKey = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 const dateOnly = (value?: string) => String(value || '').slice(0, 10);
 const number = (value: number) => new Intl.NumberFormat().format(Math.round(value));
 const percentage = (value: number) => `${Math.round(value * 10) / 10}%`;
@@ -44,8 +53,8 @@ function rangeFor(period: Period, customStart: string, customEnd: string) {
   const start = new Date(today.getFullYear(), today.getMonth(), 1);
   const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
   if (period === 'previous') {
-    start.setMonth(start.getMonth() - 1);
-    end.setMonth(end.getMonth() - 1);
+    start.setMonth(start.getMonth() - 1, 1);
+    end.setDate(0);
   }
   if (period === 'quarter') {
     start.setMonth(Math.floor(today.getMonth() / 3) * 3, 1);
@@ -74,41 +83,39 @@ function inRange(value: string | undefined, start: string, end: string) {
   return Boolean(current && current >= start && current <= end);
 }
 
-function workDays(start: string, end: string) {
+function workDays(start: string, end: string, workingDays?: string[]) {
+  const names = workingDayNameSet(workingDays);
   let total = 0;
   const cursor = new Date(`${start}T00:00:00`);
   const last = new Date(`${end}T00:00:00`);
   while (cursor <= last) {
-    if (cursor.getDay() !== 0 && cursor.getDay() !== 6) total += 1;
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+    if (isNamedWorkingDay(key, names)) total += 1;
     cursor.setDate(cursor.getDate() + 1);
   }
   return Math.max(1, total);
 }
 
 function StatCard({ label, value, comparison }: { label: string; value: string; comparison: string; accent?: string }) {
-  return (
-    <div className="people-studio__sheet people-studio__kpi">
-      <p className="people-studio__kpi-label">{label}</p>
-      <p className="people-studio__kpi-value">{value}</p>
-      <p className="people-studio__kpi-note">{comparison}</p>
-    </div>
-  );
+  return <div className={styles.metric}><p>{label}</p><strong>{value}</strong><span>{comparison}</span></div>;
 }
 
-function Section({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
-  return (
-    <section className={`people-studio__sheet people-studio__dept ${className}`}>
-      <div className="people-studio__dept-head">
-        <h2 className="people-studio__dept-name">{title}</h2>
-      </div>
-      {children}
-    </section>
-  );
+function Section({ title, children, className = '', action }: { title: string; children: React.ReactNode; className?: string; action?: React.ReactNode }) {
+  return <section className={`${styles.panel} ${className}`}><header className={styles.panelHead}><h2>{title}</h2>{action}</header>{children}</section>;
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="people-studio__empty">{children}</div>;
+  return <div className={styles.empty}><span className={styles.emptyMark}><FileSpreadsheet size={22} aria-hidden="true" /></span><p>{children}</p></div>;
 }
+
+function Status({ children, tone = 'info' }: { children: React.ReactNode; tone?: 'success' | 'warning' | 'info' | 'danger' }) {
+  return <span className={styles.status} data-tone={tone}>{children}</span>;
+}
+
+const formatRange = (start: string, end: string) => {
+  const format = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${format(start)} – ${format(end)}`;
+};
 
 type PdfTable = { title: string; headers: string[]; rows: Array<Array<string | number>> };
 
@@ -254,6 +261,7 @@ function downloadReportPdf({ organizationName, reportName, range, department, me
 }
 
 export function ReportsWorkspace({ state }: { state: AppState }) {
+  const mobile = useMobileViewport();
   const settings = { ...getDefaultReportSettings(), ...(state.customOptions?.reportSettings || {}) };
   const [report, setReport] = useState<ReportId>('overview');
   const [period, setPeriod] = useState<Period>('current');
@@ -265,17 +273,23 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
   const [serverSummary, setServerSummary] = useState<ServerSummary | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [exportError, setExportError] = useState('');
   const range = rangeFor(period, customStart, customEnd);
+  const rangeInvalid = period === 'custom' && (!customStart || !customEnd || customStart > customEnd);
+  useEffect(() => { setPage(1); }, [report, period, customStart, customEnd, department, query]);
   const previous = previousRange(range.start, range.end);
   const isExecutive = isAdminPersona(state.currentPersona) || isHRPersona(state.currentPersona);
   const isInstitute = String(state.organization?.industry || '').toLowerCase().includes('institute');
 
   useEffect(() => {
     let current = true;
-    if (department !== 'All') {
+    if (department !== 'All' || rangeInvalid) {
       setServerSummary(null);
       return () => { current = false; };
     }
+    setServerSummary(null);
     void api.reports.getSummary({ startDate: range.start, endDate: range.end })
       .then((response: any) => {
         if (current && response?.success && response.data) setServerSummary(response.data as ServerSummary);
@@ -284,7 +298,7 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
         if (current) setServerSummary(null);
       });
     return () => { current = false; };
-  }, [department, range.end, range.start]);
+  }, [department, range.end, range.start, rangeInvalid]);
 
   const employees = useMemo(() => {
     const source = isExecutive ? state.employees || [] : getTeamEmployees(state.currentPersona, state.employees || []);
@@ -298,17 +312,36 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
   const scopedRegularizations = useMemo(() => (state.regularizations || []).filter((item: any) => employeeIds.has(item.employeeId) && inRange(item.date, range.start, range.end)), [state.regularizations, employeeIds, range.end, range.start]);
   const tasks = useMemo(() => (state.tasks || []).filter((task: any) => isExecutive || employeeIds.has(task.assigneeId)), [state.tasks, isExecutive, employeeIds]);
   const projects = state.projects || [];
+  const deliveryRows = tasks.filter((task: any) => !query || `${task.title} ${task.projectName || ''} ${task.assigneeName || ''} ${task.status}`.toLowerCase().includes(query.toLowerCase()));
 
   const attendanceMetrics = useMemo(() => {
-    const present = new Set(scopedAttendance.filter((item: any) => ['Present', 'Late', 'Work From Home'].includes(item.status)).map((item: any) => `${item.employeeId}:${dateOnly(item.date)}`)).size;
+    const holidayDates = (start: string, end: string) =>
+      paidHolidayDates({
+        holidays: state.customOptions?.holidays,
+        start,
+        end,
+        workingDays: state.organization?.workingDays,
+      }).map((holiday) => holiday.date);
+    const withHolidays = (records: any[], people: any[], start: string, end: string) => {
+      const present = new Set(
+        records
+          .filter((item: any) => ['Present', 'Late', 'Work From Home'].includes(item.status))
+          .map((item: any) => `${item.employeeId}:${dateOnly(item.date)}`)
+      );
+      holidayDates(start, end).forEach((date) => {
+        people.forEach((employee: any) => present.add(`${employee.id}:${date}`));
+      });
+      return present.size;
+    };
+    const present = withHolidays(scopedAttendance, employees, range.start, range.end);
     const late = scopedAttendance.filter((item: any) => item.status === 'Late').length;
-    const expected = employees.length * workDays(range.start, range.end);
+    const expected = employees.length * workDays(range.start, range.end, state.organization?.workingDays);
     const rate = expected ? Math.min(100, (present / expected) * 100) : 0;
-    const priorPresent = new Set(priorAttendance.filter((item: any) => ['Present', 'Late', 'Work From Home'].includes(item.status)).map((item: any) => `${item.employeeId}:${dateOnly(item.date)}`)).size;
-    const priorExpected = employees.length * workDays(previous.start, previous.end);
+    const priorPresent = withHolidays(priorAttendance, employees, previous.start, previous.end);
+    const priorExpected = employees.length * workDays(previous.start, previous.end, state.organization?.workingDays);
     const priorRate = priorExpected ? Math.min(100, (priorPresent / priorExpected) * 100) : 0;
     return { present, late, expected, rate, priorRate, hours: scopedAttendance.reduce((sum: number, item: any) => sum + (Number(item.workingHours) || 0), 0) };
-  }, [employees.length, previous.end, previous.start, priorAttendance, range.end, range.start, scopedAttendance]);
+  }, [employees, previous.end, previous.start, priorAttendance, range.end, range.start, scopedAttendance, state.customOptions?.holidays, state.organization?.workingDays]);
 
   const leaveDays = scopedLeaves.filter((item: any) => item.status === 'Approved').reduce((sum: number, item: any) => sum + (Number(item.daysCount) || 0), 0);
   const completedTasks = tasks.filter((task: any) => ['Completed', 'Approved'].includes(task.status)).length;
@@ -318,9 +351,11 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
   const pendingRegularizations = scopedRegularizations.filter((item: any) => item.status === 'Pending');
 
   const trend = useMemo(() => {
-    const days = Math.min(7, Math.max(1, Math.round((new Date(`${range.end}T00:00:00`).getTime() - new Date(`${range.start}T00:00:00`).getTime()) / 86_400_000) + 1));
+    const today = dateKey(new Date());
+    const trendEnd = range.start <= today && today < range.end ? today : range.end;
+    const days = Math.min(7, Math.max(1, Math.round((new Date(`${trendEnd}T00:00:00`).getTime() - new Date(`${range.start}T00:00:00`).getTime()) / 86_400_000) + 1));
     return Array.from({ length: days }, (_, index) => {
-      const day = new Date(`${range.end}T00:00:00`);
+      const day = new Date(`${trendEnd}T00:00:00`);
       day.setDate(day.getDate() - (days - index - 1));
       const key = dateKey(day);
       const present = scopedAttendance.filter((item: any) => dateOnly(item.date) === key && ['Present', 'Late', 'Work From Home'].includes(item.status)).length;
@@ -330,12 +365,19 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
 
   const employeeRows = useMemo(() => employees.map((employee: any) => {
     const records = scopedAttendance.filter((item: any) => item.employeeId === employee.id);
-    const present = new Set(records.filter((item: any) => ['Present', 'Late', 'Work From Home'].includes(item.status)).map((item: any) => dateOnly(item.date))).size;
+    const presentDates = new Set(records.filter((item: any) => ['Present', 'Late', 'Work From Home'].includes(item.status)).map((item: any) => dateOnly(item.date)));
+    paidHolidayDates({
+      holidays: state.customOptions?.holidays,
+      start: range.start,
+      end: range.end,
+      workingDays: state.organization?.workingDays,
+    }).forEach((holiday) => presentDates.add(holiday.date));
+    const present = presentDates.size;
     const late = records.filter((item: any) => item.status === 'Late').length;
     const hours = records.reduce((sum: number, item: any) => sum + (Number(item.workingHours) || 0), 0);
     const leaves = scopedLeaves.filter((item: any) => item.employeeId === employee.id && item.status === 'Approved').reduce((sum: number, item: any) => sum + (Number(item.daysCount) || 0), 0);
-    return { employee, present, late, hours, leaves, rate: workDays(range.start, range.end) ? (present / workDays(range.start, range.end)) * 100 : 0 };
-  }).filter((item: any) => !query || `${item.employee.name} ${item.employee.employeeId} ${item.employee.department}`.toLowerCase().includes(query.toLowerCase())), [employees, query, range.end, range.start, scopedAttendance, scopedLeaves]);
+    return { employee, present, late, hours, leaves, rate: workDays(range.start, range.end, state.organization?.workingDays) ? (present / workDays(range.start, range.end, state.organization?.workingDays)) * 100 : 0 };
+  }).filter((item: any) => !query || `${item.employee.name} ${item.employee.employeeId} ${item.employee.department}`.toLowerCase().includes(query.toLowerCase())), [employees, query, range.end, range.start, scopedAttendance, scopedLeaves, state.customOptions?.holidays, state.organization?.workingDays]);
 
   const pageTitle = REPORTS.find((item) => item.id === report)?.label || 'Reports';
   const selectedUser = employees.find((employee: any) => employee.id === selectedUserId) || null;
@@ -352,11 +394,16 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
         settings: state.customOptions?.payrollSettings,
         salaryComponents: state.customOptions?.salaryComponents || [],
         fullDayMinimumHours: state.customOptions?.attendanceSettings?.fullDayMinimumHours,
+        companyCreatedAt: state.organization?.createdAt,
+        workingDays: state.organization?.workingDays,
+        holidays: state.customOptions?.holidays,
+        timeZone: state.organization?.timeZone,
+        attendanceSettings: state.customOptions?.attendanceSettings,
         year: start.getFullYear(),
         month: start.getMonth() + 1,
       }).lines[0] || null
     );
-  }, [range.start, selectedUser, state.attendance, state.customOptions, state.leaves, state.timesheets]);
+  }, [range.start, selectedUser, state.attendance, state.customOptions, state.leaves, state.organization, state.timesheets]);
   const userReport = useMemo(
     () =>
       selectedUser
@@ -368,9 +415,11 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
             tasks: state.tasks || [],
             timesheets: state.timesheets || [],
             payrollLine: userPayrollLine,
+            holidays: state.customOptions?.holidays,
+            workingDays: state.organization?.workingDays,
           })
         : null,
-    [range, selectedUser, state.attendance, state.leaves, state.tasks, state.timesheets, userPayrollLine]
+    [range, selectedUser, state.attendance, state.customOptions, state.leaves, state.organization, state.tasks, state.timesheets, userPayrollLine]
   );
   const exportTable = useMemo(() => {
     if (report === 'user') {
@@ -380,7 +429,7 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
       return {
         title: 'Work delivery',
         headers: ['Task', 'Project', 'Assignee', 'Due date', 'Status'],
-        rows: tasks.map((task: any) => [task.title, task.projectName || 'Unassigned', task.assigneeName || 'Unassigned', task.dueDate || 'No date', task.status]),
+        rows: deliveryRows.map((task: any) => [task.title, task.projectName || 'Unassigned', task.assigneeName || 'Unassigned', task.dueDate || 'No date', task.status]),
       };
     }
 
@@ -401,7 +450,7 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
       payroll: ['Employee', 'Department', 'Present days', 'Leave days', 'Payable days'],
     };
     return { title: report === 'overview' ? 'Attendance exceptions' : pageTitle, headers: configs[report], rows };
-  }, [employeeRows, pageTitle, report, tasks]);
+  }, [employeeRows, pageTitle, report, deliveryRows]);
 
   const exportCsv = () => {
     const csv = [exportTable.headers, ...exportTable.rows]
@@ -416,13 +465,14 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
   };
 
   const compactMetrics = [
-    { label: isInstitute ? 'Active students' : 'Active headcount', value: number(serverSummary?.workforce.activeHeadcount ?? employees.length), comparison: `${departments.length - 1} departments`, accent: '#17324e' },
+    { label: isInstitute ? 'Active students' : 'Active headcount', value: number(serverSummary?.workforce.activeHeadcount ?? employees.length), comparison: `${department === 'All' ? departments.length - 1 : 1} departments`, accent: '#17324e' },
     { label: 'Attendance rate', value: percentage(serverSummary?.attendance.attendanceRate ?? attendanceMetrics.rate), comparison: `${attendanceMetrics.rate >= attendanceMetrics.priorRate ? '+' : ''}${(attendanceMetrics.rate - attendanceMetrics.priorRate).toFixed(1)} pts`, accent: '#53886b' },
     { label: 'Approved leave', value: number(serverSummary?.leave.approvedDays ?? leaveDays), comparison: `${serverSummary?.leave.pendingRequests ?? pendingLeaves.length} pending`, accent: '#17324e' },
     { label: 'Task completion', value: percentage(serverSummary?.delivery.totalTasks ? (serverSummary.delivery.completedTasks / serverSummary.delivery.totalTasks) * 100 : taskRate), comparison: `${serverSummary?.delivery.overdueTasks ?? overdueTasks.length} overdue`, accent: '#53886b' },
   ];
 
   const exportPdf = async () => {
+    setExportError('');
     setIsExportingPdf(true);
     try {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -434,10 +484,12 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
           reportName: pageTitle,
           range,
           department,
-          metrics: compactMetrics,
+          metrics: reportMetrics.map((metric) => ({ ...metric, accent: '#17324e' })),
           table: exportTable,
         });
       }
+    } catch {
+      setExportError('The PDF could not be prepared. Please try again.');
     } finally {
       setIsExportingPdf(false);
     }
@@ -452,274 +504,128 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
     delivery: 'Work delivery',
   };
 
+  const openUser = (id: string) => { setSelectedUserId(id); setReport('user'); };
+  const resetFilters = () => { setDepartment('All'); setQuery(''); setPeriod('current'); setCustomStart(''); setCustomEnd(''); };
+  const hasFilters = department !== 'All' || Boolean(query) || period !== 'current';
+  const totalRows = report === 'delivery' ? deliveryRows.length : employeeRows.length;
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(totalRows / pageSize)));
+  const offset = (currentPage - 1) * pageSize;
+  const reportMetrics = report === 'delivery' ? [
+    { label: 'Assigned tasks', value: number(tasks.length), comparison: `${projects.length} projects` },
+    { label: 'Completed', value: number(completedTasks), comparison: `${percentage(taskRate)} completion` },
+    { label: 'Overdue', value: number(overdueTasks.length), comparison: 'Open tasks past their due date' },
+    { label: 'In progress', value: number(tasks.filter((task: any) => !['Completed', 'Approved', 'To Do', 'To do', 'Pending'].includes(task.status)).length), comparison: 'Across the current team' },
+  ] : report === 'overview' || report === 'workforce' ? compactMetrics : [
+    { label: 'Present days', value: number(attendanceMetrics.present), comparison: `${employees.length} people in scope` },
+    { label: 'Late arrivals', value: number(attendanceMetrics.late), comparison: `${percentage(attendanceMetrics.rate)} attendance` },
+    { label: 'Working hours', value: attendanceMetrics.hours.toFixed(1), comparison: 'Recorded attendance hours' },
+    { label: 'Approved leave', value: number(leaveDays), comparison: `${pendingLeaves.length} requests pending` },
+  ];
+  const pagination = <WorkspacePagination total={totalRows} page={currentPage} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} />;
+  const renderTable = () => report === 'delivery'
+    ? deliveryRows.length ? <DeliveryTable rows={deliveryRows.slice(offset, offset + pageSize)} /> : <Empty>No tasks match the current filters.</Empty>
+    : employeeRows.length ? <ReportTable rows={employeeRows.slice(offset, offset + pageSize)} mode={report === 'overview' || report === 'user' ? 'attendance' : report} onOpenUser={openUser} /> : <Empty>No people match the current filters.</Empty>;
+
+  if (mobile && report === 'overview') {
+    return <div className="m2-page">
+      <div className="m2-report-filters">
+        <label><span className="sr-only">Reporting period</span><select value={period} onChange={event => setPeriod(event.target.value as Period)}><option value="current">This month</option><option value="previous">Previous month</option><option value="quarter">This quarter</option><option value="ytd">Year to date</option><option value="custom">Custom range</option></select></label>
+        <label><span className="sr-only">Department</span><select value={department} onChange={event => setDepartment(event.target.value)}>{departments.map(item => <option key={item} value={item}>{item === 'All' ? 'My team' : item}</option>)}</select></label>
+      </div>
+      {period === 'custom' && <div className="m2-report-filters"><label>Start date<DateInput value={customStart} onChange={event => setCustomStart(event.target.value)} /></label><label>End date<DateInput value={customEnd} min={customStart || undefined} onChange={event => setCustomEnd(event.target.value)} /></label></div>}
+      <div className="m2-metric"><span>Attendance rate</span><strong>{percentage(attendanceMetrics.rate)}</strong></div>
+      <div className="m2-metric"><span>Project completion</span><strong>{percentage(taskRate)}</strong></div>
+      <MobileSection title="Explore reports">
+        <MobileRow title="Attendance & leave" detail="Presence, hours and absence trends" onClick={() => setReport('attendance')} />
+        <MobileRow title="Time & productivity" detail="Logged hours by project and person" onClick={() => setReport('compliance')} />
+        <MobileRow title="Payroll summary" detail="Period totals and employee reports" onClick={() => setReport('payroll')} />
+      </MobileSection>
+      <button type="button" className="m2-secondary" disabled={rangeInvalid || isExportingPdf} onClick={() => void exportPdf()}>{isExportingPdf ? 'Preparing report…' : 'Export report'}</button>
+      {exportError && <p role="alert" className="m2-empty">{exportError}</p>}
+    </div>;
+  }
   return (
-    <div className="people-studio">
-      <header className="people-studio__head">
-        <h1 className="people-studio__title">Reports</h1>
-        <div className="people-studio__actions">
-          <select aria-label="Reporting period" value={period} onChange={(event) => setPeriod(event.target.value as Period)} className="people-studio__select">
-            <option value="current">Current month</option>
-            <option value="previous">Previous month</option>
-            <option value="quarter">Current quarter</option>
-            <option value="ytd">Year to date</option>
-            <option value="custom">Custom range</option>
-          </select>
-          <button type="button" onClick={() => setFiltersOpen((open) => !open)} className="people-studio__btn people-studio__btn--secondary">Filters</button>
-          {report !== 'user' && settings.allowCsvExport !== false && (
-            <button type="button" onClick={exportCsv} className="people-studio__btn people-studio__btn--secondary">Export CSV</button>
-          )}
-          {report === 'user' && (
-            <button
-              type="button"
-              disabled={!userReport}
-              onClick={() => userReport && void downloadUserReportXlsx(userReport, String(state.organization?.name || 'Pixbe'))}
-              className="people-studio__btn people-studio__btn--secondary"
-            >
-              Export Excel
-            </button>
-          )}
-          <button type="button" onClick={() => void exportPdf()} disabled={isExportingPdf || (report === 'user' && !userReport)} className="people-studio__btn people-studio__btn--primary">
-            {isExportingPdf ? 'Preparing PDF' : 'Download PDF'}
-          </button>
-          {isExecutive && (
-            <Link href="/settings?section=reports" className="people-studio__btn people-studio__btn--secondary">Manage reports</Link>
-          )}
+    <div className={styles.workspace}>
+      {mobile && <button type="button" className="m2-row" onClick={() => setReport('overview')}>All reports</button>}
+      <header className={styles.pageHead}>
+        <h1>Reports</h1>
+        <div className={styles.actions}>
+          {isExecutive && <Link href="/settings?section=reports" className={styles.settingsLink}><Settings2 size={16} aria-hidden="true" />Report settings</Link>}
+          {report !== 'user' && settings.allowCsvExport !== false && <button type="button" disabled={rangeInvalid} onClick={exportCsv} className={styles.button}><FileSpreadsheet size={16} aria-hidden="true" />Export CSV</button>}
+          {report === 'user' && <button type="button" disabled={!userReport || rangeInvalid} onClick={() => { if (userReport) { setExportError(''); void downloadUserReportXlsx(userReport, String(state.organization?.name || 'Pixbe')).catch(() => setExportError('The Excel file could not be prepared. Please try again.')); } }} className={styles.button}><FileSpreadsheet size={16} aria-hidden="true" />Export Excel</button>}
+          <button type="button" onClick={() => void exportPdf()} disabled={rangeInvalid || isExportingPdf || (report === 'user' && !userReport)} className={`${styles.button} ${styles.primary}`}><Download size={16} aria-hidden="true" />{isExportingPdf ? 'Preparing PDF…' : 'Download PDF'}</button>
         </div>
       </header>
 
-      {filtersOpen && (
-        <div className="people-studio__sheet people-studio__sheet--pad people-studio__filters-grid">
-          {period === 'custom' && (
-            <>
-              <label className="people-studio__field">Start<input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} /></label>
-              <label className="people-studio__field">End<input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} /></label>
-            </>
-          )}
-          <label className="people-studio__field">
-            Department
-            <select value={department} onChange={(event) => setDepartment(event.target.value)}>
-              {departments.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          <label className="people-studio__field">
-            Search
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name or ID" />
-          </label>
-          <div className="flex items-end">
-            <button
-              type="button"
-              onClick={() => { setDepartment('All'); setQuery(''); setPeriod('current'); setCustomStart(''); setCustomEnd(''); }}
-              className="people-studio__btn people-studio__btn--ghost"
-            >
-              Reset filters
-            </button>
-          </div>
-        </div>
-      )}
-
-      <nav aria-label="Report collections" className="people-studio__tabs no-scrollbar">
-        {REPORTS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setReport(item.id)}
-            className={`people-studio__tab${report === item.id ? ' is-active' : ''}`}
-          >
-            {item.label}
-          </button>
-        ))}
+      <nav aria-label="Report collections" className={styles.tabs}>
+        {REPORTS.map((item) => <button key={item.id} type="button" aria-current={report === item.id ? 'page' : undefined} onClick={() => setReport(item.id)}>{item.label}</button>)}
       </nav>
 
-      {report !== 'user' && (
-        <div className="people-studio__kpis">
-          {compactMetrics.map((metric) => <StatCard key={metric.label} {...metric} />)}
-        </div>
-      )}
+      <div className={styles.toolbar}>
+        <label className={styles.search}><Search size={16} aria-hidden="true" /><input aria-label={report === 'delivery' ? 'Search tasks' : 'Search people'} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={report === 'delivery' ? 'Search task, project or assignee' : 'Search name, employee ID or department'} />{query && <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={14} /></button>}</label>
+        <label className={styles.field}>Department<select aria-label="Department" value={department} onChange={(event) => setDepartment(event.target.value)}>{departments.map((item) => <option key={item} value={item}>{item === 'All' ? 'All departments' : item}</option>)}</select></label>
+        <label className={styles.field}>Reporting period<select aria-label="Reporting period" value={period} onChange={(event) => setPeriod(event.target.value as Period)}><option value="current">Current month</option><option value="previous">Previous month</option><option value="quarter">Current quarter</option><option value="ytd">Year to date</option><option value="custom">Custom range</option></select></label>
+        <button type="button" aria-expanded={filtersOpen || period === 'custom'} aria-controls="report-date-filters" onClick={() => setFiltersOpen((open) => !open)} className={`${styles.button} ${styles.filterButton}`}><SlidersHorizontal size={16} aria-hidden="true" />Date range</button>
+        {hasFilters && <button type="button" onClick={resetFilters} className={styles.textButton}>Reset</button>}
+      </div>
+      {(filtersOpen || period === 'custom') && <div id="report-date-filters" className={styles.dateFilters}>
+        <label className={styles.field}>Start date<DateInput value={period === 'custom' ? customStart : range.start} max={customEnd || undefined} onChange={(event) => { setCustomStart(event.target.value); if (period !== 'custom') setCustomEnd(range.end); setPeriod('custom'); }} /></label>
+        <label className={styles.field}>End date<DateInput value={period === 'custom' ? customEnd : range.end} min={customStart || undefined} onChange={(event) => { setCustomEnd(event.target.value); if (period !== 'custom') setCustomStart(range.start); setPeriod('custom'); }} /></label>
+        {rangeInvalid && <p role="status">Choose a start and end date. The end date must be on or after the start date.</p>}
+      </div>}
+      {exportError && <p className={styles.error} role="alert">{exportError}</p>}
 
-      {report === 'user' ? (
-        <div className="grid min-h-0 gap-5 lg:grid-cols-[16.5rem_minmax(0,1fr)]">
-          <Section title="People">
-            {employeeRows.length ? (
-              <ul className="divide-y divide-[var(--border-color)]">
-                {employeeRows.map((item: any) => (
-                  <li key={item.employee.id}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedUserId(item.employee.id)}
-                      className={`flex w-full flex-col items-start px-3.5 py-2.5 text-left hover:bg-[#f8fbfe] ${selectedUserId === item.employee.id ? 'bg-[#f8fbfe]' : ''}`}
-                    >
-                      <span className="people-studio__role">{item.employee.name}</span>
-                      <span className="people-studio__quiet">{item.employee.department}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <Empty>No people match the current filters.</Empty>
-            )}
+      <div className={styles.scopeBar}><span><CalendarDays size={14} aria-hidden="true" />{rangeInvalid ? 'Choose a reporting period' : formatRange(range.start, range.end)}</span><span>{department === 'All' ? 'All departments' : department}</span><span>{number(employees.length)} {isInstitute ? 'students' : 'people'}</span>{report === 'delivery' && <span>Tasks · All time</span>}</div>
+
+      {rangeInvalid ? <Empty>Select a valid date range to view your report.</Empty> : report === 'user' ? (
+        <div className={styles.userLayout}>
+          <Section title={isInstitute ? 'Students' : 'People'} className={styles.peoplePanel} action={<span className={styles.count}>{employeeRows.length}</span>}>
+            {employeeRows.length ? <ul className={styles.peopleList}>{employeeRows.map((item: any) => <li key={item.employee.id}><button type="button" onClick={() => setSelectedUserId(item.employee.id)} aria-pressed={selectedUserId === item.employee.id}><UserAvatar name={item.employee.name} src={item.employee.avatar} className={styles.avatar} /><span><strong>{item.employee.name}</strong><small>{item.employee.department || 'No department'}</small></span><ChevronRight size={14} aria-hidden="true" /></button></li>)}</ul> : <Empty>No people match your search.</Empty>}
           </Section>
-          {userReport ? (
-            <UserReportView report={userReport} organizationName={String(state.organization?.name || 'Pixbe')} showExport={false} />
-          ) : (
-            <Empty>Select a person to open their report.</Empty>
-          )}
+          <div className={styles.userDetail}>{userReport ? <div className={styles.userReport}><UserReportView report={userReport} organizationName={String(state.organization?.name || 'Pixbe')} showExport={false} /></div> : <div className={styles.selectPerson}><Empty>Select a person to view attendance, tasks, leave, and payroll.</Empty></div>}</div>
         </div>
-      ) : report === 'overview' ? (
-        <>
-          <div className="people-studio__split people-studio__split--8-4">
-            <Section title="Attendance trend">
-              <div className="people-studio__chart">
-                {trend.some((item) => item.present) ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={trend} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                      <CartesianGrid stroke="var(--border-color)" vertical={false} />
-                      <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={{ border: '1px solid var(--border-color)', borderRadius: 7, fontSize: 12 }} />
-                      <Line type="monotone" dataKey="present" stroke="#17324e" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <Empty>No attendance records for this period.</Empty>
-                )}
-              </div>
-            </Section>
-            <Section title="Attention needed">
-              <div className="people-studio__attention">
-                {[
-                  { label: 'Late arrivals', value: attendanceMetrics.late, target: 'attendance' as ReportId },
-                  { label: 'Pending leave', value: pendingLeaves.length, target: 'leave' as ReportId },
-                  { label: 'Pending regularizations', value: pendingRegularizations.length, target: 'compliance' as ReportId },
-                  { label: 'Overdue tasks', value: overdueTasks.length, target: 'delivery' as ReportId },
-                ].map((item) => (
-                  <button key={item.label} type="button" onClick={() => setReport(item.target)}>
-                    {item.label}
-                    <span>{number(item.value)}</span>
-                  </button>
-                ))}
-              </div>
-            </Section>
-          </div>
-          <Section title={isInstitute ? 'Student attendance' : 'Attendance exceptions'}>
-            {employeeRows.length ? <ReportTable rows={employeeRows.slice(0, 8)} mode="attendance" /> : <Empty>No people match the current filters.</Empty>}
-          </Section>
-        </>
       ) : (
         <>
-          <div className="people-studio__split people-studio__split--7-5">
-            <Section title={pageTitle}>
-              <div className="people-studio__kpis is-flush">
-                {[['Present days', attendanceMetrics.present], ['Late arrivals', attendanceMetrics.late], ['Working hours', attendanceMetrics.hours.toFixed(1)], ['Approved leave', leaveDays]].map(([label, value]) => (
-                  <div key={String(label)} className="people-studio__kpi">
-                    <p className="people-studio__kpi-label">{label}</p>
-                    <p className="people-studio__kpi-value">{value}</p>
-                  </div>
-                ))}
-              </div>
+          <div className={styles.metrics}>{reportMetrics.map((metric) => <StatCard key={metric.label} {...metric} />)}</div>
+          {report === 'overview' && <div className={styles.overviewGrid}>
+            <Section title="Attendance trend" action={<span className={styles.count}>Last {trend.length} days of selected period</span>}>
+              <div className={styles.chart}>
+                {trend.some((item) => item.present) ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={trend} margin={{ top: 12, right: 20, left: -12, bottom: 0 }}><CartesianGrid stroke="var(--border-color)" vertical={false} strokeDasharray="3 4" /><XAxis dataKey="day" tick={{ fontSize: 12, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} tickMargin={12} /><YAxis allowDecimals={false} tick={{ fontSize: 12, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} /><Tooltip contentStyle={{ border: '1px solid var(--border-color)', borderRadius: 6, fontSize: 12, background: 'var(--bg-surface)', color: 'var(--text-primary)' }} /><Area isAnimationActive={false} type="monotone" dataKey="present" name="Present" stroke="var(--primary-blue)" fill="var(--studio-focus)" fillOpacity={0.5} strokeWidth={2} /></AreaChart></ResponsiveContainer> : <Empty>No attendance recorded for these dates.</Empty>}
+              </div><div className={styles.chartLegend}><i />Present, late, and work from home</div>
             </Section>
-            <Section title="Current scope">
-              <dl className="people-studio__scope">
-                <div>
-                  <dt>Period</dt>
-                  <dd>{range.start} to {range.end}</dd>
-                </div>
-                <div>
-                  <dt>Department</dt>
-                  <dd>{department}</dd>
-                </div>
-                <div>
-                  <dt>People</dt>
-                  <dd>{number(employees.length)}</dd>
-                </div>
-                <div>
-                  <dt>Projects</dt>
-                  <dd>{number(projects.length)}</dd>
-                </div>
-              </dl>
+            <Section title="Attention needed" action={<span className={styles.count}>In this period</span>}>
+              <div className={styles.attention}>{[
+                { label: 'Late arrivals', hint: 'Attendance & punctuality', value: attendanceMetrics.late, target: 'attendance' as ReportId },
+                { label: 'Pending leave', hint: 'Leave & availability', value: pendingLeaves.length, target: 'leave' as ReportId },
+                { label: 'Regularizations', hint: 'Awaiting a decision', value: pendingRegularizations.length, target: 'compliance' as ReportId },
+                { label: 'Overdue tasks', hint: 'Work delivery · All time', value: overdueTasks.length, target: 'delivery' as ReportId },
+              ].map((item) => <button key={item.label} type="button" onClick={() => setReport(item.target)}><span><strong>{item.label}</strong><small>{item.hint}</small></span><b>{number(item.value)}</b><ArrowRight size={15} aria-hidden="true" /></button>)}</div>
             </Section>
-          </div>
-          <Section title={tableTitle[report as Exclude<ReportId, 'overview' | 'user'>]}>
-            {report === 'delivery' ? <DeliveryTable rows={tasks} /> : employeeRows.length ? <ReportTable rows={employeeRows} mode={report} /> : <Empty>No records match the current filters.</Empty>}
+          </div>}
+          <Section title={report === 'overview' ? (isInstitute ? 'Student attendance' : 'Employee attendance') : tableTitle[report]} action={<span className={styles.count}>{totalRows} {report === 'delivery' ? 'tasks' : 'people'}</span>}>
+            {renderTable()}
+            {pagination}
           </Section>
+          <footer className={styles.pageFooter}><span>{report === 'delivery' ? 'All assigned tasks in your accessible workspace.' : 'Select an employee to open their detailed report.'}</span><span>{pageTitle}</span></footer>
         </>
       )}
     </div>
   );
 }
 
-function ReportTable({ rows, mode }: { rows: any[]; mode: Exclude<ReportId, 'overview' | 'delivery' | 'user'> | 'attendance' }) {
+function ReportTable({ rows, mode, onOpenUser }: { rows: any[]; mode: Exclude<ReportId, 'overview' | 'delivery' | 'user'> | 'attendance'; onOpenUser: (id: string) => void }) {
   const config = mode === 'leave' ? ['Employee', 'Department', 'Leave days', 'Attendance rate'] : mode === 'compliance' ? ['Employee', 'Department', 'Hours', 'Late', 'Status'] : mode === 'payroll' ? ['Employee', 'Department', 'Present days', 'Leave days', 'Payable days'] : mode === 'workforce' ? ['Employee', 'Department', 'Present days', 'Leave days', 'Attendance rate'] : ['Employee', 'Department', 'Present days', 'Late', 'Attendance rate'];
-  return (
-    <div className="people-studio__table-wrap">
-      <table>
-        <thead>
-          <tr>{config.map((label) => <th key={label}>{label}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.map((item) => {
-            const status = item.hours >= item.present * 8 ? 'On target' : 'Review';
-            return (
-              <tr key={item.employee.id}>
-                <td className="people-studio__role">{item.employee.name}</td>
-                <td className="people-studio__quiet">{item.employee.department}</td>
-                {mode === 'leave' ? (
-                  <>
-                    <td>{item.leaves}</td>
-                    <td>{percentage(item.rate)}</td>
-                  </>
-                ) : mode === 'compliance' ? (
-                  <>
-                    <td>{item.hours.toFixed(1)}</td>
-                    <td>{item.late}</td>
-                    <td>
-                      <span className={`people-studio__status ${status === 'On target' ? 'people-studio__status--ok' : 'people-studio__status--wait'}`}>{status}</span>
-                    </td>
-                  </>
-                ) : mode === 'payroll' ? (
-                  <>
-                    <td>{item.present}</td>
-                    <td>{item.leaves}</td>
-                    <td>{Math.max(0, item.present - item.leaves)}</td>
-                  </>
-                ) : (
-                  <>
-                    <td>{item.present}</td>
-                    <td>{mode === 'workforce' ? item.leaves : item.late}</td>
-                    <td>{percentage(item.rate)}</td>
-                  </>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
+  const rate = (value: number) => <span className={styles.rate}><span className={styles.rateTrack}><i style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></span>{percentage(value)}</span>;
+  return <div className={styles.tableScroll}><ResponsiveTable className={styles.table}><thead><tr>{config.map((label) => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{rows.map((item) => {
+    const status = item.hours >= item.present * 8 ? 'On target' : 'Review';
+    return <tr key={item.employee.id}>
+      <td><button type="button" className={styles.person} onClick={() => onOpenUser(item.employee.id)}><UserAvatar name={item.employee.name} src={item.employee.avatar} className={styles.avatar} /><span><strong>{item.employee.name}</strong><small>{item.employee.employeeId || item.employee.designation || 'View report'}</small></span></button></td>
+      <td><span className={styles.department}>{item.employee.department || '—'}</span></td>
+      {mode === 'leave' ? <><td>{item.leaves}</td><td>{rate(item.rate)}</td></> : mode === 'compliance' ? <><td>{item.hours.toFixed(1)}</td><td>{item.late}</td><td><Status tone={status === 'On target' ? 'success' : 'warning'}>{status}</Status></td></> : mode === 'payroll' ? <><td>{item.present}</td><td>{item.leaves}</td><td>{Math.max(0, item.present - item.leaves)}</td></> : <><td>{item.present}</td><td>{mode === 'workforce' ? item.leaves : item.late}</td><td>{rate(item.rate)}</td></>}
+    </tr>;
+  })}</tbody></ResponsiveTable></div>;
 }
 
 function DeliveryTable({ rows }: { rows: any[] }) {
-  return (
-    <div className="people-studio__table-wrap">
-      <table>
-        <thead>
-          <tr>
-            {['Task', 'Project', 'Assignee', 'Due date', 'Status'].map((label) => <th key={label}>{label}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((task) => (
-            <tr key={task.id}>
-              <td className="people-studio__role">{task.title}</td>
-              <td className="people-studio__quiet">{task.projectName || 'Unassigned'}</td>
-              <td className="people-studio__quiet">{task.assigneeName || 'Unassigned'}</td>
-              <td className="people-studio__quiet">{task.dueDate || 'No date'}</td>
-              <td>
-                <span className="people-studio__status people-studio__status--wait">{task.status}</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  return <div className={styles.tableScroll}><ResponsiveTable className={styles.table}><thead><tr>{['Task', 'Project', 'Assignee', 'Due date', 'Status'].map((label) => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{rows.map((task) => <tr key={task.id}><td className={styles.taskName}>{task.title}</td><td>{task.projectName || 'Unassigned'}</td><td>{task.assigneeName || 'Unassigned'}</td><td>{task.dueDate ? new Date(`${dateOnly(task.dueDate)}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'No date'}</td><td><Status tone={['Completed','Approved'].includes(task.status) ? 'success' : task.dueDate && task.dueDate < dateKey(new Date()) ? 'danger' : 'info'}>{task.status}</Status></td></tr>)}</tbody></ResponsiveTable></div>;
 }

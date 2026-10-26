@@ -68,7 +68,7 @@ export const SetPasswordForm: React.FC<SetPasswordFormProps> = ({ email, submitL
               setPassword(e.target.value);
               if (error) setError('');
             }}
-            placeholder="Create a strong password (8+ chars)"
+            placeholder="At least 8 characters"
             data-invalid={Boolean(error)}
             className="auth-field pr-11"
           />
@@ -81,7 +81,7 @@ export const SetPasswordForm: React.FC<SetPasswordFormProps> = ({ email, submitL
             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
-        <CognitoPasswordPolicyGuide password={password} showAlways={password.length > 0} />
+        <CognitoPasswordPolicyGuide password={password} showAlways />
       </div>
 
       <div className="space-y-1.5">

@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Paperclip, SendHorizontal, Smile, X } from 'lucide-react';
-import type { ChatMessage } from '@/services/chatTypes';
-import { EMOJI_SET, chatMediaKind, formatBytes, iconButton, type ChatMediaKind } from './chatUi';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp, Paperclip, Smile, X } from 'lucide-react';
+import type { ChatMessage, ChatParticipant } from '@/services/chatTypes';
+import { ChatAvatar, EMOJI_SET, chatMediaKind, formatBytes, iconButton, mentionPlainText, mentionToken, type ChatMediaKind } from './chatUi';
 
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -13,9 +13,20 @@ interface ComposerProps {
   placeholder: string;
   disabledReason?: string | null;
   replyTo: ChatMessage | null;
+  participants: ChatParticipant[];
+  meId: string;
   onCancelReply: () => void;
   onSend: (input: { body: string; parentMessageId: string | null; files: File[] }) => void;
   onTyping: () => void;
+}
+
+function mentionQueryAt(value: string, cursor: number): { start: number; query: string } | null {
+  if (cursor < 0) return null;
+  const upto = value.slice(0, cursor);
+  const match = upto.match(/(^|\s)@([^\s@\[\]]*)$/);
+  if (!match) return null;
+  const query = match[2];
+  return { start: cursor - query.length - 1, query };
 }
 
 export function Composer({
@@ -23,11 +34,16 @@ export function Composer({
   placeholder,
   disabledReason,
   replyTo,
+  participants,
+  meId,
   onCancelReply,
   onSend,
   onTyping,
 }: ComposerProps) {
   const [body, setBody] = useState('');
+  const [caret, setCaret] = useState(0);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionDismissed, setMentionDismissed] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -40,6 +56,9 @@ export function Composer({
     drafts.current.set(currentId.current, body);
     currentId.current = conversationId;
     setBody(drafts.current.get(conversationId) || '');
+    setCaret(0);
+    setMentionIndex(0);
+    setMentionDismissed(null);
     setFiles([]);
     setFileError(null);
     setEmojiOpen(false);
@@ -73,6 +92,22 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
   }, [body]);
 
+  const mention = mentionQueryAt(body, caret);
+  const mentionKey = mention ? `${mention.start}:${mention.query}` : null;
+  const mentionQuery = mention?.query ?? '';
+  const mentionMatches = useMemo(() => {
+    if (!mentionKey) return [];
+    const q = mentionQuery.trim().toLowerCase();
+    return participants
+      .filter((person) => person.employeeId !== meId && person.name.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [mentionKey, mentionQuery, participants, meId]);
+  const mentionOpen = !!mention && mentionDismissed !== mentionKey;
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionKey]);
+
   if (disabledReason) {
     return (
       <div className="chat-composer text-center text-[12.5px] text-[var(--text-secondary)]">
@@ -82,6 +117,22 @@ export function Composer({
   }
 
   const canSend = body.trim().length > 0 || files.length > 0;
+
+  const insertMention = (person: ChatParticipant) => {
+    const active = mentionQueryAt(body, caret);
+    if (!active) return;
+    const token = `${mentionToken(person.name, person.employeeId)} `;
+    const next = body.slice(0, active.start) + token + body.slice(caret);
+    const pos = active.start + token.length;
+    setBody(next);
+    setCaret(pos);
+    setMentionDismissed(null);
+    requestAnimationFrame(() => {
+      const el = textRef.current;
+      el?.focus();
+      el?.setSelectionRange(pos, pos);
+    });
+  };
 
   const submit = () => {
     if (!canSend) return;
@@ -135,7 +186,7 @@ export function Composer({
         <div className="mb-2 flex items-start gap-2 rounded-[8px] border-l-[3px] border-[#2d628e]/60 bg-[var(--bg-surface-subtle)] px-3 py-1.5">
           <div className="min-w-0 flex-1">
             <p className="text-[11.5px] font-semibold text-[var(--text-secondary)]">Replying to {replyTo.senderName || 'message'}</p>
-            <p className="truncate text-[12px] text-[var(--text-muted)]">{replyTo.body || 'Attachment'}</p>
+            <p className="truncate text-[12px] text-[var(--text-muted)]">{replyTo.body ? mentionPlainText(replyTo.body) : 'Attachment'}</p>
           </div>
           <button type="button" className={`${iconButton} h-6 w-6`} onClick={onCancelReply} aria-label="Cancel reply">
             <X className="h-3.5 w-3.5" />
@@ -176,12 +227,42 @@ export function Composer({
       {fileError && <p className="mb-2 text-[12px] text-[#8b3133] dark:text-red-300">{fileError}</p>}
 
       <div className="chat-composer-box relative">
+        {mentionOpen && (
+          <div
+            className="absolute bottom-[calc(100%+6px)] left-8 z-30 w-[260px] overflow-hidden rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)] py-1 shadow-[0_9px_22px_rgba(26,58,84,.12)]"
+            role="listbox"
+            aria-label="Mention someone"
+          >
+            {mentionMatches.length === 0 ? (
+              <p className="px-3 py-2 text-[12.5px] text-[var(--text-muted)]">No one in this chat matches.</p>
+            ) : (
+              mentionMatches.map((person, index) => (
+                <button
+                  key={person.employeeId}
+                  type="button"
+                  role="option"
+                  aria-selected={index === mentionIndex}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    insertMention(person);
+                  }}
+                  onMouseEnter={() => setMentionIndex(index)}
+                  className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[13px] ${
+                    index === mentionIndex ? 'bg-[var(--bg-surface-hover)]' : ''
+                  }`}
+                >
+                  <ChatAvatar name={person.name} src={person.avatarUrl} size={22} />
+                  <span className="truncate font-medium text-[var(--text-primary)]">{person.name}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
         <input
           ref={fileRef}
           type="file"
           multiple
-          className="sr-only"
-          tabIndex={-1}
+          className="hidden"
           onChange={(e) => {
             addFiles(e.target.files);
             e.target.value = '';
@@ -236,9 +317,37 @@ export function Composer({
           placeholder={placeholder}
           onChange={(e) => {
             setBody(e.target.value);
+            setCaret(e.target.selectionStart ?? e.target.value.length);
             if (e.target.value.trim()) onTyping();
           }}
+          onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+          onKeyUp={(e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === 'Tab' || e.key === 'Escape') return;
+            setCaret(e.currentTarget.selectionStart ?? 0);
+          }}
           onKeyDown={(e) => {
+            if (mentionOpen && mentionMatches.length > 0) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setMentionIndex((index) => (index + 1) % mentionMatches.length);
+                return;
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setMentionIndex((index) => (index - 1 + mentionMatches.length) % mentionMatches.length);
+                return;
+              }
+              if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+                e.preventDefault();
+                insertMention(mentionMatches[Math.min(mentionIndex, mentionMatches.length - 1)]);
+                return;
+              }
+            }
+            if (e.key === 'Escape' && mentionOpen) {
+              e.preventDefault();
+              setMentionDismissed(mentionKey);
+              return;
+            }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();
@@ -257,14 +366,14 @@ export function Composer({
           type="button"
           onClick={submit}
           disabled={!canSend}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] bg-[#17324e] text-white transition-colors hover:bg-[#285275] disabled:bg-[var(--bg-surface-subtle)] disabled:text-[var(--text-muted)]"
+          className="chat-send-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] bg-[#17324e] text-white transition-colors hover:bg-[#285275] disabled:bg-[var(--bg-surface-subtle)] disabled:text-[var(--text-muted)]"
           aria-label="Send message"
           title="Send (Enter)"
         >
-          <SendHorizontal className="h-4 w-4" />
+          <ArrowUp className="h-4 w-4" />
         </button>
       </div>
-      <p className="mt-1 hidden text-[10.5px] text-[var(--text-muted)] sm:block">Enter to send · Shift + Enter for a new line</p>
+      <p className="chat-composer-hint mt-1 hidden text-[10.5px] text-[var(--text-muted)] sm:block">Enter to send · Shift + Enter for a new line</p>
     </div>
   );
 }

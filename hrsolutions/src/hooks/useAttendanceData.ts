@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/services/apiClient';
 import { safeApiCall } from '@/hooks/safeApiCall';
-import { mapApiTask } from '@/services/backendSync';
-import { Employee, Project, Task, AttendanceRecord, LeaveRequest, AttendanceRegularization, AuditLogItem, Student } from '@/types';
-import { aggregatePunchesToDaily, mapStudentAttendanceToRecords } from '@/utils/attendancePunches';
+import { mapApiTask, mapApiTimesheet } from '@/services/backendSync';
+import { Employee, Project, Task, AttendanceRecord, LeaveRequest, AttendanceRegularization, AuditLogItem, Student, TimesheetEntry } from '@/types';
+import { aggregateOptionsFromSettings, aggregatePunchesToDaily, mapStudentAttendanceToRecords } from '@/utils/attendancePunches';
+import { subscribeAttendanceCheckout, patchAttendanceCheckout } from '@/utils/attendanceSessionEvents';
 import { mapLeaveRow } from '@/utils/mapLeaveRow';
 import { applyLeaveBalancesToEmployees } from '@/utils/applyLeaveBalances';
 import { splitRegularizationReason } from '@/utils/wfhRegularization';
@@ -16,6 +17,7 @@ export function useAttendanceData() {
     regularizations: [] as AttendanceRegularization[],
     projects: [] as Project[],
     tasks: [] as Task[],
+    timesheets: [] as TimesheetEntry[],
     students: [] as Student[],
     auditLogs: [] as AuditLogItem[]
   });
@@ -26,17 +28,19 @@ export function useAttendanceData() {
 
     async function fetchData() {
       try {
-        const [empRes, punchRes, leaveRes, regRes, projRes, taskRes, auditRes, studentRes, studentAttRes, balRes] = await Promise.all([
+        const [empRes, punchRes, leaveRes, regRes, projRes, taskRes, timeRes, auditRes, studentRes, studentAttRes, balRes, settingsRes] = await Promise.all([
           safeApiCall(api.identity.getEmployees(), [] as any[]),
           safeApiCall(api.attendance.getPunches(), [] as any[]),
           safeApiCall(api.attendance.getLeaves(), [] as any[]),
           safeApiCall(api.attendance.getRegularizations(), [] as any[]),
           safeApiCall(api.projects.getProjects(), [] as any[]),
           safeApiCall(api.projects.getTasks(), [] as any[]),
+          safeApiCall(api.projects.getTimesheets(), [] as any[]),
           safeApiCall(api.auditComms.getAuditLogs(), [] as any[]),
           safeApiCall(api.institute.getStudents(), [] as any[]),
           safeApiCall(api.institute.getStudentAttendance(), [] as any[]),
           safeApiCall(api.attendance.getLeaveBalances(), [] as any[]),
+          safeApiCall(api.setup.getSettings(), {} as any),
         ]);
 
         if (!isMounted) return;
@@ -66,7 +70,16 @@ export function useAttendanceData() {
           const employeeLookup = Object.fromEntries(
             newData.employees.map((e) => [e.id, { name: e.name, avatar: e.avatar }])
           );
-          newData.attendance = aggregatePunchesToDaily(punchRes.data, { employeeLookup });
+          const people = newData.employees.map((employee) => ({
+            id: employee.id,
+            shiftId: employee.shiftId,
+            shiftTiming: employee.shiftTiming,
+            salaryType: employee.salaryType,
+          }));
+          newData.attendance = aggregatePunchesToDaily(punchRes.data, {
+            employeeLookup,
+            ...aggregateOptionsFromSettings(settingsRes.success ? settingsRes.data : null, people),
+          });
         }
 
         if (studentRes && studentRes.success && Array.isArray(studentRes.data)) {
@@ -158,6 +171,10 @@ export function useAttendanceData() {
           newData.tasks = taskRes.data.map(mapApiTask);
         }
 
+        if (timeRes.success && Array.isArray(timeRes.data)) {
+          newData.timesheets = timeRes.data.map(mapApiTimesheet);
+        }
+
         if (auditRes.success && Array.isArray(auditRes.data)) {
           newData.auditLogs = auditRes.data.map((l: any) => ({
             id: l.id,
@@ -182,6 +199,12 @@ export function useAttendanceData() {
     return () => {
       isMounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    return subscribeAttendanceCheckout((detail) => {
+      setBusinessData((prev) => ({ ...prev, attendance: patchAttendanceCheckout(prev.attendance, detail) }));
+    });
   }, []);
 
   const updateBusinessData = (updates: Partial<typeof businessData>) => {

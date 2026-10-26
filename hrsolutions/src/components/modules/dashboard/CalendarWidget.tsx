@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, ChevronDown, ExternalLink } from 'lucide-rea
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
-import { generateInitialHolidays } from '@/data/holidayTemplates';
+import { localDateKey } from '@/utils/dashboardPeople';
 
 /* ─────────────────────────────────────────────
    CalendarWidget — redesigned with Linear/Notion
@@ -17,7 +17,7 @@ export const CalendarWidget: React.FC<{ className?: string }> = ({ className = '
   const dashboardState = useDashboardContext();
   const router = useRouter();
 
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => localDateKey());
   const [currentViewDate, setCurrentViewDate] = useState(() => new Date());
   const [showPicker, setShowPicker] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
@@ -78,13 +78,13 @@ export const CalendarWidget: React.FC<{ className?: string }> = ({ className = '
   const handleJumpToToday = () => {
     const now = new Date();
     setCurrentViewDate(now);
-    setSelectedDate(now.toISOString().split('T')[0]);
+    setSelectedDate(localDateKey(now));
     setShowPicker(false);
   };
 
   // Synchronized Attendance & Holiday Data from AppContext
   const holidaysMap = useMemo(() => {
-    const holidays = state.customOptions?.holidays || generateInitialHolidays();
+    const holidays = state.customOptions?.holidays || [];
     const map = new Map<string, string[]>();
     holidays.forEach((h) => {
       if (h.isApproved !== false && h.date) {
@@ -122,7 +122,7 @@ export const CalendarWidget: React.FC<{ className?: string }> = ({ className = '
         const curr = new Date(start);
         
         while (curr <= end) {
-          const dateStr = curr.toISOString().split('T')[0];
+          const dateStr = `${curr.getFullYear()}-${String(curr.getMonth() + 1).padStart(2, '0')}-${String(curr.getDate()).padStart(2, '0')}`;
           const list = map.get(dateStr) || [];
           list.push({ name: l.employeeName || 'Staff', type: l.leaveType || 'Leave' });
           map.set(dateStr, list);
@@ -133,11 +133,14 @@ export const CalendarWidget: React.FC<{ className?: string }> = ({ className = '
     return map;
   }, [dashboardState.leaves, state.leaves]);
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }, []);
 
   // Compute month calendar cells
   const calendarDays = useMemo(() => {
-    const firstDayIndex = new Date(year, month, 1).getDay(); // 0 = Sunday
+    const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7; // Monday first
     const daysInCurrentMonth = new Date(year, month + 1, 0).getDate();
     const daysInPrevMonth = new Date(year, month, 0).getDate();
 
@@ -347,7 +350,7 @@ export const CalendarWidget: React.FC<{ className?: string }> = ({ className = '
 
       {/* ─── Day-of-week headers ─── */}
       <div className="cal-w-dow-row">
-        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+        {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => (
           <span key={d} className="cal-w-dow">{d}</span>
         ))}
       </div>

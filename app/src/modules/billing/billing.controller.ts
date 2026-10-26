@@ -106,15 +106,24 @@ function withSeller(req: Request, invoice: any) {
   return { ...invoice, ...sellerFromTenant(req) };
 }
 
+const BILLING_DETAIL_ROLES = new Set(['super_admin', 'hr_manager', 'manager']);
+
 export async function listClients(req: Request, res: Response): Promise<void> {
   try {
     await ensureBillingSchema(req);
-    const result = await req.tenantQuery!(
-      `SELECT c.*,
-              (SELECT COUNT(*)::int FROM projects p WHERE p.client_id = c.id) AS project_count
-       FROM billing_clients c
-       ORDER BY lower(c.name)`
-    );
+    const canReadBillingDetails = BILLING_DETAIL_ROLES.has(String(req.user?.role || ''));
+    const result = canReadBillingDetails
+      ? await req.tenantQuery!(
+          `SELECT c.*,
+                  (SELECT COUNT(*)::int FROM projects p WHERE p.client_id = c.id) AS project_count
+           FROM billing_clients c
+           ORDER BY lower(c.name)`
+        )
+      : await req.tenantQuery!(
+          `SELECT c.id, c.name, c.company_name
+           FROM billing_clients c
+           ORDER BY lower(c.name)`
+        );
     res.json({ success: true, data: result.rows });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });

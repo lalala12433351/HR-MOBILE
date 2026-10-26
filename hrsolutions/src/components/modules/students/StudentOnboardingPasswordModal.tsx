@@ -187,7 +187,7 @@ export const StudentOnboardingPasswordModal: React.FC<StudentOnboardingPasswordM
                   type={showNewPass ? 'text' : 'password'}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="At least 8 characters (mixed case, number, symbol)"
+                  placeholder="At least 8 characters"
                   required
                   className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 sm:px-4 py-2.5 sm:py-3 pr-10 text-sm text-[var(--text-primary)] placeholder-slate-400 font-medium outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-300 transition-all"
                 />
@@ -199,7 +199,7 @@ export const StudentOnboardingPasswordModal: React.FC<StudentOnboardingPasswordM
                   {showNewPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              <CognitoPasswordPolicyGuide password={newPassword} showAlways={newPassword.length > 0} />
+              <CognitoPasswordPolicyGuide password={newPassword} showAlways />
             </div>
 
             {/* Confirm Password */}

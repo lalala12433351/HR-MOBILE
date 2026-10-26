@@ -10,6 +10,7 @@ import { AuthService } from '../services/authService';
 import { showRealtimeToast, dismissRealtimeToast } from '../lib/sonnerToast';
 import { showAppNotification } from '../lib/native';
 import { useAppNotificationBridge } from '../hooks/useAppNotificationBridge';
+import { returnAssignedInProgressTasksToTodo } from '../utils/taskBoard';
 
 interface AppContextType {
   state: AppState;
@@ -52,6 +53,17 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+function readAuthPersist(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    if (sessionStorage.getItem('BOS_AUTH_PERSIST') === '0') return false;
+    if (localStorage.getItem('BOS_AUTH_PERSIST') === '0') return false;
+  } catch {
+    return true;
+  }
+  return true;
+}
+
 export function AppProvider({ children }: { children?: React.ReactNode }) {
   const router = useRouter();
   const [state, setState] = useState<AppState>(getDefaultState);
@@ -67,6 +79,7 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
   const [inboxHydrated, setInboxHydrated] = useState(false);
   // Bumped on logout so in-flight sync results are ignored
   const authEpochRef = useRef(0);
+  const logoutStartedRef = useRef(false);
 
   useAppNotificationBridge(
     state.notifications,
@@ -153,33 +166,63 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
       });
     }
 
-    // Auth is credential-backed only (staff token or student session marker)
-    const token = api.getToken();
-    if (token) {
-      loaded.isAuthenticated = true;
-      if (!loaded.currentPersona) {
-        const session = AuthService.getSession();
-        if (session) {
-          loaded.currentPersona = {
-            id: session.sub,
-            name: session.name || session.email || 'User',
-            email: session.email || '',
-            role: session.role as any,
-            designation: session.role === 'super_admin' ? 'Founder & CEO' : 'Team Member',
-            department: session.role === 'student' ? 'Academic' : 'Management',
-            avatar: '',
-          };
-        }
+    // Do not treat a stored flag as a login. Confirm the authorization token first.
+    loaded.isAuthenticated = false;
+    loaded.currentPersona = null;
+
+    void (async () => {
+      const authorization = await api.verifyStoredAuthorization();
+      if (epoch !== authEpochRef.current) return;
+
+      if (authorization.status !== 'authorized' || !api.getToken()) {
+        loaded.isAuthenticated = false;
+        loaded.currentPersona = null;
+        setState(loaded);
+        setIsLoaded(true);
+        setBackendStatus('disconnected');
+        setInboxHydrated(false);
+        return;
       }
-    } else if (!loaded.isAuthenticated) {
-      loaded.currentPersona = null;
-    }
 
-    setState(loaded);
-    setIsLoaded(true);
+      loaded.isAuthenticated = true;
+      const session = AuthService.getSession();
+      const verified = authorization.user;
+      if (session) {
+        loaded.currentPersona = {
+          id: session.sub,
+          name: session.name || session.email || 'User',
+          email: session.email || '',
+          role: session.role as any,
+          designation: session.role === 'super_admin' ? 'Founder & CEO' : 'Team Member',
+          department: session.role === 'student' ? 'Academic' : 'Management',
+          avatar: '',
+        };
+      } else if (verified?.email && verified.role) {
+        const persist = readAuthPersist();
+        const restored = AuthService.setSession({
+          token: api.getToken(),
+          sub: verified.sub || verified.id,
+          email: verified.email,
+          role: verified.role as any,
+          tenantId: verified.tenantId || api.getTenantId(),
+          dbSchema: verified.tenantSchema,
+          name: verified.name,
+          persist,
+        });
+        loaded.currentPersona = {
+          id: restored.sub,
+          name: restored.name || restored.email || 'User',
+          email: restored.email || '',
+          role: restored.role as any,
+          designation: verified.designation || (restored.role === 'super_admin' ? 'Founder & CEO' : 'Team Member'),
+          department: verified.department || (restored.role === 'student' ? 'Academic' : 'Management'),
+          avatar: verified.avatar || '',
+        };
+      }
 
-    // Only fetch live backend records when user is logged in with an active token
-    if (token) {
+      setState(loaded);
+      setIsLoaded(true);
+
       api
         .ensureFreshToken()
         .then(() => syncBackendDataToState(loaded))
@@ -204,10 +247,7 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
           setBackendStatus('disconnected');
           setInboxHydrated(true);
         });
-    } else {
-      setBackendStatus('disconnected');
-      setInboxHydrated(false);
-    }
+    })();
   }, []);
 
   // Save state on changes
@@ -371,42 +411,62 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
   };
 
   const logout = useCallback(() => {
-    // Invalidate any in-flight sync before clearing credentials
-    authEpochRef.current += 1;
-    api.clearAuth();
+    if (logoutStartedRef.current) return;
+    logoutStartedRef.current = true;
 
-    const loggedOutState: AppState = {
-      ...getDefaultState(),
-      isAuthenticated: false,
-      currentPersona: null,
-      notifications: [],
-      customOptions: state.customOptions,
-      auditLogs: [
-        {
-          id: `log_${Date.now()}`,
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          user: state.currentPersona?.name || 'User',
-          action: 'USER_LOGGED_OUT',
-          entity: 'UserSession',
-          entityId: state.currentPersona?.id || 'session',
-          ipAddress: '106.51.72.18',
-          details: `User signed out of session`,
-        },
-      ],
-    };
+    const persona = state.currentPersona;
+    const customOptions = state.customOptions;
+    const hadToken = Boolean(api.getToken());
 
-    // Persist logged-out UI state synchronously so refresh cannot resurrect the session
-    saveStoredState(loggedOutState);
-    setState(loggedOutState);
-    setBackendStatus('disconnected');
-    setInboxHydrated(false);
+    void (async () => {
+      if (hadToken && persona?.id && persona.role !== 'student') {
+        try {
+          await Promise.race([
+            returnAssignedInProgressTasksToTodo(persona.id, persona.name || ''),
+            new Promise((resolve) => setTimeout(resolve, 12000)),
+          ]);
+        } catch (err) {
+          console.error('Failed to move in-progress tasks back to To Do on logout', err);
+        }
+      }
 
-    // Hard navigation resets React state and kills pending soft redirects
-    if (typeof window !== 'undefined') {
-      window.location.assign('/login');
-    } else {
-      router.replace('/login');
-    }
+      // Invalidate any in-flight sync before clearing credentials
+      authEpochRef.current += 1;
+      setInboxHydrated(false);
+      api.clearAuth();
+
+      const loggedOutState: AppState = {
+        ...getDefaultState(),
+        isAuthenticated: false,
+        currentPersona: null,
+        notifications: [],
+        customOptions,
+        auditLogs: [
+          {
+            id: `log_${Date.now()}`,
+            timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+            user: persona?.name || 'User',
+            action: 'USER_LOGGED_OUT',
+            entity: 'UserSession',
+            entityId: persona?.id || 'session',
+            ipAddress: '106.51.72.18',
+            details: `User signed out of session. In-progress tasks moved back to To Do.`,
+          },
+        ],
+      };
+
+      // Persist logged-out UI state synchronously so refresh cannot resurrect the session
+      saveStoredState(loggedOutState);
+      setState(loggedOutState);
+      setBackendStatus('disconnected');
+
+      // Hard navigation resets React state and kills pending soft redirects
+      if (typeof window !== 'undefined') {
+        window.location.assign('/login');
+      } else {
+        router.replace('/login');
+      }
+    })();
   }, [router, state.currentPersona, state.customOptions]);
 
   const selectPersona = (persona: UserPersona) => {

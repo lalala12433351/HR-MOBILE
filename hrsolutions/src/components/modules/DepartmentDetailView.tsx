@@ -1,4 +1,5 @@
 'use client';
+import './people-attendance.css';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -23,6 +24,7 @@ import {
   suggestDepartmentCode,
 } from '@/utils/departmentCode';
 import { refreshEmployeeManagerLinks } from '@/utils/refreshEmployeeManagers';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 
 export type DepartmentSavePatch = {
   id: string;
@@ -83,9 +85,10 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
   );
 
   const [activeTab, setActiveTab] = useState<'general' | 'members' | 'setting'>('general');
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(canEdit);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [formName, setFormName] = useState(departmentName);
   const [formCode, setFormCode] = useState(record?.shortCode || suggestDepartmentCode(departmentName));
@@ -99,8 +102,8 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
     setFormCode(record?.shortCode || suggestDepartmentCode(departmentName));
     setFormDescription(record?.description || '');
     setFormLeadIds(leadIdsOf(record));
-    setIsEditing(false);
-  }, [record?.id, record?.name, record?.shortCode, record?.description, recordLeadKey, departmentName]);
+    setIsEditing(canEdit);
+  }, [canEdit, record?.id, record?.name, record?.shortCode, record?.description, recordLeadKey, departmentName]);
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -173,17 +176,21 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!canEdit) return;
     if (members.length > 0) {
       showToast('Move or unassign members before deleting this department.');
       return;
     }
-    if (!window.confirm(`Delete department “${departmentName}”? This cannot be undone.`)) return;
+    setConfirmDeleteOpen(true);
+  };
+
+  const confirmDeleteDepartment = async () => {
     setDeleting(true);
     try {
       const id = await resolveRecordId();
       await api.org.deleteDepartment(id);
+      setConfirmDeleteOpen(false);
       onDeleted(id, departmentName);
     } catch (err: any) {
       showToast(err?.message || 'Failed to delete department');
@@ -213,7 +220,7 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="department-profile-studio space-y-6">
       {toastMessage && (
         <div className="fixed top-6 right-6 z-50 bg-[#172234] text-white px-4 py-2.5 rounded-[12px] shadow-xl text-xs font-bold flex items-center gap-2">
           <span>{toastMessage}</span>
@@ -231,10 +238,10 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <div className="lg:col-span-4 xl:col-span-3 w-full bg-white rounded-[12px] p-6 sm:p-7 shadow-xs space-y-5 text-[#172234] border border-[#dde4e9]">
-          <div className="flex flex-col items-center text-center space-y-2">
-            <div className="w-24 h-24 rounded-full overflow-hidden bg-[#e8eef2] flex items-center justify-center text-[#17324e] border-2 border-[#dde4e9]">
+      <div className="department-profile-grid grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="department-profile-sidebar lg:col-span-4 xl:col-span-3 w-full bg-white rounded-[12px] p-6 sm:p-7 shadow-xs space-y-5 text-[#172234] border border-[#dde4e9]">
+          <div className="department-profile-identity flex flex-col items-center text-center space-y-2">
+            <div className="department-profile-monogram w-24 h-24 rounded-full overflow-hidden bg-[#e8eef2] flex items-center justify-center text-[#17324e] border-2 border-[#dde4e9]">
               {initials ? (
                 <span className="text-2xl font-bold tracking-tight">{initials}</span>
               ) : (
@@ -272,13 +279,15 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
           </div>
         </div>
 
-        <div className="lg:col-span-8 xl:col-span-9 space-y-6">
-          <div className="flex items-center gap-6 sm:gap-8 border-b border-[#dde4e9] overflow-x-auto scrollbar-none pb-0 bg-white px-6 pt-3 rounded-[12px] shadow-xs">
+        <div className="department-profile-content lg:col-span-8 xl:col-span-9 space-y-6">
+          <div role="tablist" aria-label="Department details" className="department-profile-tabs flex items-center gap-6 sm:gap-8 border-b border-[#dde4e9] overflow-x-auto scrollbar-none pb-0 bg-white px-6 pt-3 rounded-[12px] shadow-xs">
             {tabs.map((tab) => {
               const isActive = activeTab === tab.id;
               return (
                 <button
                   key={tab.id}
+                  role="tab"
+                  aria-selected={isActive}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
                   className={`border-b-2 px-1 pb-3 text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
@@ -303,6 +312,7 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
                     onClick={() => setIsEditing(!isEditing)}
                     className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f3f5f7] cursor-pointer"
                     title={isEditing ? 'Cancel' : 'Edit department'}
+                    aria-label={isEditing ? 'Cancel editing department' : 'Edit department'}
                   >
                     <Edit2 className="w-4 h-4" strokeWidth={1.75} />
                   </button>
@@ -376,7 +386,7 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
                     />
                   </div>
                   <div className="flex justify-end gap-2.5 pt-3 border-t border-[#f3f5f7]">
-                    <button type="button" onClick={() => setIsEditing(false)} className={secondaryBtn}>
+                    <button type="button" onClick={() => { setFormName(record?.name || departmentName); setFormCode(record?.shortCode || suggestDepartmentCode(departmentName)); setFormDescription(record?.description || ''); setFormLeadIds(leadIdsOf(record)); setIsEditing(false); }} className={secondaryBtn}>
                       Cancel
                     </button>
                     <button type="submit" disabled={saving} className={primaryBtn}>
@@ -403,7 +413,7 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
                       key={emp.id}
                       type="button"
                       onClick={() => onSelectEmployee(emp)}
-                      className="w-full flex items-center gap-3 py-3 text-left hover:bg-[#f8fbfe] rounded-[8px] px-1 cursor-pointer"
+                      className="department-member-row w-full flex items-center gap-3 py-3 text-left hover:bg-[#f8fbfe] rounded-[8px] px-1 cursor-pointer"
                     >
                       <UserAvatar src={emp.avatar} name={emp.name} className="h-9 w-9 text-[11px]" />
                       <div className="min-w-0 flex-1">
@@ -440,7 +450,7 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
                 )}
               </div>
               {canEdit && (
-                <div className="bg-white border border-[#faeeee] rounded-[12px] p-6 space-y-3">
+                <div className="department-danger-zone bg-white border border-[#faeeee] rounded-[12px] p-6 space-y-3">
                   <h3 className="text-[15px] font-bold text-[#8b3133]">Delete department</h3>
                   <p className="text-xs text-[#5e6c7b]">
                     {members.length > 0
@@ -461,6 +471,17 @@ export const DepartmentDetailView: React.FC<DepartmentDetailViewProps> = ({
           )}
         </div>
       </div>
+      {confirmDeleteOpen && (
+        <ConfirmDialog
+          title={`Delete “${departmentName}”?`}
+          description="This permanently removes the department from the workspace. This cannot be undone."
+          confirmLabel="Delete department"
+          busy={deleting}
+          busyLabel="Deleting…"
+          onCancel={() => setConfirmDeleteOpen(false)}
+          onConfirm={() => void confirmDeleteDepartment()}
+        />
+      )}
     </div>
   );
 };

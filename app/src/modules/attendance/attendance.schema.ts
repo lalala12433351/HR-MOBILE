@@ -129,6 +129,7 @@ export const requestLeaveSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'endDate must be in YYYY-MM-DD format'),
   daysCount: z.number().or(z.string().transform(Number)).pipe(z.number().min(0.5).max(365)),
   reason: z.string().min(2, 'Reason must be at least 2 characters').max(1000),
+  attachmentUrl: z.string().max(2_000_000).optional().nullable(),
 });
 
 export const holidayItemSchema = z.object({
@@ -212,6 +213,7 @@ export const requestRegularizationSchema = z.object({
   requestedCheckOut: optionalClockTime,
   reason: z.string().min(1).max(1000),
   remarks: z.string().max(1000).optional(),
+  creditCompOff: z.boolean().optional(),
 });
 
 export const regularizationStatusSchema = z.object({
@@ -237,6 +239,17 @@ export const toggleBreakSchema = z.object({
   employeeId: z.string().min(1),
   isOnBreak: z.boolean(),
   breakType: z.string().max(32).optional(),
+});
+
+export const presencePingSchema = z.object({
+  latitude: z.number().gte(-90).lte(90),
+  longitude: z.number().gte(-180).lte(180),
+  accuracy: z.number().gte(0).lte(100000).optional().nullable(),
+});
+
+export const missedCheckoutSchema = z.object({
+  workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  time: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/),
 });
 
 export const workplaceLocationCheckSchema = z.object({

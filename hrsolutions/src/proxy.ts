@@ -2,14 +2,22 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 const LOCAL_APP_ORIGIN = 'http://localhost:3000';
-const APP_ORIGIN = (
-  process.env.NEXT_PUBLIC_APP_ORIGIN ||
-  (process.env.NODE_ENV === 'production' ? 'https://app.pixbe.in' : LOCAL_APP_ORIGIN)
-).replace(/\/+$/, '');
-const MASTER_ADMIN_ORIGIN = (
-  process.env.NEXT_PUBLIC_MASTER_ADMIN_ORIGIN ||
-  (process.env.NODE_ENV === 'production' ? 'https://masteradmin.pixbe.in' : LOCAL_APP_ORIGIN)
-).replace(/\/+$/, '');
+const APP_PIXBE_IN = 'https://app.pixbe.in';
+const PROD_MASTER_ADMIN_ORIGIN = 'https://masteradmin.pixbe.in';
+
+function resolveOrigin(envValue: string | undefined, prodFallback: string): string {
+  const raw = (envValue || '').trim().replace(/\/+$/, '');
+  if (!raw || /https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/i.test(raw)) {
+    return process.env.NODE_ENV === 'production' ? prodFallback : LOCAL_APP_ORIGIN;
+  }
+  return raw;
+}
+
+const APP_ORIGIN = resolveOrigin(process.env.NEXT_PUBLIC_APP_ORIGIN, APP_PIXBE_IN);
+const MASTER_ADMIN_ORIGIN = resolveOrigin(
+  process.env.NEXT_PUBLIC_MASTER_ADMIN_ORIGIN,
+  PROD_MASTER_ADMIN_ORIGIN
+);
 
 function hostOf(origin: string): string {
   try {

@@ -1,6 +1,8 @@
 import React from 'react';
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import './mobile.css';
+import './mobile-v2.css';
 import { AppShell } from '@/components/layout/AppShell';
 
 export const metadata: Metadata = {
@@ -13,7 +15,7 @@ export const viewport: Viewport = {
   themeColor: '#f3f5f7',
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({
@@ -23,7 +25,7 @@ export default function RootLayout({
 }) {
   return (
     <html
-      lang="en"
+      lang="en-GB"
       className="font-sans"
       data-theme="light"
     >

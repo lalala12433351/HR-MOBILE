@@ -1,11 +1,12 @@
 'use client';
+import './finance-studio.css';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { AppState } from '@/services/store';
-import { PayrollIncentive, PayrollRecord } from '@/types';
+import { Employee, PayrollIncentive, PayrollRecord } from '@/types';
 import { api } from '@/services/apiClient';
 import {
   buildPayrollRun,
@@ -14,6 +15,9 @@ import {
 } from '@/utils/payrollRun';
 import { BankDisbursementRow, buildBankDisbursementRows, downloadPayrollWorkbook } from '@/utils/payrollExcel';
 import { PayrollHeaderSwitch } from './PayrollHeaderSwitch';
+import { UserAvatar } from '@/components/common/UserAvatar';
+import { Check, Settings2 } from 'lucide-react';
+import { FinanceNote, FinanceStatus } from './FinanceUi';
 import { UserReportModal } from '@/components/modules/reports/UserReportModal';
 import { buildUserReport } from '@/utils/userReport';
 
@@ -25,10 +29,12 @@ interface PayrollRunModuleProps {
   step: PayrollStep;
 }
 
-const inr = (value: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(
-    Number(value) || 0
-  );
+const money = (value: number, currency: string) =>
+  new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: currency || 'INR',
+    maximumFractionDigits: 0,
+  }).format(Number(value) || 0);
 
 const controlClass =
   'h-10 rounded-[7px] border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 text-sm font-semibold text-[var(--text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[#2d628e] focus-visible:ring-offset-1';
@@ -42,6 +48,7 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [periodSlice, setPeriodSlice] = useState('');
   const [incentives, setIncentives] = useState<PayrollIncentive[]>([]);
   const [draftReady, setDraftReady] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -68,6 +75,12 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
   }, [month, year, incentives, draftReady]);
 
   const employees = state.employees || [];
+  const payCurrency =
+    state.customOptions?.payrollSettings?.defaultCurrency ||
+    state.customOptions?.employeeIdSettings?.defaultCurrency ||
+    'INR';
+  const inr = (value: number) => money(value, payCurrency);
+  const payFrequency = String(state.customOptions?.payrollSettings?.defaultPayFrequency || 'Monthly');
 
   const run = useMemo(
     () =>
@@ -81,10 +94,16 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
         salaryComponents: state.customOptions?.salaryComponents || [],
         incentives,
         fullDayMinimumHours: state.customOptions?.attendanceSettings?.fullDayMinimumHours,
+        companyCreatedAt: state.organization?.createdAt,
+        workingDays: state.organization?.workingDays,
+        holidays: state.customOptions?.holidays,
+        timeZone: state.organization?.timeZone,
+        attendanceSettings: state.customOptions?.attendanceSettings,
+        periodSlice,
         year,
         month,
       }),
-    [employees, state.attendance, state.leaves, state.timesheets, state.customOptions, incentives, year, month]
+    [employees, state.attendance, state.leaves, state.timesheets, state.customOptions, state.organization, incentives, year, month, periodSlice]
   );
 
   const visibleLines = useMemo(() => {
@@ -112,6 +131,8 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
       tasks: state.tasks || [],
       timesheets: state.timesheets || [],
       payrollLine: reportLine,
+      holidays: state.customOptions?.holidays,
+      workingDays: state.organization?.workingDays,
     });
 
   const addIncentive = () => {
@@ -182,48 +203,46 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
   const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-5">
-      <header className="flex shrink-0 flex-col gap-4 border-b border-[var(--border-color)] pb-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <PayrollHeaderSwitch active="payroll" />
-          <p className="mt-1 max-w-[62ch] text-[14px] leading-6 text-[var(--text-secondary)]">
-            Review hours, LOP and deductions, then add incentives and export.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <select value={month} onChange={(event) => setMonth(Number(event.target.value))} aria-label="Pay month" className={controlClass}>
-            {monthOptions.map((value) => (
-              <option key={value} value={value}>
-                {new Date(2026, value - 1, 1).toLocaleDateString('en-IN', { month: 'long' })}
-              </option>
-            ))}
-          </select>
-          <select value={year} onChange={(event) => setYear(Number(event.target.value))} aria-label="Pay year" className={controlClass}>
-            {years.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search employee"
-            aria-label="Search employee"
-            className={`${controlClass} w-[11.5rem] font-normal`}
-          />
-          <Link href="/settings?section=payroll" className={secondaryBtn}>
-            Settings
-          </Link>
-        </div>
+    <div className="finance-page payroll-studio flex flex-1 flex-col gap-5">
+      <header className="finance-page-head">
+        <h1>Payroll</h1>
+        <PayrollHeaderSwitch active="payroll" />
       </header>
+      <nav className="finance-steps" aria-label="Payroll steps">
+        {([
+          { id: 'review', label: 'Review', href: '/payroll' },
+          { id: 'adjustments', label: 'Incentives', href: '/payroll/adjustments' },
+          { id: 'export', label: 'Export', href: '/payroll/export' },
+        ] as const).map((item, index) => {
+          const current = ['review', 'adjustments', 'export'].indexOf(step);
+          return <Link key={item.id} href={item.href} aria-current={step === item.id ? 'step' : undefined} data-complete={index < current}><span>{index < current ? <Check size={13} /> : index + 1}</span>{item.label}</Link>;
+        })}
+      </nav>
+      <div className="finance-pay-filters">
+        <label htmlFor="pay-month">Pay month<select id="pay-month" value={month} onChange={(event) => setMonth(Number(event.target.value))} className={controlClass}>
+          {monthOptions.map((value) => <option key={value} value={value}>{new Date(2026, value - 1, 1).toLocaleDateString('en-IN', { month: 'long' })}</option>)}
+        </select></label>
+        {payFrequency !== 'Monthly' && (
+          <label htmlFor="pay-period">Pay period<select id="pay-period" value={periodSlice} onChange={(event) => setPeriodSlice(event.target.value)} className={controlClass}>
+            <option value="">{payFrequency === 'Weekly' ? 'This week' : 'This half'}</option>
+            {payFrequency === 'Weekly'
+              ? [1, 8, 15, 22, 29].map((day) => <option key={day} value={String(day)}>Days {day}-{Math.min(day + 6, new Date(year, month, 0).getDate())}</option>)
+              : [{ value: 'first', label: '1st-15th' }, { value: 'second', label: '16th-end' }].map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select></label>
+        )}
+        <label htmlFor="pay-year">Pay year<select id="pay-year" value={year} onChange={(event) => setYear(Number(event.target.value))} className={controlClass}>
+          {years.map((value) => <option key={value} value={value}>{value}</option>)}
+        </select></label>
+        <label className="finance-employee-search" htmlFor="pay-search">Search employee<input id="pay-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, department or payroll group" className={controlClass} /></label>
+        <Link href="/settings?section=payroll" className="finance-settings-link"><Settings2 size={14} />Payroll settings</Link>
+      </div>
 
-      <div className="grid shrink-0 grid-cols-2 gap-4 lg:grid-cols-4">
-        <SummaryCard label="Company net" value={inr(run.totals.totalNet)} hint={run.totals.periodLabel} />
-        <SummaryCard label="Employees" value={String(run.totals.employeeCount)} hint={`Paid on day ${run.totals.disbursementDay}`} />
-        <SummaryCard label="Gross + incentives" value={inr(run.totals.totalGross + run.totals.totalIncentives)} hint={`${inr(run.totals.totalIncentives)} incentives`} />
+      <div className="finance-summary-grid grid shrink-0 grid-cols-2 gap-4 lg:grid-cols-4">
+        <SummaryCard tone="amber" label="Company net" value={inr(run.totals.totalNet)} hint={run.totals.periodLabel} />
+        <SummaryCard tone="violet" label="Employees" value={String(run.totals.employeeCount)} hint={`Paid on day ${run.totals.disbursementDay}`} />
+        <SummaryCard tone="amber" label="Gross + incentives" value={inr(run.totals.totalGross + run.totals.totalIncentives)} hint={`${inr(run.totals.totalIncentives)} incentives`} />
         <SummaryCard
-          label="Deductions & LOP"
+          tone="rose" label="Deductions & LOP"
           value={inr(run.totals.totalDeductions)}
           hint={`${inr(run.totals.totalLop)} LOP · ${run.totals.shortHoursCount} short`}
         />
@@ -232,6 +251,8 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
       {step === 'review' && (
         <>
           <PayrollTable
+            formatMoney={inr}
+            employees={employees}
             lines={visibleLines}
             onSelect={(id) => setReportEmployeeId(id)}
           />
@@ -244,22 +265,27 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
       )}
 
       {step === 'adjustments' && (
-        <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-5 lg:grid-cols-[minmax(0,1.6fr)_20rem]">
+        <div className="finance-incentive-layout grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <PayrollTable
+            formatMoney={inr}
+            employees={employees}
             lines={visibleLines}
+            showIncentives
             selectedId={selectedId}
             onSelect={(id) => {
               setSelectedId(id);
               setReportEmployeeId(id);
             }}
           />
-          <aside className="flex min-h-0 flex-col overflow-y-auto rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)] p-4">
+          <aside aria-label="Add incentive" className="finance-incentive-editor flex min-h-0 flex-col overflow-y-auto rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)] p-4">
+            <h2 className="finance-section-title">Add incentive</h2>
             {selected ? (
               <>
-                <h2 className="text-base font-bold tracking-[-0.02em] text-[var(--text-primary)]">{selected.employeeName}</h2>
-                <p className="mt-1 text-[14px] text-[var(--text-secondary)]">Net {inr(selected.netPay)}. Add an incentive with a reason.</p>
-                <label className="mt-3 block text-[12px] font-semibold text-[var(--text-muted)]">Type</label>
+                <div className="finance-selected-person"><UserAvatar src={employees.find((employee) => employee.id === selected.employeeId)?.avatar} name={selected.employeeName} className="h-8 w-8 text-xs" /><div><strong>{selected.employeeName}</strong><small>{selected.department}</small></div></div>
+                <p className="finance-current-net"><span>Current net</span><strong>{inr(selected.netPay)}</strong></p>
+                <label htmlFor="incentive-type" className="mt-3 block text-[12px] font-semibold text-[var(--text-muted)]">Type</label>
                 <select
+                  id="incentive-type"
                   value={incentiveType}
                   onChange={(event) => setIncentiveType(event.target.value as PayrollIncentive['type'])}
                   className={`${controlClass} mt-1 w-full`}
@@ -268,16 +294,18 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
                   <option value="bonus">Bonus</option>
                   <option value="reimbursement">Reimbursement</option>
                 </select>
-                <label className="mt-3 block text-[12px] font-semibold text-[var(--text-muted)]">Amount (INR)</label>
+                <label htmlFor="incentive-amount" className="mt-3 block text-[12px] font-semibold text-[var(--text-muted)]">Amount ({payCurrency})</label>
                 <input
+                  id="incentive-amount"
                   value={amount}
                   onChange={(event) => setAmount(event.target.value)}
                   type="number"
                   min="0"
                   className={`${controlClass} mt-1 w-full font-normal`}
                 />
-                <label className="mt-3 block text-[12px] font-semibold text-[var(--text-muted)]">Reason</label>
+                <label htmlFor="incentive-reason" className="mt-3 block text-[12px] font-semibold text-[var(--text-muted)]">Reason</label>
                 <textarea
+                  id="incentive-reason"
                   value={reason}
                   onChange={(event) => setReason(event.target.value)}
                   rows={3}
@@ -286,6 +314,7 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
                 <button type="button" onClick={addIncentive} className={`${primaryBtn} mt-3 w-full`}>
                   Add incentive
                 </button>
+                <h3 className="finance-incentives-title">Added incentives{selectedIncentives.length ? ` (${selectedIncentives.length})` : ''}</h3>
                 <ul className="mt-3 space-y-2">
                   {selectedIncentives.map((item) => (
                     <li key={item.id} className="flex items-start justify-between gap-3 rounded-[8px] bg-[var(--bg-app)] px-4 py-3 text-[14px]">
@@ -323,7 +352,9 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
 
       {step === 'export' && (
         <>
-          <BankDisbursementTable rows={buildBankDisbursementRows(visibleLines, employees, run.period.monthYear)} />
+          {buildBankDisbursementRows(run.lines, employees, run.period.monthYear).some((row) => !row.ready) && <FinanceNote title="Bank details need attention" tone="warning">The file includes all {run.lines.length} employees. Complete missing bank details before disbursement.</FinanceNote>}
+          <BankDisbursementTable rows={buildBankDisbursementRows(visibleLines, employees, run.period.monthYear)} formatMoney={inr} />
+          <div className="finance-export-summary"><span>The bank file includes all {run.lines.length} employees in {run.totals.periodLabel}.</span><strong>Full-run total {inr(run.totals.totalNet)}</strong></div>
           <div className="flex shrink-0 justify-between pt-1">
             <button type="button" onClick={() => router.push('/payroll/adjustments')} className={secondaryBtn}>
               Back
@@ -345,9 +376,9 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
   );
 };
 
-function SummaryCard({ label, value, hint }: { label: string; value: string; hint: string }) {
+function SummaryCard({ label, value, hint, tone }: { label: string; value: string; hint: string; tone: string }) {
   return (
-    <div className="rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)] px-5 py-4">
+    <div data-tone={tone} className="finance-summary-card rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)] px-5 py-4">
       <p className="text-[12px] font-semibold text-[var(--text-muted)]">{label}</p>
       <p className="mt-1 text-lg font-bold tracking-[-0.02em] tabular-nums text-[var(--text-primary)]">{value}</p>
       <p className="mt-1 text-[12px] text-[var(--text-secondary)]">{hint}</p>
@@ -360,11 +391,15 @@ function PayrollTable({
   selectedId,
   onSelect,
   showIncentives,
+  formatMoney,
+  employees,
 }: {
+  employees: Employee[];
   lines: PayrollRecord[];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   showIncentives?: boolean;
+  formatMoney: (value: number) => string;
 }) {
   if (!lines.length) {
     return (
@@ -375,8 +410,9 @@ function PayrollTable({
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)]">
-      <table className="min-w-full text-left text-[14px]">
+    <section className="finance-table-panel finance-pay-panel flex-1">
+      <header><h2>{showIncentives ? 'Add incentives' : 'Review employee pay'}</h2><span>{lines.length} {lines.length === 1 ? 'employee' : 'employees'}</span></header>
+      <div className="finance-table-scroll"><table className="min-w-full text-left text-[14px]">
         <thead className="sticky top-0 bg-[var(--bg-app)] text-[12px] font-semibold text-[var(--text-secondary)]">
           <tr>
             <th className="px-4 py-3">Employee</th>
@@ -396,50 +432,43 @@ function PayrollTable({
             return (
               <React.Fragment key={line.id}>
                 <tr
-                  className={`cursor-pointer ${selected ? 'bg-[#f8fbfe]' : 'hover:bg-[#f8fbfe]'}`}
+                  className={`finance-pay-row cursor-pointer ${selected ? 'bg-[#f8fbfe]' : 'hover:bg-[#f8fbfe]'}`}
                   onClick={() => onSelect?.(line.employeeId)}
                 >
-                  <td className="px-4 py-3">
-                    <p className="font-semibold text-[var(--text-primary)]">{line.employeeName}</p>
+                  <td data-label="Employee" className="finance-pay-person px-4 py-3">
+                    <div className="finance-person"><UserAvatar src={employees.find((employee) => employee.id === line.employeeId)?.avatar} name={line.employeeName} className="h-8 w-8 text-xs" /><div><button type="button" onClick={(event) => { event.stopPropagation(); onSelect?.(line.employeeId); }} className="finance-person-name">{line.employeeName}</button>
                     <p className="text-[12px] text-[var(--text-muted)]">
                       {line.department} · {line.salaryType}
-                    </p>
+                    </p></div></div>
                   </td>
-                  <td className="px-4 py-3 text-[var(--text-secondary)]">{line.payrollGroupName}</td>
-                  <td className="px-4 py-3 font-mono text-[12px] tabular-nums">
+                  <td data-label="Group" className="finance-pay-group px-4 py-3 text-[var(--text-secondary)]">{line.payrollGroupName}</td>
+                  <td data-label="Hours / days" className="finance-pay-hours px-4 py-3 text-[12px] tabular-nums">
                     {line.daysWorked}/{line.daysRequired}d
                     <span className="block text-[var(--text-muted)]">
                       {line.hoursWorked}/{line.hoursRequired}h
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[12px] font-semibold ${
-                        line.hoursMet ? 'bg-[#eaf1ee] text-[#53886b]' : 'bg-[#faeeee] text-[#8b3133]'
-                      }`}
-                    >
-                      {line.hoursMet ? 'On target' : 'Short'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-[12px] tabular-nums">
+                  <td data-label="Status" className="finance-pay-status px-4 py-3"><FinanceStatus status={line.hoursMet ? 'On target' : 'Short'} /></td>
+                  <td data-label="LOP" className="finance-pay-lop px-4 py-3 text-[12px] tabular-nums">
                     {line.lopDays || 0}d
-                    <span className="block text-[var(--text-muted)]">{inr(line.lopAmount || 0)}</span>
+                    <span className="block text-[var(--text-muted)]">{formatMoney(line.lopAmount || 0)}</span>
                   </td>
-                  <td className="px-4 py-3 tabular-nums">{inr(line.basicSalary + line.allowances + line.overtimePay)}</td>
-                  {showIncentives ? <td className="px-4 py-3 tabular-nums">{inr(line.incentives || 0)}</td> : null}
-                  <td className="px-4 py-3 tabular-nums">{inr(line.deductions)}</td>
-                  <td className="px-4 py-3 font-semibold tabular-nums">{inr(line.netPay)}</td>
+                  <td data-label="Gross" className="finance-pay-gross px-4 py-3 tabular-nums">{formatMoney(line.basicSalary + line.allowances + line.overtimePay)}</td>
+                  {showIncentives ? <td data-label="Incentives" className="finance-pay-incentives px-4 py-3 tabular-nums">{formatMoney(line.incentives || 0)}</td> : null}
+                  <td data-label="Deductions" className="finance-pay-deductions px-4 py-3 tabular-nums">{formatMoney(line.deductions)}</td>
+                  <td data-label="Net" className="finance-pay-net px-4 py-3 font-semibold tabular-nums">{formatMoney(line.netPay)}</td>
                 </tr>
               </React.Fragment>
             );
           })}
         </tbody>
-      </table>
-    </div>
+      </table></div>
+      <footer>Open an employee to view their User report. Gross excludes incentives.</footer>
+    </section>
   );
 }
 
-function BankDisbursementTable({ rows }: { rows: BankDisbursementRow[] }) {
+function BankDisbursementTable({ rows, formatMoney }: { rows: BankDisbursementRow[]; formatMoney: (value: number) => string }) {
   if (!rows.length) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)] px-5 text-[14px] text-[var(--text-secondary)]">
@@ -449,7 +478,9 @@ function BankDisbursementTable({ rows }: { rows: BankDisbursementRow[] }) {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)]">
+    <section className="finance-table-panel finance-bank-panel flex-1">
+      <header><h2>Bank disbursement preview</h2><FinanceStatus status={`${rows.filter((row) => row.ready).length} ready`} /></header>
+      <div className="finance-table-scroll">
       <table className="min-w-full text-left text-[14px]">
         <thead className="sticky top-0 bg-[var(--bg-app)] text-[12px] font-semibold text-[var(--text-secondary)]">
           <tr>
@@ -466,26 +497,18 @@ function BankDisbursementTable({ rows }: { rows: BankDisbursementRow[] }) {
         <tbody className="divide-y divide-[var(--border-color)]">
           {rows.map((row) => (
             <tr key={row.employeeId}>
-              <td className="px-4 py-3 font-mono text-[12px]">{row.employeeCode || '—'}</td>
-              <td className="px-4 py-3 font-semibold text-[var(--text-primary)]">{row.beneficiaryName}</td>
-              <td className="px-4 py-3 font-mono text-[12px] tabular-nums">{row.accountNumber || '—'}</td>
-              <td className="px-4 py-3 font-mono text-[12px]">{row.ifsc || '—'}</td>
-              <td className="px-4 py-3 text-[var(--text-secondary)]">{row.bankName || '—'}</td>
-              <td className="px-4 py-3 font-semibold tabular-nums">{inr(row.amount)}</td>
-              <td className="px-4 py-3 text-[var(--text-secondary)]">{row.paymentMode}</td>
-              <td className="px-4 py-3">
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[12px] font-semibold ${
-                    row.ready ? 'bg-[#eaf1ee] text-[#53886b]' : 'bg-[#faeeee] text-[#8b3133]'
-                  }`}
-                >
-                  {row.ready ? 'Ready' : 'Missing bank details'}
-                </span>
-              </td>
+              <td data-label="Employee code" className="px-4 py-3 font-mono text-[12px]">{row.employeeCode || '—'}</td>
+              <td data-label="Beneficiary" className="px-4 py-3 font-semibold text-[var(--text-primary)]">{row.beneficiaryName}</td>
+              <td data-label="Account number" className="px-4 py-3 font-mono text-[12px] tabular-nums">{row.accountNumber || '—'}</td>
+              <td data-label="IFSC" className="px-4 py-3 font-mono text-[12px]">{row.ifsc || '—'}</td>
+              <td data-label="Bank" className="px-4 py-3 text-[var(--text-secondary)]">{row.bankName || '—'}</td>
+              <td data-label="Amount" className="px-4 py-3 font-semibold tabular-nums">{formatMoney(row.amount)}</td>
+              <td data-label="Mode" className="px-4 py-3 text-[var(--text-secondary)]">{row.paymentMode}</td>
+              <td data-label="Status" className="px-4 py-3"><FinanceStatus status={row.ready ? 'Ready' : 'Missing bank details'} /></td>
             </tr>
           ))}
         </tbody>
-      </table>
-    </div>
+      </table></div>
+    </section>
   );
 }

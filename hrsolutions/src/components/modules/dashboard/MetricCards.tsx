@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
 import { isInstitutionMode } from '@/utils/organizationMode';
+import { localDateKey } from '@/utils/dashboardPeople';
 
 export const MetricCards: React.FC = () => {
   const router = useRouter();
@@ -19,7 +20,7 @@ export const MetricCards: React.FC = () => {
 
   const isInstitution = isInstitutionMode(state.organization, state.currentPersona);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = localDateKey();
   const todayPunches = attendance.filter((a) => a.date === todayStr);
   const presentEmployeesCount = new Set(
     todayPunches
@@ -30,75 +31,65 @@ export const MetricCards: React.FC = () => {
   const totalMembers = isInstitution ? students.length + employees.length : employees.length;
   const attendanceRate =
     totalMembers > 0
-      ? Math.min(100, Math.round((presentEmployeesCount / totalMembers) * 100))
+      ? Math.min(100, Math.round((presentEmployeesCount / totalMembers) * 1000) / 10)
       : 0;
 
-  const approvedLeaves = leaves.filter((l) => l.status === 'Approved').length;
   const pendingLeaves = leaves.filter((l) => l.status === 'Pending').length;
   const activeProjects = projects.filter((p) => p.status === 'In Progress' || !p.status).length;
   const academicBatchesCount =
     state.customOptions?.academicBatches?.length ||
     new Set(students.map((s) => s.grade || s.section).filter(Boolean)).size;
 
-  const lead = {
-    label: isInstitution ? 'Class attendance today' : 'Attendance today',
-    value: attendanceRate,
-    suffix: '%',
-    onClick: () => router.push('/attendance'),
-  };
-
-  const rail: Array<{
-    label: string;
-    onClick: () => void;
-    value?: number;
-    customValue?: { approved: number; pending: number };
-  }> = [
+  const cards = [
     {
-      label: isInstitution ? 'Enrolled students' : 'People in the directory',
-      value: isInstitution ? students.length : employees.length,
+      key: 'attendance',
+      tone: 'attendance',
+      label: isInstitution ? 'Student attendance' : 'Attendance today',
+      value: `${attendanceRate}%`,
+      note: '',
+      onClick: () => router.push('/attendance'),
+    },
+    {
+      key: 'people',
+      tone: 'people',
+      label: isInstitution ? 'Enrolled students' : 'People',
+      value: String(isInstitution ? students.length : employees.length),
+      note: '',
       onClick: () => router.push(isInstitution ? '/student-directory' : '/hr'),
     },
     {
-      label: isInstitution ? 'Staff and faculty' : 'Leave requests',
+      key: 'leave',
+      tone: 'leave',
+      label: isInstitution ? 'Staff' : 'Leave requests',
+      value: String(isInstitution ? employees.length : pendingLeaves),
+      note: '',
       onClick: () => router.push(isInstitution ? '/hr' : '/leaves'),
-      customValue: isInstitution ? undefined : { approved: approvedLeaves, pending: pendingLeaves },
-      value: isInstitution ? employees.length : undefined,
     },
     {
+      key: 'projects',
+      tone: 'projects',
       label: isInstitution ? 'Academic batches' : 'Active projects',
-      value: isInstitution ? academicBatchesCount : activeProjects,
+      value: String(isInstitution ? academicBatchesCount : activeProjects),
+      note: '',
       onClick: () => router.push(isInstitution ? '/setup-students' : '/projects'),
     },
   ];
 
   return (
-    <section aria-label="Organization metrics" className="dash-figures">
-      <button type="button" onClick={lead.onClick} className="dash-figure-lead">
-        <span className="dash-kpi-label">{lead.label}</span>
-        <span className="flex items-baseline gap-1">
-          <span className="dash-kpi">{lead.value}</span>
-          <span className="text-[13px] font-semibold text-[var(--text-muted)]">{lead.suffix}</span>
-        </span>
-      </button>
-
-      <div className="dash-figure-rail">
-        {rail.map((card) => (
-          <button key={card.label} type="button" onClick={card.onClick} className="dash-figure-item">
-            <span className="dash-kpi-label">{card.label}</span>
-            {card.customValue ? (
-              <span className="dash-kpi-split">
-                <b>{card.customValue.pending}</b>
-                pending
-                <span aria-hidden>·</span>
-                <b>{card.customValue.approved}</b>
-                approved
-              </span>
-            ) : (
-              <span className="dash-kpi">{card.value}</span>
-            )}
-          </button>
-        ))}
-      </div>
+    <section aria-label="Organization metrics" className="dash-metrics">
+      {cards.map((card) => (
+        <button
+          key={card.key}
+          type="button"
+          onClick={card.onClick}
+          className="dash-metric"
+          data-tone={card.tone}
+        >
+          <span className="dash-kpi-label">{card.label}</span>
+          <span className="dash-kpi">{card.value}</span>
+          {card.note ? <span className="dash-metric-note">{card.note}</span> : null}
+        </button>
+      ))}
     </section>
   );
 };

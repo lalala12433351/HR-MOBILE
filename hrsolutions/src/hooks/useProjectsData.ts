@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/services/apiClient';
 import { safeApiCall } from '@/hooks/safeApiCall';
-import { mapApiEmployee, mapApiTask, mapApiTimesheet } from '@/services/backendSync';
+import { mapApiEmployee, mapApiProject, mapApiTask, mapApiTimesheet } from '@/services/backendSync';
 import { Employee, Project, Task, AttendanceRecord, TimesheetEntry, AuditLogItem, DriveItem } from '@/types';
-import { aggregatePunchesToDaily, mapStudentAttendanceToRecords } from '@/utils/attendancePunches';
+import { aggregateOptionsFromSettings, aggregatePunchesToDaily, mapStudentAttendanceToRecords } from '@/utils/attendancePunches';
+import { subscribeAttendanceCheckout, patchAttendanceCheckout } from '@/utils/attendanceSessionEvents';
 
 export function useProjectsData() {
   const [businessData, setBusinessData] = useState({
@@ -22,7 +23,7 @@ export function useProjectsData() {
 
     async function fetchData() {
       try {
-        const [empRes, projRes, taskRes, timeRes, auditRes, punchRes, studentAttRes, docsRes] = await Promise.all([
+        const [empRes, projRes, taskRes, timeRes, auditRes, punchRes, studentAttRes, docsRes, settingsRes] = await Promise.all([
           safeApiCall(api.identity.getEmployees(), [] as any[]),
           safeApiCall(api.projects.getProjects(), [] as any[]),
           safeApiCall(api.projects.getTasks(), [] as any[]),
@@ -31,6 +32,7 @@ export function useProjectsData() {
           safeApiCall(api.attendance.getPunches(), [] as any[]),
           safeApiCall(api.institute.getStudentAttendance(), [] as any[]),
           safeApiCall(api.storage.listDocuments(), [] as any[]),
+          safeApiCall(api.setup.getSettings(), {} as any),
         ]);
 
         if (!isMounted) return;
@@ -45,7 +47,10 @@ export function useProjectsData() {
           const employeeLookup = Object.fromEntries(
             newData.employees.map((e) => [e.id, { name: e.name, avatar: e.avatar }])
           );
-          newData.attendance = aggregatePunchesToDaily(punchRes.data, { employeeLookup });
+          newData.attendance = aggregatePunchesToDaily(punchRes.data, {
+            employeeLookup,
+            ...aggregateOptionsFromSettings(settingsRes.success ? settingsRes.data : null, newData.employees),
+          });
         }
 
         if (studentAttRes?.success && Array.isArray(studentAttRes.data)) {
@@ -57,29 +62,7 @@ export function useProjectsData() {
         }
 
         if (projRes.success && Array.isArray(projRes.data)) {
-          newData.projects = projRes.data.map(
-            (p: any) =>
-              ({
-                id: p.id,
-                name: p.name,
-                code: p.code || '',
-                clientName: p.client_name || p.clientName || '',
-                clientId: p.client_id || p.clientId || undefined,
-                description: p.description || '',
-                managerId: p.manager_id || p.managerId || '',
-                managerName: p.manager_name || p.managerName || '',
-                teamMembers: [],
-                startDate: p.start_date || p.startDate || '',
-                endDate: p.end_date || p.endDate || '',
-                budget: p.budget || 0,
-                currency: p.currency || 'INR',
-                billingMode: String(p.billing_mode || p.billingMode || 'deliverable').toLowerCase() === 'hourly' ? 'hourly' : 'deliverable',
-                hourlyRate: p.hourly_rate != null ? Number(p.hourly_rate) : p.hourlyRate != null ? Number(p.hourlyRate) : undefined,
-                status: p.status || 'In Progress',
-                priority: p.priority || 'Medium',
-                progress: Number(p.progress) || 0,
-              }) as Project
-          );
+          newData.projects = projRes.data.map(mapApiProject);
         }
 
         if (taskRes.success && Array.isArray(taskRes.data)) {
@@ -156,6 +139,12 @@ export function useProjectsData() {
     return () => {
       isMounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    return subscribeAttendanceCheckout((detail) => {
+      setBusinessData((prev) => ({ ...prev, attendance: patchAttendanceCheckout(prev.attendance, detail) }));
+    });
   }, []);
 
   const updateBusinessData = (updates: Partial<typeof businessData>) => {

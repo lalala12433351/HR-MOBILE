@@ -12,13 +12,27 @@ export type RepairMeta = {
   schemaName?: string;
 };
 
-/** Highest numeric EMP/SETUP sequence currently used (EMP001 and EMP-001 both count as 1). */
+async function loadEmployeeIdSettings(query: TenantQuery): Promise<{ prefix: string; sequenceStart: number }> {
+  try {
+    const res = await query(`SELECT value FROM tenant_settings WHERE key = 'general' LIMIT 1`);
+    const raw = res.rows[0]?.value;
+    const blob = typeof raw === 'string' ? JSON.parse(raw) : raw || {};
+    const ids = blob.employeeIdSettings || {};
+    const prefix = String(ids.prefix || 'EMP').trim() || 'EMP';
+    const sequenceStart = Math.max(1, Number(ids.sequenceStart) || 1);
+    return { prefix, sequenceStart };
+  } catch {
+    return { prefix: 'EMP', sequenceStart: 1 };
+  }
+}
+
+/** Highest trailing number on any employee code. */
 export async function getMaxEmployeeSequence(query: TenantQuery): Promise<number> {
   const res = await query(`SELECT employee_code FROM employees WHERE employee_code IS NOT NULL`);
   let max = 0;
   for (const row of res.rows) {
     const code = String(row.employee_code || '');
-    const match = code.match(/^(?:EMP|SETUP)-?0*(\d+)$/i);
+    const match = code.match(/(\d+)\s*$/);
     if (match) {
       max = Math.max(max, parseInt(match[1], 10));
     }
@@ -26,14 +40,15 @@ export async function getMaxEmployeeSequence(query: TenantQuery): Promise<number
   return max;
 }
 
-/** Allocate the next EMP-001 style codes (settings format: Prefix-Sequence). */
+/** Next code is prefix plus max(sequenceStart, highest existing number + 1). */
 export async function allocateEmployeeCodes(query: TenantQuery, count: number): Promise<string[]> {
   if (count <= 0) return [];
-  let max = await getMaxEmployeeSequence(query);
+  const { prefix, sequenceStart } = await loadEmployeeIdSettings(query);
+  let next = Math.max(sequenceStart, (await getMaxEmployeeSequence(query)) + 1);
   const codes: string[] = [];
   for (let i = 0; i < count; i++) {
-    max += 1;
-    codes.push(`EMP-${String(max).padStart(3, '0')}`);
+    codes.push(`${prefix}-${String(next).padStart(3, '0')}`);
+    next += 1;
   }
   return codes;
 }

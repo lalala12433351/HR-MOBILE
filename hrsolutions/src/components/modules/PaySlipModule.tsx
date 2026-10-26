@@ -39,6 +39,16 @@ interface PaySlipModuleProps {
 }
 
 export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateState }) => {
+  const payCurrency =
+    state.customOptions?.payrollSettings?.defaultCurrency ||
+    state.customOptions?.employeeIdSettings?.defaultCurrency ||
+    'INR';
+  const formatPay = (value: number) =>
+    new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: payCurrency || 'INR',
+      maximumFractionDigits: 0,
+    }).format(Number(value) || 0);
   const isEmployee = state.currentPersona.role === 'employee' || state.currentPersona.role === 'faculty';
   
   const fallbackEmployee: Employee = useMemo(() => ({
@@ -568,7 +578,7 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
             Net Take-Home Pay
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1.5 font-mono">
-            ₹{salaryData.netPay.toLocaleString('en-IN')}
+            {formatPay(salaryData.netPay)}
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">
             Pay Period: {selectedPeriod}
@@ -580,7 +590,7 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
             Gross Remuneration
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1.5 font-mono">
-            ₹{salaryData.grossEarnings.toLocaleString('en-IN')}
+            {formatPay(salaryData.grossEarnings)}
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">
             Basic + HRA + Allowances
@@ -592,7 +602,7 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
             Total Deductions
           </div>
           <p className="text-2xl font-bold text-rose-600 dark:text-rose-400 mt-1.5 font-mono">
-            -₹{salaryData.totalDeductions.toLocaleString('en-IN')}
+            -{formatPay(salaryData.totalDeductions)}
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">
             EPF, ESIC, PT, and TDS
@@ -604,7 +614,7 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
             Annualized CTC
           </div>
           <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1.5 font-mono">
-            ₹{(salaryData.grossEarnings * 12).toLocaleString('en-IN')}
+            {formatPay((salaryData.grossEarnings * 12))}
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">
             Calculated on 12-month base
@@ -722,41 +732,41 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
               <div className="border border-slate-200 rounded-xl overflow-hidden">
                 <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
                   <span className="font-bold text-xs uppercase tracking-wider text-slate-800">Earnings & Allowances</span>
-                  <span className="font-bold text-xs uppercase tracking-wider text-slate-800">Amount (INR)</span>
+                  <span className="font-bold text-xs uppercase tracking-wider text-slate-800">Amount ({payCurrency})</span>
                 </div>
                 <div className="divide-y divide-slate-100 text-xs">
                   <div className="px-4 py-2.5 flex items-center justify-between">
                     <span className="text-slate-700">Basic Salary</span>
-                    <span className="font-mono font-semibold text-slate-900">₹{salaryData.baseSalary.toLocaleString('en-IN')}</span>
+                    <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.baseSalary)}</span>
                   </div>
                   {salaryData.hra > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">House Rent Allowance (HRA)</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.hra.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.hra)}</span>
                     </div>
                   )}
                   {salaryData.conveyanceAllowance > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Conveyance Allowance</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.conveyanceAllowance.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.conveyanceAllowance)}</span>
                     </div>
                   )}
                   {salaryData.medicalAllowance > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Medical Allowance</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.medicalAllowance.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.medicalAllowance)}</span>
                     </div>
                   )}
                   {salaryData.specialAllowance > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Special Allowance</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.specialAllowance.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.specialAllowance)}</span>
                     </div>
                   )}
                   {salaryData.otherAllowances > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Other Allowances</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.otherAllowances.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.otherAllowances)}</span>
                     </div>
                   )}
                   {(salaryData.customAllowances || []).map((item) => (
@@ -765,24 +775,24 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                         {item.name}
                       </span>
-                      <span className="font-mono font-semibold text-slate-900">₹{Number(item.amount).toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(Number(item.amount))}</span>
                     </div>
                   ))}
                   {salaryData.overtimePay > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Overtime Pay ({salaryData.overtimeHours} hrs)</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.overtimePay.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.overtimePay)}</span>
                     </div>
                   )}
                   {salaryData.performanceBonus > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Performance Incentive / Bonus</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.performanceBonus.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.performanceBonus)}</span>
                     </div>
                   )}
                   <div className="px-4 py-3 bg-slate-50 flex items-center justify-between font-bold border-t border-slate-200">
                     <span className="text-slate-900">Gross Earnings (A)</span>
-                    <span className="font-mono text-emerald-700">₹{salaryData.grossEarnings.toLocaleString('en-IN')}</span>
+                    <span className="font-mono text-emerald-700">{formatPay(salaryData.grossEarnings)}</span>
                   </div>
                 </div>
               </div>
@@ -791,37 +801,37 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
               <div className="border border-slate-200 rounded-xl overflow-hidden">
                 <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
                   <span className="font-bold text-xs uppercase tracking-wider text-slate-800">Deductions</span>
-                  <span className="font-bold text-xs uppercase tracking-wider text-slate-800">Amount (INR)</span>
+                  <span className="font-bold text-xs uppercase tracking-wider text-slate-800">Amount ({payCurrency})</span>
                 </div>
                 <div className="divide-y divide-slate-100 text-xs">
                   {salaryData.pf > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Provident Fund (Employee EPF)</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.pf.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.pf)}</span>
                     </div>
                   )}
                   {salaryData.tds > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Income Tax (TDS)</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.tds.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.tds)}</span>
                     </div>
                   )}
                   {salaryData.professionalTax > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Professional Tax (PT)</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.professionalTax.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.professionalTax)}</span>
                     </div>
                   )}
                   {salaryData.esic > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Employee State Insurance (ESIC)</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.esic.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.esic)}</span>
                     </div>
                   )}
                   {salaryData.healthInsurance > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between">
                       <span className="text-slate-700">Group Health Insurance</span>
-                      <span className="font-mono font-semibold text-slate-900">₹{salaryData.healthInsurance.toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(salaryData.healthInsurance)}</span>
                     </div>
                   )}
                   {(salaryData.customDeductions || []).map((item) => (
@@ -830,12 +840,12 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
                         <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
                         {item.name}
                       </span>
-                      <span className="font-mono font-semibold text-slate-900">₹{Number(item.amount).toLocaleString('en-IN')}</span>
+                      <span className="font-mono font-semibold text-slate-900">{formatPay(Number(item.amount))}</span>
                     </div>
                   ))}
                   <div className="px-4 py-3 bg-slate-50 flex items-center justify-between font-bold border-t border-slate-200">
                     <span className="text-slate-900">Total Deductions (B)</span>
-                    <span className="font-mono text-rose-600">-₹{salaryData.totalDeductions.toLocaleString('en-IN')}</span>
+                    <span className="font-mono text-rose-600">-{formatPay(salaryData.totalDeductions)}</span>
                   </div>
                 </div>
               </div>
@@ -853,7 +863,7 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
               </div>
               <div className="text-right">
                 <span className="text-3xl font-extrabold text-blue-900 font-mono">
-                  ₹{salaryData.netPay.toLocaleString('en-IN')}
+                  {formatPay(salaryData.netPay)}
                 </span>
               </div>
             </div>
@@ -899,9 +909,9 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
                     <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">{item.ref}</td>
                     <td className="p-3 font-semibold">{item.period}</td>
                     <td className="p-3">{item.issueDate}</td>
-                    <td className="p-3 font-mono">₹{item.gross.toLocaleString('en-IN')}</td>
+                    <td className="p-3 font-mono">{formatPay(item.gross)}</td>
                     <td className="p-3 font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                      ₹{item.netPay.toLocaleString('en-IN')}
+                      {formatPay(item.netPay)}
                     </td>
                     <td className="p-3">
                       <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 rounded-full font-bold text-[10px]">
@@ -948,15 +958,15 @@ export const PaySlipModule: React.FC<PaySlipModuleProps> = ({ state, onUpdateSta
             <div className="space-y-3 text-xs">
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-[#18181d]">
                 <span className="text-slate-600 dark:text-[#9e9ea7]">Provident Fund (PF) Employee Share</span>
-                <span className="font-mono font-bold text-slate-900 dark:text-white">₹{(salaryData.pf * 5).toLocaleString('en-IN')} YTD</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white">{formatPay((salaryData.pf * 5))} YTD</span>
               </div>
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-[#18181d]">
                 <span className="text-slate-600 dark:text-[#9e9ea7]">PF Employer Contribution</span>
-                <span className="font-mono font-bold text-slate-900 dark:text-white">₹{(salaryData.pf * 5).toLocaleString('en-IN')} YTD</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white">{formatPay((salaryData.pf * 5))} YTD</span>
               </div>
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-[#18181d]">
                 <span className="text-slate-600 dark:text-[#9e9ea7]">Total TDS Remitted to IT Department</span>
-                <span className="font-mono font-bold text-slate-900 dark:text-white">₹{(salaryData.tds * 5).toLocaleString('en-IN')} YTD</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white">{formatPay((salaryData.tds * 5))} YTD</span>
               </div>
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-[#18181d]">
                 <span className="text-slate-600 dark:text-[#9e9ea7]">Form 16 / Part B Status</span>

@@ -67,6 +67,10 @@ export interface Organization {
   city?: string;
   stateProvince?: string;
   postalCode?: string;
+  /** Tenant creation time. Payroll ignores days before this date. */
+  createdAt?: string;
+  /** Workspace owner login. Moves when that person changes their login email. */
+  adminEmail?: string;
 }
 
 export interface JobTimelineItem {
@@ -153,6 +157,8 @@ export interface Employee {
   bloodGroup?: string;
   nationality?: string;
   maritalStatus?: string;
+  /** Personal / backup email distinct from work email */
+  personalEmail?: string;
   personalTaxId?: string;
   socialInsurance?: string;
   healthInsurance?: string;
@@ -183,6 +189,8 @@ export interface Employee {
   team: string;
   /** Backend teams.id when synced */
   teamId?: string;
+  /** Backend job_roles.id for this person's title in their department */
+  jobRoleId?: string;
   joiningDate: string;
   employmentType: 'Full-time' | 'Contract' | 'Contractor' | 'Part-time' | 'Intern';
   location: string;
@@ -223,10 +231,21 @@ export interface Employee {
   };
   status?: AccountStatus | string;
   accountStatus?: AccountStatus;
+  /** employees.employment_status: active, on_probation, terminated, resigned. */
+  employmentStatus?: string;
   noticePeriodDays?: number;
   noticePeriodEndDate?: string;
   exitDate?: string;
   exitReason?: string;
+  fnfDueDate?: string;
+  salaryCurrency?: string;
+  buddyEmployeeId?: string;
+  buddyName?: string;
+  offboardingChecklist?: {
+    exitInterview?: boolean;
+    assetClearance?: boolean;
+    managerNoc?: boolean;
+  };
   isActivated?: boolean;
   isDeactivated?: boolean;
   hasCompletedProfile?: boolean;
@@ -351,6 +370,8 @@ export interface AttendanceRecord {
   selfiePhoto?: string; // base64 data URL captured at punch time (check-in)
   checkInPhoto?: string; // base64 data URL for check-in punch
   checkOutPhoto?: string; // base64 data URL for check-out punch
+  /** Yesterday's punch had no checkout. Hours stay blank until they enter the time. */
+  missedPunchOut?: boolean;
 }
 
 export interface AttendanceRegularization {
@@ -379,7 +400,7 @@ export interface LeaveRequest {
   endDate: string;
   daysCount: number;
   reason: string;
-  status: 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
+  status: 'Pending' | 'Manager approved' | 'Approved' | 'Rejected' | 'Cancelled';
   appliedOn: string;
   approvedBy?: string;
   isPaid?: boolean;
@@ -702,7 +723,7 @@ export interface Project {
   approvedBy?: string; // Name of Admin/HR who approved or denied
   denialReason?: string; // Reason if project is denied
   status: 'Planning' | 'In Progress' | 'On Hold' | 'Completed' | 'Pending Approval' | 'Approved' | 'Denied';
-  priority: 'Low' | 'Medium' | 'High' | 'Critical';
+  priority: 'Low' | 'Medium' | 'High' | 'Urgent' | 'Critical';
   progress: number; // 0 - 100
 }
 
@@ -722,6 +743,8 @@ export interface Task {
   assigneeAvatar?: string;
   reporterName?: string;
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
+  /** Position inside a board column. Unset tasks stay in priority order. */
+  boardOrder?: number;
   status: 'Backlog' | 'To Do' | 'In Progress' | 'Review' | 'Approved' | 'Completed';
   startDate?: string;
   dueDate?: string;
@@ -1000,7 +1023,7 @@ export interface NotificationItem {
   title: string;
   message: string;
   timestamp: string;
-  category: 'Tasks' | 'Approvals' | 'HR' | 'CRM' | 'Finance' | 'Meetings' | 'System' | 'Attendance';
+  category: 'Tasks' | 'Approvals' | 'HR' | 'CRM' | 'Finance' | 'Meetings' | 'System' | 'Attendance' | 'Chat';
   priority?: 'low' | 'medium' | 'high' | 'urgent';
   read: boolean;
   linkModule?: string;
@@ -1092,6 +1115,14 @@ export interface OfficeLocationRecord {
   geofencingStatus?: 'Active' | 'Inactive' | 'Optional';
 }
 
+export interface JobRoleRecord {
+  id: string;
+  title: string;
+  departmentId?: string;
+  departmentName?: string;
+  level?: string;
+}
+
 export interface DepartmentRecord {
   id?: string;
   name?: string;
@@ -1112,6 +1143,8 @@ export interface CustomizableOptions {
   /** Full office rows with GPS — used by punch geofencing */
   officeRecords?: OfficeLocationRecord[];
   designations: string[];
+  /** Job titles with the department they belong to */
+  jobRoleRecords?: JobRoleRecord[];
   employmentTypes: string[];
   employmentTypeCategories?: { id: string; name: string; hasBenefits: boolean; isPermanent: boolean }[];
   defaultInitialPassword?: string;
@@ -1184,6 +1217,8 @@ export interface CustomizableOptions {
     rosterRotationCycle?: 'weekly' | 'biweekly' | 'monthly' | 'custom';
     enableHourlyShiftPolicy?: boolean;
     attendanceCycle?: 'monthly' | 'yearly';
+    regularizationWindowDays?: number;
+    requireManagerRegularizationApproval?: boolean;
   };
   leaveSettings?: {
     paidLeaveQuota: number;
@@ -1254,6 +1289,10 @@ export interface CustomizableOptions {
     allowSelfEditAddress: boolean;
     allowSelfEditBank: boolean;
     allowCoworkerDirectoryAccess: boolean;
+    /** When true, any employee can assign any task to anyone in the organization. */
+    anyoneCanAssignTasks?: boolean;
+    /** When true, any employee can create a project. */
+    anyoneCanCreateProjects?: boolean;
   };
   noticePeriodSettings?: {
     days: number;
@@ -1308,6 +1347,8 @@ export interface WorkShift {
   name: string;
   startTime: string; // e.g. "09:00 AM" or "08:30"
   endTime: string;   // e.g. "06:00 PM" or "15:30"
+  /** Scheduled unpaid break; actual attendance keeps using recorded break sessions. */
+  unpaidBreakMinutes?: number;
   gracePeriodMinutes?: number;
   halfDayThresholdHours?: number;
   workingDays?: string[];

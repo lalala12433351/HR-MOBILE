@@ -23,6 +23,20 @@ export function emitToRooms(targets: string[], event: string, payload: unknown):
   io.to(Array.from(new Set(targets))).emit(event, payload);
 }
 
+export type LiveNotice = {
+  id: string;
+  title: string;
+  message: string;
+  category: string;
+  priority: string;
+  linkUrl: string;
+  createdAt: string;
+};
+
+export function emitUserNotification(tenantKey: string, employeeId: string, notice: LiveNotice): void {
+  emitToRooms([rooms.user(tenantKey, employeeId)], 'notification:new', notice);
+}
+
 const onlineCounts = new Map<string, number>();
 
 function presenceKey(tenantKey: string, employeeId: string): string {

@@ -63,6 +63,37 @@ function isUsableAuthToken(value: string): boolean {
   return Boolean(value) && !isPresenceMarker(value);
 }
 
+const REJECTED_AUTH_CODES = new Set([
+  'INVALID_TOKEN',
+  'UNAUTHORIZED',
+  'ACCOUNT_NOT_FOUND',
+  'ACCOUNT_DEACTIVATED',
+  'TENANT_SUSPENDED',
+  'HTTP_401',
+]);
+
+function isRejectedAuthCode(code: string): boolean {
+  return REJECTED_AUTH_CODES.has(code);
+}
+
+export interface VerifiedAuthUser {
+  id: string;
+  sub?: string;
+  name?: string;
+  email?: string;
+  role?: string;
+  designation?: string;
+  department?: string;
+  avatar?: string;
+  tenantId?: string;
+  tenantSchema?: string;
+}
+
+/** Result of checking the stored authorization token when the site opens. */
+export type StoredAuthorization =
+  | { status: 'anonymous' }
+  | { status: 'authorized'; user: VerifiedAuthUser | null };
+
 function jwtExpiryMs(token: string): number | null {
   try {
     const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
@@ -356,6 +387,72 @@ class ApiClient {
     return refreshed ? this.getToken() : token;
   }
 
+  /**
+   * Confirm the stored authorization token on startup.
+   * Refreshes an expired access token, then asks /auth/me to accept it.
+   * A network failure keeps a still-valid local token so reopening the site stays signed in.
+   */
+  public async verifyStoredAuthorization(): Promise<StoredAuthorization> {
+    const initial = this.getToken();
+    if (!isUsableAuthToken(initial)) {
+      return { status: 'anonymous' };
+    }
+
+    if (isLikelyJwt(initial)) {
+      const exp = jwtExpiryMs(initial);
+      if (exp !== null && exp <= Date.now() + AUTH_REFRESH_SKEW_MS) {
+        const refreshed = await this.refreshSession();
+        if (!refreshed && exp <= Date.now()) {
+          this.clearAuth();
+          return { status: 'anonymous' };
+        }
+      }
+    }
+
+    if (!isUsableAuthToken(this.getToken())) {
+      return { status: 'anonymous' };
+    }
+
+    try {
+      const me = await this.auth.me();
+      const user = me?.data?.user;
+      if (!me?.success || !user) {
+        this.clearAuth();
+        return { status: 'anonymous' };
+      }
+      return {
+        status: 'authorized',
+        user: {
+          id: String(user.id || user.sub || ''),
+          sub: user.sub ? String(user.sub) : undefined,
+          name: user.name ? String(user.name) : undefined,
+          email: user.email ? String(user.email) : undefined,
+          role: user.role ? String(user.role) : undefined,
+          designation: user.designation ? String(user.designation) : undefined,
+          department: user.department ? String(user.department) : undefined,
+          avatar: user.avatar ? String(user.avatar) : undefined,
+          tenantId: me.data?.tenant?.id ? String(me.data.tenant.id) : undefined,
+          tenantSchema: me.data?.tenant?.schema ? String(me.data.tenant.schema) : undefined,
+        },
+      };
+    } catch (error) {
+      if (error instanceof ApiClientError && isRejectedAuthCode(error.code)) {
+        this.clearAuth();
+        return { status: 'anonymous' };
+      }
+      const current = this.getToken();
+      if (!isUsableAuthToken(current)) return { status: 'anonymous' };
+      if (isLikelyJwt(current)) {
+        const exp = jwtExpiryMs(current);
+        if (exp !== null && exp <= Date.now()) {
+          this.clearAuth();
+          return { status: 'anonymous' };
+        }
+      }
+      return { status: 'authorized', user: null };
+    }
+  }
+
   private async refreshSession(): Promise<boolean> {
     if (this.refreshInFlight) return this.refreshInFlight;
     this.refreshInFlight = this.performRefresh().finally(() => {
@@ -409,7 +506,10 @@ class ApiClient {
       endpoint.startsWith('/auth/forgot-password') ||
       endpoint.startsWith('/auth/reset-password') ||
       endpoint.startsWith('/auth/invite') ||
-      endpoint.startsWith('/auth/accept-invite')
+      endpoint.startsWith('/auth/accept-invite') ||
+      endpoint.startsWith('/auth/change-email/status') ||
+      endpoint.startsWith('/auth/change-email/resend') ||
+      endpoint.startsWith('/auth/change-email/confirm')
     );
   }
 
@@ -606,6 +706,33 @@ class ApiClient {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+
+    requestLoginEmailChange: (payload: { employeeId?: string; newEmail: string; currentPassword?: string }) =>
+      this.request<{
+        status: 'code_sent' | 'invite_sent';
+        email: string;
+        expiresAt?: string;
+        movesOrganizationEmail?: boolean;
+        mode?: 'self' | 'admin';
+      }>('/auth/change-email', { method: 'POST', body: JSON.stringify(payload) }),
+
+    loginEmailChangeStatus: (email: string) =>
+      this.request<{ email: string; mode: 'self' | 'admin'; expiresAt: string }>(
+        `/auth/change-email/status?email=${encodeURIComponent(email)}`,
+        { method: 'GET' }
+      ),
+
+    resendLoginEmailChange: (payload: { email: string }) =>
+      this.request<{ email: string; expiresAt: string; mode: 'self' | 'admin' }>('/auth/change-email/resend', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    confirmLoginEmailChange: (payload: { email: string; code: string; password: string }) =>
+      this.request<{ email: string }>('/auth/change-email/confirm', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
   };
 
   public license = {
@@ -649,6 +776,7 @@ class ApiClient {
         planId?: string;
         maxSeats?: number;
         billingCycle?: 'monthly' | 'annual';
+        term?: 'trial' | 'monthly' | 'annual';
         extendDays?: number;
         periodEnd?: string;
         revoke?: boolean;
@@ -837,7 +965,7 @@ class ApiClient {
       this.request(`/identity/employees/${id}`, { method: 'GET' }),
 
     createEmployee: (payload: {
-      employeeCode: string;
+      employeeCode?: string;
       firstName: string;
       lastName: string;
       email: string;
@@ -861,6 +989,9 @@ class ApiClient {
       accountStatus?: string;
       dateOfJoining?: string;
       sendInvite?: boolean;
+      probationStatus?: string;
+      probationEndDate?: string;
+      salaryCurrency?: string;
     }) => this.request('/identity/employees', { method: 'POST', body: JSON.stringify(payload) }),
 
     updateEmployee: (id: string, payload: {
@@ -881,6 +1012,7 @@ class ApiClient {
       departmentId?: string;
       department?: string;
       teamId?: string;
+      team?: string;
       jobRoleId?: string;
       designation?: string;
       jobTitle?: string;
@@ -905,11 +1037,26 @@ class ApiClient {
       personalTaxId?: string;
       socialInsurance?: string;
       healthInsurance?: string;
+      personalEmail?: string;
+      pfUanNumber?: string;
+      esiNumber?: string;
+      panNumber?: string;
       emergencyContact?: any;
       customFieldValues?: any;
       uploadedDocuments?: any;
       avatar?: string;
       bio?: string | null;
+      exitDate?: string | null;
+      noticePeriodEndDate?: string | null;
+      fnfDueDate?: string | null;
+      offboardingChecklist?: {
+        exitInterview?: boolean;
+        assetClearance?: boolean;
+        managerNoc?: boolean;
+      } | null;
+      salaryCurrency?: string | null;
+      probationStatus?: string | null;
+      probationEndDate?: string | null;
     }) => this.request(`/identity/employees/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
 
     updateBankDetails: (employeeId: string, payload: {
@@ -930,18 +1077,6 @@ class ApiClient {
   // 4. ATTENDANCE MODULE API (Geofenced Punches, Leaves, Regularizations)
   // =========================================================================
   public attendance = {
-    recordPunch: (payload: {
-      employeeId: string;
-      officeId?: string;
-      punchType: 'check_in' | 'check_out';
-      latitude?: number;
-      longitude?: number;
-      deviceInfo?: string;
-      selfiePhoto?: string | null;
-      qrToken?: string;
-      workFromHome?: boolean;
-    }) => this.request('/attendance/punches', { method: 'POST', body: JSON.stringify(payload) }),
-
     verifyWorkplaceLocation: (payload: {
       latitude: number;
       longitude: number;
@@ -959,6 +1094,18 @@ class ApiClient {
         message?: string;
       }>('/attendance/location-check', { method: 'POST', body: JSON.stringify(payload) }),
 
+    recordPunch: (payload: {
+      employeeId: string;
+      officeId?: string;
+      punchType: 'check_in' | 'check_out';
+      latitude?: number;
+      longitude?: number;
+      deviceInfo?: string;
+      selfiePhoto?: string | null;
+      qrToken?: string;
+      workFromHome?: boolean;
+    }) => this.request('/attendance/punches', { method: 'POST', body: JSON.stringify(payload) }),
+
     getOfficeQrToken: (officeId?: string) => {
       const query = officeId ? `?officeId=${encodeURIComponent(officeId)}` : '';
       return this.request<{
@@ -970,10 +1117,37 @@ class ApiClient {
       }>(`/attendance/qr-token${query}`, { method: 'GET' });
     },
 
-    getPunches: (params?: { employeeId?: string; date?: string }) => {
-      const query = new URLSearchParams(params as any).toString();
-      return this.request(`/attendance/punches${query ? `?${query}` : ''}`, { method: 'GET' });
+    getPunches: (params?: { employeeId?: string; date?: string; includePhotos?: boolean }) => {
+      const query = new URLSearchParams();
+      if (params?.employeeId) query.set('employeeId', params.employeeId);
+      if (params?.date) query.set('date', params.date);
+      if (params?.includePhotos) query.set('includePhotos', '1');
+      const qs = query.toString();
+      return this.request(`/attendance/punches${qs ? `?${qs}` : ''}`, { method: 'GET' });
     },
+
+    getSession: () =>
+      this.request<{
+        openOfficePunch: boolean;
+        missedCheckouts: Array<{ workDate: string; checkInLabel: string; lastSeenLabel: string | null }>;
+        recentGeofenceSignOut: { workDate: string; checkOutLabel: string; at: string } | null;
+      }>('/attendance/session', { method: 'GET' }),
+
+    postPresence: (payload: { latitude: number; longitude: number; accuracy?: number | null }) =>
+      this.request<{
+        status: 'inside' | 'outside' | 'signed_out' | 'ignored';
+        reason?: string;
+        outsideSince?: string | null;
+        signsOutAt?: string | null;
+        workDate?: string;
+        checkOutLabel?: string;
+      }>('/attendance/presence', { method: 'POST', body: JSON.stringify(payload) }),
+
+    submitMissedCheckout: (payload: { workDate: string; time: string }) =>
+      this.request<{ workDate: string; checkOutLabel: string; employeeId: string }>('/attendance/missed-checkout', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
 
     getLeaves: (params?: { employeeId?: string; status?: string }) => {
       const query = new URLSearchParams(params as any).toString();
@@ -1003,6 +1177,7 @@ class ApiClient {
       endDate: string;
       daysCount: number;
       reason: string;
+      attachmentUrl?: string;
     }) => this.request('/attendance/leaves', { method: 'POST', body: JSON.stringify(payload) }),
 
     updateLeaveStatus: (
@@ -1050,6 +1225,7 @@ class ApiClient {
       requestedCheckOut?: string;
       reason: string;
       remarks?: string;
+      creditCompOff?: boolean;
     }) => this.request('/attendance/regularizations', { method: 'POST', body: JSON.stringify(payload) }),
 
     getRegularizations: (params?: { employeeId?: string; status?: string }) => {
@@ -1114,10 +1290,19 @@ class ApiClient {
       managerId: string;
       startDate?: string;
       endDate?: string;
+      status?: string;
+      category?: string;
+      priority?: string;
+      totalWorkHours?: number | null;
     }) => this.request('/projects/projects', { method: 'POST', body: JSON.stringify(payload) }),
     
     updateProject: (projectId: string, payload: any) =>
       this.request(`/projects/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+
+    deleteProject: (projectId: string) =>
+      this.request<{ id: string; message: string }>(`/projects/projects/${encodeURIComponent(projectId)}`, {
+        method: 'DELETE',
+      }),
 
     getTasks: (projectId?: string) =>
       this.request(`/projects/tasks${projectId ? `?projectId=${projectId}` : ''}`, { method: 'GET' }),
@@ -1139,6 +1324,9 @@ class ApiClient {
       clientId?: string | null;
       recurrence?: { frequency: string; weekday?: number; count?: number; endDate?: string | null } | null;
     }) => this.request('/projects/tasks', { method: 'POST', body: JSON.stringify(payload) }),
+
+    reorderTasks: (orders: Array<{ id: string; boardOrder: number }>) =>
+      this.request('/projects/tasks/reorder', { method: 'POST', body: JSON.stringify({ orders }) }),
 
     updateTask: (taskId: string, payload: {
       status?: string;
@@ -1484,6 +1672,8 @@ class ApiClient {
       longitude?: number;
       selfiePhoto?: string | null;
     }) => this.request('/institute/attendance', { method: 'POST', body: JSON.stringify(payload) }),
+    alertGuardians: (payload: { studentIds: string[]; subject?: string; message?: string }) =>
+      this.request('/institute/guardian-alerts', { method: 'POST', body: JSON.stringify(payload) }),
   };
 
   // =========================================================================
@@ -1668,6 +1858,17 @@ class ApiClient {
     saveAttendanceSettings: (payload: any) => this.request('/setup/attendance', { method: 'POST', body: JSON.stringify(payload) }),
     saveIdCardTemplates: (payload: { templates: unknown[]; defaults: { employee?: string; student?: string } }) =>
       this.request('/setup/id-card-templates', { method: 'POST', body: JSON.stringify(payload) }),
+  };
+
+  public push = {
+    vapidPublicKey: () =>
+      this.request<{ publicKey: string | null; enabled: boolean }>('/push/vapid-public-key', { method: 'GET' }),
+
+    saveSubscription: (payload: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+      this.request('/push/subscription', { method: 'PUT', body: JSON.stringify(payload) }),
+
+    deleteSubscription: (endpoint: string) =>
+      this.request('/push/subscription', { method: 'DELETE', body: JSON.stringify({ endpoint }) }),
   };
 }
 

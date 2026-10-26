@@ -9,6 +9,12 @@ import {
   sendVerificationCode,
   verifyEmailCode,
 } from './emailFlows.controller.js';
+import {
+  changeEmailStatus,
+  confirmChangeEmail,
+  requestChangeEmail,
+  resendChangeEmail,
+} from './changeEmail.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 
 export const authRoutes = Router();
@@ -48,6 +54,10 @@ authRoutes.get('/invite/:token', tokenCheckLimiter, getInvite);
 authRoutes.post('/accept-invite', tokenCheckLimiter, acceptInvite);
 authRoutes.post('/forgot-password', emailSendLimiter, forgotPassword);
 authRoutes.post('/reset-password', tokenCheckLimiter, resetPasswordWithToken);
+authRoutes.get('/change-email/status', tokenCheckLimiter, changeEmailStatus);
+authRoutes.post('/change-email/resend', emailSendLimiter, resendChangeEmail);
+authRoutes.post('/change-email/confirm', tokenCheckLimiter, confirmChangeEmail);
 
 // Protected routes
 authRoutes.get('/me', authenticateToken, me);
+authRoutes.post('/change-email', authenticateToken, emailSendLimiter, requestChangeEmail);

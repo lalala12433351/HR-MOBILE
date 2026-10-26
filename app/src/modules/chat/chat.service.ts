@@ -1,6 +1,8 @@
 import { pool } from '../../config/database.js';
 import { sanitizeSchemaName } from '../../db/queryRunner.js';
-import { emitToRooms, rooms } from './chat.realtime.js';
+import { log } from '../../utils/logger.js';
+import { sendPushToEmployees } from '../push/push.service.js';
+import { emitToRooms, emitUserNotification, rooms } from './chat.realtime.js';
 
 export type TenantQuery = <T = any>(text: string, params?: any[]) => Promise<{ rows: T[]; rowCount?: number | null }>;
 
@@ -38,6 +40,84 @@ export function isHrRole(role?: string | null): boolean {
 }
 
 const NAME_SQL = (alias: string) => `NULLIF(TRIM(COALESCE(${alias}.first_name, '') || ' ' || COALESCE(${alias}.last_name, '')), '')`;
+
+const MENTION_RE =
+  /@\[([^\]\n]{1,120})\]\(([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\)/g;
+
+function mentionPattern(): RegExp {
+  return new RegExp(MENTION_RE.source, 'g');
+}
+
+export function stripMentionTokens(text: string): string {
+  return text.replace(mentionPattern(), '@$1');
+}
+
+function mentionLabel(name: string): string {
+  return name.replace(/[\[\]\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Someone';
+}
+
+type MentionRef = { employeeId: string; name: string };
+
+async function resolveMentionBody(
+  ctx: ChatCtx,
+  conversationId: string,
+  body: string
+): Promise<{ body: string; mentions: MentionRef[] }> {
+  if (!body.includes('@[')) return { body, mentions: [] };
+  const participants = await ctx.q(
+    `SELECT p.employee_id, ${NAME_SQL('e')} AS name
+     FROM chat_participants p
+     JOIN employees e ON e.id = p.employee_id
+     WHERE p.conversation_id = $1`,
+    [conversationId]
+  );
+  const byId = new Map<string, MentionRef>();
+  for (const row of participants.rows) {
+    const employeeId = String(row.employee_id);
+    byId.set(employeeId.toLowerCase(), { employeeId, name: mentionLabel(row.name || 'Someone') });
+  }
+  const seen = new Set<string>();
+  const mentions: MentionRef[] = [];
+  const next = body.replace(mentionPattern(), (_full, rawName: string, rawId: string) => {
+    const known = byId.get(String(rawId).toLowerCase());
+    if (!known || known.employeeId.toLowerCase() === ctx.meId.toLowerCase()) return `@${mentionLabel(String(rawName))}`;
+    if (!seen.has(known.employeeId)) {
+      seen.add(known.employeeId);
+      mentions.push(known);
+    }
+    return `@[${known.name}](${known.employeeId})`;
+  });
+  return { body: next, mentions };
+}
+
+async function replaceMessageMentions(ctx: ChatCtx, messageId: string, mentions: MentionRef[]) {
+  await ctx.q(`DELETE FROM chat_mentions WHERE message_id = $1`, [messageId]);
+  if (mentions.length === 0) return;
+  await ctx.q(
+    `INSERT INTO chat_mentions (message_id, employee_id)
+     SELECT $1, x.id FROM unnest($2::uuid[]) AS x(id)
+     ON CONFLICT (message_id, employee_id) DO NOTHING`,
+    [messageId, mentions.map((m) => m.employeeId)]
+  );
+}
+
+async function announceMentions(
+  ctx: ChatCtx,
+  conversationId: string,
+  messageId: string,
+  mentions: MentionRef[],
+  body: string
+) {
+  if (mentions.length === 0) return;
+  const conv = await ctx.q(`SELECT type, name FROM chat_conversations WHERE id = $1`, [conversationId]);
+  const row = conv.rows[0];
+  const where = row?.type === 'direct' ? '' : ` in ${row?.name || 'a chat'}`;
+  const title = `${ctx.meName} mentioned you${where}`;
+  const preview = stripMentionTokens(body).replace(/\s+/g, ' ').trim().slice(0, 180) || 'You were mentioned';
+  const link = `/chat?c=${conversationId}`;
+  const ids = mentions.map((m) => m.employeeId);
+  await notify(ctx, ids, title, preview, link, 'high', 'Chat', `mention-${messageId}`);
+}
 
 // ---------------------------------------------------------------------------
 // Tenant DB access outside of an HTTP request (sockets)
@@ -261,7 +341,7 @@ function mapConversation(row: any, participants: any[]) {
     lastMessage: row.last_message_id
       ? {
           id: String(row.last_message_id),
-          body: row.last_message_deleted_at ? '' : row.last_message_body || '',
+          body: row.last_message_deleted_at ? '' : stripMentionTokens(row.last_message_body || ''),
           type: row.last_message_type,
           senderId: row.last_message_sender_id ? String(row.last_message_sender_id) : null,
           senderName: row.last_message_sender_name || null,
@@ -287,7 +367,7 @@ function mapConversation(row: any, participants: any[]) {
 
 export type ConversationDto = ReturnType<typeof mapConversation>;
 
-function mapMessage(row: any, attachments: any[], reactions: any[]) {
+function mapMessage(row: any, attachments: any[], reactions: any[], mentions: any[] = []) {
   const deleted = !!row.deleted_at;
   return {
     id: String(row.id),
@@ -323,6 +403,12 @@ function mapMessage(row: any, attachments: any[], reactions: any[]) {
       emoji: r.emoji,
       employeeIds: (r.employee_ids || []).map(String),
     })),
+    mentions: deleted
+      ? []
+      : mentions.map((m) => ({
+          employeeId: String(m.employee_id),
+          name: m.name || 'Someone',
+        })),
   };
 }
 
@@ -730,13 +816,21 @@ async function fetchMessages(
   if (rows.length === 0) return [];
   const ids = rows.map((r: any) => r.id);
 
-  const [attachmentsRes, reactionsRes] = await Promise.all([
+  const [attachmentsRes, reactionsRes, mentionsRes] = await Promise.all([
     ctx.q(`SELECT * FROM chat_attachments WHERE message_id = ANY($1::uuid[]) ORDER BY created_at ASC`, [ids]),
     ctx.q(
       `SELECT message_id, emoji, array_agg(employee_id::text ORDER BY created_at) AS employee_ids
        FROM chat_reactions WHERE message_id = ANY($1::uuid[])
        GROUP BY message_id, emoji
        ORDER BY MIN(created_at)`,
+      [ids]
+    ),
+    ctx.q(
+      `SELECT cm.message_id, cm.employee_id, ${NAME_SQL('e')} AS name
+       FROM chat_mentions cm
+       JOIN employees e ON e.id = cm.employee_id
+       WHERE cm.message_id = ANY($1::uuid[])
+       ORDER BY cm.created_at ASC`,
       [ids]
     ),
   ]);
@@ -752,9 +846,17 @@ async function fetchMessages(
   };
   const attachmentsBy = group(attachmentsRes.rows);
   const reactionsBy = group(reactionsRes.rows);
+  const mentionsBy = group(mentionsRes.rows);
 
   return rows
-    .map((row: any) => mapMessage(row, attachmentsBy.get(String(row.id)) || [], reactionsBy.get(String(row.id)) || []))
+    .map((row: any) =>
+      mapMessage(
+        row,
+        attachmentsBy.get(String(row.id)) || [],
+        reactionsBy.get(String(row.id)) || [],
+        mentionsBy.get(String(row.id)) || []
+      )
+    )
     .reverse();
 }
 
@@ -807,9 +909,9 @@ export async function sendMessage(
   input: { body?: string; parentMessageId?: string | null; attachments?: AttachmentInput[]; clientId?: string }
 ): Promise<MessageDto & { clientId?: string }> {
   const access = await requireAccess(ctx, conversationId);
-  const body = (input.body || '').trim();
+  const rawBody = (input.body || '').trim();
   const attachments = input.attachments || [];
-  if (!body && attachments.length === 0) throw new ChatError(400, 'EMPTY_MESSAGE', 'Write a message or attach a file.');
+  if (!rawBody && attachments.length === 0) throw new ChatError(400, 'EMPTY_MESSAGE', 'Write a message or attach a file.');
   assertAttachmentKeys(ctx, attachments);
 
   if (!access.my_role) {
@@ -834,12 +936,16 @@ export async function sendMessage(
     if (!parent.rows[0]) throw new ChatError(400, 'INVALID_PARENT', 'The message you replied to is not in this chat.');
   }
 
+  const resolved = await resolveMentionBody(ctx, conversationId, rawBody);
+  const body = resolved.body;
+
   const inserted = await ctx.q(
     `INSERT INTO chat_messages (conversation_id, sender_id, body, type, parent_message_id)
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,
     [conversationId, ctx.meId, body, body ? 'text' : 'file', input.parentMessageId || null]
   );
   const messageId = String(inserted.rows[0].id);
+  await replaceMessageMentions(ctx, messageId, resolved.mentions);
 
   for (const a of attachments) {
     await ctx.q(
@@ -870,7 +976,51 @@ export async function sendMessage(
   const message = await getMessageOrThrow(ctx, messageId);
   const payload = { ...message, clientId: input.clientId };
   await broadcast(ctx, conversationId, access.type, 'message:new', payload);
+  await announceMentions(ctx, conversationId, messageId, resolved.mentions, body);
+  try {
+    await announceChatMessage(
+      ctx,
+      conversationId,
+      access,
+      body,
+      attachments.length > 0,
+      resolved.mentions.map((mention) => mention.employeeId)
+    );
+  } catch (err) {
+    log.warn('Could not notify chat participants', err);
+  }
   return payload;
+}
+
+/** Inbox and desktop alerts for a direct message, group message, or HR reply. Mentions are notified separately. */
+async function announceChatMessage(
+  ctx: ChatCtx,
+  conversationId: string,
+  access: { type: ConversationType; name: string | null },
+  body: string,
+  hasAttachments: boolean,
+  mentionedIds: string[]
+) {
+  if (access.type !== 'direct' && access.type !== 'group' && access.type !== 'hr_ticket') return;
+  const participants = await ctx.q(
+    `SELECT employee_id, muted FROM chat_participants WHERE conversation_id = $1 AND employee_id <> $2`,
+    [conversationId, ctx.meId]
+  );
+  const mentioned = new Set(mentionedIds.map((id) => id.toLowerCase()));
+  const ids = participants.rows
+    .filter((row: any) => !row.muted && !mentioned.has(String(row.employee_id).toLowerCase()))
+    .map((row: any) => String(row.employee_id));
+  if (ids.length === 0) return;
+
+  const preview =
+    stripMentionTokens(body).replace(/\s+/g, ' ').trim().slice(0, 180) ||
+    (hasAttachments ? 'Sent a file' : 'New message');
+  const place =
+    access.type === 'hr_ticket'
+      ? access.name || 'an HR request'
+      : access.name || 'a group';
+  const title = access.type === 'direct' ? ctx.meName : `${ctx.meName} in ${place}`;
+  await notify(ctx, ids, title, preview, `/chat?c=${conversationId}`, 'medium', 'Chat', `chat-${conversationId}`);
 }
 
 const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
@@ -900,12 +1050,19 @@ export async function editMessage(ctx: ChatCtx, messageId: string, body: string)
   }
   const trimmed = body.trim();
   if (!trimmed) throw new ChatError(400, 'EMPTY_MESSAGE', 'A message cannot be empty.');
+  const conversationId = String(row.conversation_id);
+  const previous = await ctx.q(`SELECT employee_id FROM chat_mentions WHERE message_id = $1`, [messageId]);
+  const previousIds = new Set(previous.rows.map((r: any) => String(r.employee_id).toLowerCase()));
+  const resolved = await resolveMentionBody(ctx, conversationId, trimmed);
   await ctx.q(`UPDATE chat_messages SET body = $2, type = 'text', edited_at = CURRENT_TIMESTAMP WHERE id = $1`, [
     messageId,
-    trimmed,
+    resolved.body,
   ]);
+  await replaceMessageMentions(ctx, messageId, resolved.mentions);
   const message = await getMessageOrThrow(ctx, messageId);
-  await broadcast(ctx, String(row.conversation_id), row.conversation_type, 'message:updated', message);
+  await broadcast(ctx, conversationId, row.conversation_type, 'message:updated', message);
+  const fresh = resolved.mentions.filter((m) => !previousIds.has(m.employeeId.toLowerCase()));
+  await announceMentions(ctx, conversationId, messageId, fresh, resolved.body);
   return message;
 }
 
@@ -1028,15 +1185,35 @@ async function notify(
   title: string,
   message: string,
   linkUrl: string,
-  priority = 'medium'
+  priority = 'medium',
+  category = 'HR Desk',
+  tag?: string
 ) {
   const ids = Array.from(new Set(recipientIds.filter((id) => id && id !== ctx.meId)));
   if (ids.length === 0) return;
-  await ctx.q(
+  const inserted = await ctx.q(
     `INSERT INTO notifications (recipient_employee_id, title, message, category, priority, link_url)
-     SELECT x.id, $2, $3, 'HR Desk', $4, $5 FROM unnest($1::uuid[]) AS x(id)`,
-    [ids, title, message, priority, linkUrl]
+     SELECT x.id, $2, $3, $4, $5, $6 FROM unnest($1::uuid[]) AS x(id)
+     RETURNING id, recipient_employee_id, title, message, category, priority, link_url, created_at`,
+    [ids, title, message, category, priority, linkUrl]
   );
+  for (const row of inserted.rows) {
+    emitUserNotification(ctx.tenantKey, String(row.recipient_employee_id), {
+      id: String(row.id),
+      title: row.title,
+      message: row.message,
+      category: row.category || category,
+      priority: row.priority || priority,
+      linkUrl: row.link_url || linkUrl,
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+    });
+  }
+  await sendPushToEmployees(ctx.q, ids, {
+    title,
+    body: message.slice(0, 180),
+    url: linkUrl,
+    tag: tag || `notice-${linkUrl}-${title}`,
+  });
 }
 
 const STATUS_LABELS: Record<TicketStatus, string> = {

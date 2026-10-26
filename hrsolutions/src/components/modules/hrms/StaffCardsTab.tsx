@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Printer, Search, X } from 'lucide-react';
 import { Employee, AccountStatus } from '../../../types';
 import { AppState } from '../../../services/store';
+import { WorkspacePagination } from '@/components/common/WorkspacePagination';
 import { UserAvatar } from '@/components/common/UserAvatar';
 
 interface StaffCardsTabProps {
@@ -22,6 +23,8 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
   onPrintIdCards,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(6);
   const [branchFilter, setBranchFilter] = useState('All');
   const [departmentFilter, setDepartmentFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -140,6 +143,10 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
       return matchesSearch && matchesBranch && matchesDept && matchesStatus;
     });
   }, [baseList, searchQuery, branchFilter, departmentFilter, statusFilter, state.currentPersona]);
+  useEffect(() => setPage(1), [searchQuery, branchFilter, departmentFilter, statusFilter]);
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(filteredEmployees.length / pageSize)));
+  const pagedEmployees = filteredEmployees.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
 
   const availableBranches = useMemo(() => {
     const set = new Set<string>();
@@ -190,13 +197,13 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
 
     return (
       <span className={`people-studio__status ${tone}`}>
-        {accStatus === 'Activated' ? 'Active' : accStatus}
+        {accStatus === 'Activated' ? 'Active' : accStatus === 'Not Activated' ? 'Inactive' : accStatus}
       </span>
     );
   };
 
   return (
-    <div className="people-studio__panel">
+    <div className="people-studio__panel people-directory-panel">
       <section className="people-studio__sheet people-studio__sheet--pad">
         <div className="people-studio__filters">
           <div className="people-studio__search">
@@ -251,7 +258,7 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
               className="people-studio__select"
             >
               <option value="All">All statuses</option>
-              <option value="Not Activated">Not Activated</option>
+              <option value="Not Activated">Inactive</option>
               <option value="Active">Active</option>
               <option value="In Probation">In Probation</option>
               <option value="On Leave">On Leave</option>
@@ -279,7 +286,7 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
               className="people-studio__btn people-studio__btn--secondary people-studio__btn--compact"
             >
               <Printer className="h-3.5 w-3.5" />
-              Print ID cards
+              Print this view
             </button>
           )}
         </div>
@@ -291,7 +298,7 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
             No people match these filters. Clear a filter or search a different name.
           </div>
         ) : (
-          filteredEmployees.map((emp) => {
+          pagedEmployees.map((emp) => {
             const branchText = emp.officeName || emp.location || 'No office';
 
             return (
@@ -299,6 +306,15 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
                 key={emp.id}
                 onClick={() => onSelectEmployee(emp)}
                 className="people-studio__sheet people-studio__card"
+                role="button"
+                tabIndex={0}
+                aria-label={`Open profile: ${emp.name}`}
+                onKeyDown={(event) => {
+                  if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    onSelectEmployee(emp);
+                  }
+                }}
               >
                 <div className="people-studio__card-top">
                   {emp.employeeId ? <span className="people-studio__id">{emp.employeeId}</span> : <span />}
@@ -341,6 +357,7 @@ export const StaffCardsTab: React.FC<StaffCardsTabProps> = ({
           })
         )}
       </div>
+      <WorkspacePagination total={filteredEmployees.length} page={currentPage} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}/>
     </div>
   );
 };

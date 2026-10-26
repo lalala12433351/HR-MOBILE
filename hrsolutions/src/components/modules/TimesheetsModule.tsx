@@ -1,30 +1,30 @@
 'use client';
+import { ResponsiveFilters } from '@/components/common/ResponsiveFilters';
+import './workspaces.css';
+import { DateInput } from '@/components/common/DateInput';
+import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileHeaderAction } from '@/components/mobile/MobileHeaderAction';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
-  Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
   Clock,
   Plus,
   CheckCircle2,
   X,
-  FileText,
-  Briefcase,
   Edit3,
   Trash2,
   Download,
   Check,
-  Tag,
   Search,
-  Video,
-  Link2,
-  Users,
 } from 'lucide-react';
 import { AppState, isTestEntity, normalizeTaskStatus } from '../../services/store';
 import { TimesheetEntry, Project } from '../../types';
 import { api } from '../../services/apiClient';
+import { combineResumedTaskEntries, isUuid, taskDayMergePlans } from '../../utils/taskBoard';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { localDateKey } from '@/utils/dashboardPeople';
 
 interface TimesheetsModuleProps {
   state: AppState;
@@ -97,6 +97,23 @@ function formatHoursHM(hrs: number): string {
   return `${h}h ${m}m`;
 }
 
+function formatChipHours(hrs: number): string {
+  const value = Math.round((hrs || 0) * 10) / 10;
+  return `${Number.isInteger(value) ? value.toFixed(0) : value}h`;
+}
+
+function chipInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
+function avatarTone(name: string): 1 | 2 | 3 {
+  const sum = [...name].reduce((total, char) => total + char.charCodeAt(0), 0);
+  return ((sum % 3) + 1) as 1 | 2 | 3;
+}
+
 function isPendingStatus(status?: TimesheetEntry['status']): boolean {
   return status !== 'Approved' && status !== 'Rejected';
 }
@@ -164,9 +181,12 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     [accessibleEmployees]
   );
 
-  const getTodayIso = () => new Date().toISOString().split('T')[0];
+  const getTodayIso = () => localDateKey();
   const TODAY_DATE = getTodayIso();
 
+  const mobileViewport = useMobileViewport();
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [listDateScope, setListDateScope] = useState<'week' | 'all'>('week');
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month' | 'list'>('day');
   const [selectedDate, setSelectedDate] = useState<string>(TODAY_DATE);
   const [searchQuery, setSearchQuery] = useState('');
@@ -186,10 +206,11 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   const canReviewEntry = (entry: TimesheetEntry) =>
     canApproveTimesheet(state.currentPersona, entry, state.employees, state.projects);
   const [showLogModal, setShowLogModal] = useState(false);
+  const [confirmRejectPeriod, setConfirmRejectPeriod] = useState(false);
+  const [pendingDeleteEntry, setPendingDeleteEntry] = useState<TimesheetEntry | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [formTitle, setFormTitle] = useState('');
-  const [formType, setFormType] = useState<'task' | 'custom' | 'meeting'>('task');
   const [logModalTab, setLogModalTab] = useState<'task' | 'schedule'>('task');
   const [formMeetingLink, setFormMeetingLink] = useState('');
   const [showMeetingLinkInput, setShowMeetingLinkInput] = useState(false);
@@ -205,12 +226,19 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   const [formEmployeeId, setFormEmployeeId] = useState(state.currentPersona?.id || state.employees[0]?.id || '');
   const [formEmployeeIds, setFormEmployeeIds] = useState<string[]>([]);
 
+  useEffect(() => {
+    if (!showLogModal) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setShowLogModal(false); };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [showLogModal]);
+
   const timeGridScrollRef = useRef<HTMLDivElement>(null);
-  const HOUR_HEIGHT = 68;
+  const HOUR_HEIGHT = 44;
 
   useEffect(() => {
     setSelectedEmployeeFilter(state.currentPersona?.id || state.employees[0]?.id || '');
-  }, [state.currentPersona?.id, isAdmin, state.employees.length]);
+  }, [state.currentPersona?.id]);
 
   useEffect(() => {
     setSelectedApprovalIds([]);
@@ -231,82 +259,92 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Compute live hours for any timesheet entry based on its linked task (if tracking)
-  const getEntryLiveHours = (entry: TimesheetEntry): number => {
-    const task = state.tasks.find(
-      (t) =>
-        t.id === entry.taskId ||
-        (t.title && entry.taskTitle && t.title.trim().toLowerCase() === entry.taskTitle.trim().toLowerCase())
+  const onUpdateStateRef = useRef(onUpdateState);
+  onUpdateStateRef.current = onUpdateState;
+  const mergingKeysRef = useRef(new Set<string>());
+  useEffect(() => {
+    const plans = taskDayMergePlans(state.timesheets || []).filter(
+      (plan) => isUuid(plan.keeper.id) && isUuid(plan.keeper.taskId) && plan.extras.every((entry) => isUuid(entry.id))
     );
-
-    if (task) {
-      let totalSec = task.timeSpentSeconds || (task.actualHours ? Math.round(task.actualHours * 3600) : 0);
-      if (normalizeTaskStatus(task.status) === 'In Progress' && task.isTimerRunning && task.timerStartedAt) {
-        totalSec += Math.max(0, Math.floor((now - task.timerStartedAt) / 1000));
+    if (!plans.length) return;
+    const key = plans
+      .map((plan) => plan.keeper.id)
+      .sort()
+      .join('|');
+    if (mergingKeysRef.current.has(key)) return;
+    mergingKeysRef.current.add(key);
+    let cancelled = false;
+    (async () => {
+      for (const plan of plans) {
+        await api.projects.updateTimesheet(plan.keeper.id, {
+          hoursSpent: plan.merged.hours,
+          startTime: plan.merged.startTime,
+          endTime: plan.merged.endTime || '',
+          status: plan.merged.status === 'Draft' ? 'draft' : 'submitted',
+        });
+        for (const extra of plan.extras) {
+          try {
+            await api.projects.deleteTimesheet(extra.id);
+          } catch {
+            /* The extra row may already have been removed. */
+          }
+        }
       }
-      const taskHrs = Number((totalSec / 3600).toFixed(2));
-      if (taskHrs > (entry.hours || 0)) {
-        return taskHrs;
-      }
-    }
+      if (cancelled) return;
+      const removeIds = new Set(plans.flatMap((plan) => plan.extras.map((entry) => entry.id)));
+      const replacements = new Map(plans.map((plan) => [plan.keeper.id, plan.merged]));
+      onUpdateStateRef.current((prev) => ({
+        ...prev,
+        timesheets: (prev.timesheets || [])
+          .filter((entry) => !removeIds.has(entry.id))
+          .map((entry) => replacements.get(entry.id) || entry),
+      }));
+    })()
+      .catch(() => {
+        /* The calendar already draws these sessions as one block. */
+      })
+      .finally(() => {
+        mergingKeysRef.current.delete(key);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.timesheets]);
 
-    return entry.hours || 0;
+  const taskForEntry = (entry: TimesheetEntry) => state.tasks.find((task) => task.id === entry.taskId);
+
+  const isScheduleEntry = (entry: TimesheetEntry) => entry.entryType === 'schedule' || entry.category === 'Meeting';
+
+  const isRunningEntry = (entry: TimesheetEntry) => {
+    if (entry.endTime || isScheduleEntry(entry)) return false;
+    const task = taskForEntry(entry);
+    if (!task || normalizeTaskStatus(task.status) !== 'In Progress' || !task.isTimerRunning || !task.timerStartedAt) return false;
+    if (task.openTimesheetId) return entry.id === task.openTimesheetId;
+    return true;
+  };
+
+  const getEntryLiveHours = (entry: TimesheetEntry): number => {
+    if (!isRunningEntry(entry)) return entry.hours || 0;
+    const task = taskForEntry(entry);
+    const elapsedHrs = task?.timerStartedAt ? Math.max(0, (now - task.timerStartedAt) / 3600000) : 0;
+    return Number(((entry.hours || 0) + elapsedHrs).toFixed(2));
   };
 
   const getEntryLiveEndTime = (entry: TimesheetEntry): string => {
-    if (entry.endTime) return entry.endTime;
-    const task = state.tasks.find(
-      (t) =>
-        t.id === entry.taskId ||
-        (t.title && entry.taskTitle && t.title.trim().toLowerCase() === entry.taskTitle.trim().toLowerCase())
-    );
-    if (task && normalizeTaskStatus(task.status) === 'In Progress' && task.isTimerRunning) {
+    if (isRunningEntry(entry)) {
       return new Date(now).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
     }
-    return entry.endTime || 'Present';
+    if (entry.endTime) return entry.endTime;
+    const start = parseTimeToMinutes(entry.startTime || '09:00 AM');
+    return formatMinutesToTime(start + Math.round((entry.hours || 0) * 60));
   };
 
-  const allTimesheets = useMemo(() => {
-    const existing = [...state.timesheets];
-    state.tasks.forEach((task) => {
-      const isInProgress = normalizeTaskStatus(task.status) === 'In Progress';
-      const hasTime = (task.timeSpentSeconds || 0) > 0 || (task.actualHours || 0) > 0 || task.isTimerRunning;
-      if (isInProgress && hasTime) {
-        const hasEntry = existing.some(
-          (ts) =>
-            (ts.taskId === task.id ||
-              (ts.taskTitle && task.title && ts.taskTitle.trim().toLowerCase() === task.title.trim().toLowerCase())) &&
-            ts.date === TODAY_DATE
-        );
-        if (!hasEntry) {
-          const taskHrs = Number(((task.timeSpentSeconds || 0) / 3600).toFixed(2)) || task.actualHours || 0;
-          existing.unshift({
-            id: `ts_live_${task.id}`,
-            employeeId: [...(task.assigneeIds || []), task.assigneeId].includes(state.currentPersona?.id)
-              ? state.currentPersona?.id || task.assigneeId
-              : task.assigneeId || state.currentPersona?.id || state.employees[0]?.id || '',
-            employeeName: [...(task.assigneeNames || []), task.assigneeName].some(
-              (name) => (name || '').toLowerCase() === (state.currentPersona?.name || '').toLowerCase()
-            )
-              ? state.currentPersona?.name || task.assigneeName
-              : task.assigneeName || state.currentPersona?.name || state.employees[0]?.name || 'Team Member',
-            projectId: task.projectId || 'standalone',
-            projectName: task.projectName || 'General Project',
-            taskId: task.id,
-            taskTitle: task.title,
-            date: TODAY_DATE,
-            startTime: task.startDate || '09:00 AM',
-            hours: taskHrs,
-            billable: true,
-            category: 'Development',
-            description: `Active work on ${task.title}`,
-            status: 'Review',
-          });
-        }
-      }
-    });
-    return existing;
-  }, [state.timesheets, state.tasks, TODAY_DATE, state.currentPersona, state.employees]);
+  const showOnCalendar = (entry: TimesheetEntry) => {
+    if (isScheduleEntry(entry) || isRunningEntry(entry)) return true;
+    return getEntryLiveHours(entry) >= 0.25;
+  };
+
+  const allTimesheets = state.timesheets || [];
 
   const entryBelongsTo = (entry: TimesheetEntry, empId: string, empName?: string) =>
     entry.employeeId === empId ||
@@ -349,17 +387,10 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
         if (!isPendingStatus(entry.status)) return false;
       } else if (statusFilter !== 'All' && entry.status !== statusFilter) return false;
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        if (
-          !(
-            entry.taskTitle.toLowerCase().includes(q) ||
-            entry.projectName.toLowerCase().includes(q) ||
-            entry.description.toLowerCase().includes(q) ||
-            entry.employeeName.toLowerCase().includes(q) ||
-            (entry.category || '').toLowerCase().includes(q)
-          )
-        )
-          return false;
+        const query = searchQuery.trim().toLowerCase();
+        const matches = [entry.taskTitle, entry.projectName, entry.description, entry.employeeName, entry.category]
+          .some((value) => (value || '').toLowerCase().includes(query));
+        if (!matches) return false;
       }
       return true;
     });
@@ -383,9 +414,22 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   );
 
   const filteredEntries = useMemo(() => {
-    if (selectedEmployeeFilter === 'All') return scopedEntries;
-    return scopedEntries.filter((entry) => entryBelongsTo(entry, selectedEmployeeFilter, selectedEmployee?.name));
-  }, [scopedEntries, selectedEmployeeFilter, selectedEmployee]);
+    const scoped =
+      selectedEmployeeFilter === 'All'
+        ? scopedEntries
+        : scopedEntries.filter((entry) => entryBelongsTo(entry, selectedEmployeeFilter, selectedEmployee?.name));
+    let periodEntries = scoped;
+    if (viewMode === 'list' && listDateScope === 'week') {
+      const monday = new Date(`${selectedDate}T00:00:00`);
+      monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      const start = localDateKey(monday);
+      const end = localDateKey(sunday);
+      periodEntries = scoped.filter((entry) => entry.date >= start && entry.date <= end);
+    }
+    return combineResumedTaskEntries(periodEntries);
+  }, [scopedEntries, selectedEmployeeFilter, selectedEmployee, viewMode, listDateScope, selectedDate]);
 
   const projectTasks = useMemo(() => {
     if (!formProjectId || formProjectId === 'standalone') {
@@ -399,21 +443,31 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   }, [state.projects]);
 
   const handlePrevDate = () => {
-    const cur = new Date(selectedDate);
+    const cur = new Date(`${selectedDate}T00:00:00`);
     if (viewMode === 'day') cur.setDate(cur.getDate() - 1);
     else if (viewMode === 'week') cur.setDate(cur.getDate() - 7);
-    else if (viewMode === 'month') cur.setMonth(cur.getMonth() - 1);
+    else if (viewMode === 'month') {
+      const day = cur.getDate();
+      cur.setDate(1);
+      cur.setMonth(cur.getMonth() - 1);
+      cur.setDate(Math.min(day, new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate()));
+    }
     else cur.setDate(cur.getDate() - 7);
-    setSelectedDate(cur.toISOString().split('T')[0]);
+    setSelectedDate(localDateKey(cur));
   };
 
   const handleNextDate = () => {
-    const cur = new Date(selectedDate);
+    const cur = new Date(`${selectedDate}T00:00:00`);
     if (viewMode === 'day') cur.setDate(cur.getDate() + 1);
     else if (viewMode === 'week') cur.setDate(cur.getDate() + 7);
-    else if (viewMode === 'month') cur.setMonth(cur.getMonth() + 1);
+    else if (viewMode === 'month') {
+      const day = cur.getDate();
+      cur.setDate(1);
+      cur.setMonth(cur.getMonth() + 1);
+      cur.setDate(Math.min(day, new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate()));
+    }
     else cur.setDate(cur.getDate() + 7);
-    setSelectedDate(cur.toISOString().split('T')[0]);
+    setSelectedDate(localDateKey(cur));
   };
 
   const handleToday = () => {
@@ -421,23 +475,23 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   };
 
   const headerDateTitle = useMemo(() => {
-    const dateObj = new Date(selectedDate);
-    if (viewMode === 'day') return dateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-    if (viewMode === 'week') {
+    const dateObj = new Date(`${selectedDate}T00:00:00`);
+    if (viewMode === 'day') return dateObj.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    if (viewMode === 'week' || (viewMode === 'list' && listDateScope === 'week')) {
       const dayOfWeek = dateObj.getDay();
       const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
       const mon = new Date(dateObj);
       mon.setDate(dateObj.getDate() + mondayOffset);
       const sun = new Date(mon);
       sun.setDate(mon.getDate() + 6);
-      return `${mon.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })} – ${sun.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+      return `${mon.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${sun.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
     }
-    if (viewMode === 'month') return dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    return dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  }, [selectedDate, viewMode]);
+    if (viewMode === 'month') return dateObj.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    return dateObj.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  }, [selectedDate, viewMode, listDateScope]);
 
   const weekDays = useMemo(() => {
-    const dateObj = new Date(selectedDate);
+    const dateObj = new Date(`${selectedDate}T00:00:00`);
     const dayOfWeek = dateObj.getDay();
     const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     const days = [];
@@ -445,7 +499,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     for (let i = 0; i < 7; i++) {
       const d = new Date(dateObj);
       d.setDate(dateObj.getDate() + mondayOffset + i);
-      const iso = d.toISOString().split('T')[0];
+      const iso = localDateKey(d);
       const dayTotal = filteredEntries.filter((e) => e.date === iso).reduce((sum, e) => sum + getEntryLiveHours(e), 0);
       days.push({ dateStr: iso, dayName: dayNames[i], dayNum: d.getDate(), isToday: iso === TODAY_DATE, totalHours: dayTotal });
     }
@@ -453,7 +507,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   }, [selectedDate, filteredEntries, TODAY_DATE, now, state.tasks]);
 
   const monthDays = useMemo(() => {
-    const dateObj = new Date(selectedDate);
+    const dateObj = new Date(`${selectedDate}T00:00:00`);
     const year = dateObj.getFullYear();
     const month = dateObj.getMonth();
     const firstDay = new Date(year, month, 1);
@@ -462,10 +516,11 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     const days = [];
     const startDate = new Date(firstDay);
     startDate.setDate(startDate.getDate() - offset);
-    for (let i = 0; i < 35; i++) {
+    const cellCount = Math.ceil((offset + new Date(year, month + 1, 0).getDate()) / 7) * 7;
+    for (let i = 0; i < cellCount; i++) {
       const current = new Date(startDate);
       current.setDate(startDate.getDate() + i);
-      const iso = current.toISOString().split('T')[0];
+      const iso = localDateKey(current);
       const isCurrentMonth = current.getMonth() === month;
       const dayEntries = filteredEntries.filter((e) => e.date === iso);
       const totalHours = dayEntries.reduce((sum, e) => sum + getEntryLiveHours(e), 0);
@@ -476,20 +531,24 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
   const periodRange = useMemo<{ start: string; end: string } | null>(() => {
     if (viewMode === 'day') return { start: selectedDate, end: selectedDate };
-    if (viewMode === 'week') return { start: weekDays[0].dateStr, end: weekDays[6].dateStr };
+    if (viewMode === 'week' || (viewMode === 'list' && listDateScope === 'week')) {
+      return { start: weekDays[0].dateStr, end: weekDays[6].dateStr };
+    }
     if (viewMode === 'month') {
       const ym = selectedDate.slice(0, 7);
       return { start: `${ym}-01`, end: `${ym}-31` };
     }
     return null;
-  }, [viewMode, selectedDate, weekDays]);
+  }, [viewMode, selectedDate, weekDays, listDateScope]);
 
-  const periodLabel = viewMode === 'list' ? 'all time' : headerDateTitle;
+  const periodLabel = viewMode === 'list' && listDateScope === 'all' ? 'all time' : headerDateTitle;
 
   const inPeriod = (entry: TimesheetEntry) =>
     !periodRange || (entry.date >= periodRange.start && entry.date <= periodRange.end);
 
   const [employeeSearch, setEmployeeSearch] = useState('');
+  const [peopleMenuOpen, setPeopleMenuOpen] = useState(false);
+  const peopleMenuRef = useRef<HTMLDivElement>(null);
 
   const employeeSummaries = useMemo(() => {
     const q = employeeSearch.trim().toLowerCase();
@@ -513,6 +572,35 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       })
       .sort((a, b) => b.pending - a.pending || b.hours - a.hours || a.emp.name.localeCompare(b.emp.name));
   }, [accessibleEmployees, employeeSearch, scopedEntries, periodRange, now, state.tasks]);
+
+  const { shownPeople, morePeople } = useMemo(() => {
+    const limit = 4;
+    const selectedIndex = employeeSummaries.findIndex((row) => row.emp.id === selectedEmployeeFilter);
+    if (selectedIndex < limit) {
+      return { shownPeople: employeeSummaries.slice(0, limit), morePeople: employeeSummaries.slice(limit) };
+    }
+    const selected = employeeSummaries[selectedIndex];
+    const rest = employeeSummaries.filter((row) => row.emp.id !== selected.emp.id);
+    const shownPeople = [selected, ...rest.slice(0, limit - 1)];
+    const shownIds = new Set(shownPeople.map((row) => row.emp.id));
+    return { shownPeople, morePeople: employeeSummaries.filter((row) => !shownIds.has(row.emp.id)) };
+  }, [employeeSummaries, selectedEmployeeFilter]);
+
+  useEffect(() => {
+    if (!peopleMenuOpen) return;
+    const close = (event: MouseEvent) => {
+      if (!peopleMenuRef.current?.contains(event.target as Node)) setPeopleMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPeopleMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [peopleMenuOpen]);
 
   const reviewablePeriodEntries = useMemo(
     () =>
@@ -543,7 +631,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
   const handleApproveEmployeePeriod = async () => {
     const entries = reviewablePeriodEntries;
-    if (entries.length === 0 || !selectedEmployee) return;
+    if (entries.length === 0) return;
     const ids = entries.map((e) => e.id);
     setIsSaving(true);
     try {
@@ -558,14 +646,14 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
             user: prev.currentPersona.name,
             action: 'APPROVED_EMPLOYEE_TIMESHEETS',
             entity: 'TimesheetEntry',
-            entityId: selectedEmployee.id,
+            entityId: selectedEmployee?.id || 'team',
             ipAddress: '106.51.72.18',
-            details: `Approved ${ids.length} timesheets for ${selectedEmployee.name} (${periodLabel})`,
+            details: `Approved ${ids.length} timesheets for ${selectedEmployee?.name || 'selected people'} (${periodLabel})`,
           },
           ...prev.auditLogs,
         ],
       }));
-      showToast(`Approved ${ids.length} entries for ${selectedEmployee.name}`);
+      showToast(`Approved ${ids.length} entries for ${selectedEmployee?.name || 'selected people'}`);
     } catch (err) {
       console.error('Failed to approve employee timesheets', err);
       showToast(apiErrorMessage(err, 'Failed to approve timesheets.'));
@@ -574,10 +662,15 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     }
   };
 
-  const handleRejectEmployeePeriod = async () => {
+  const handleRejectEmployeePeriod = () => {
     const entries = reviewablePeriodEntries;
-    if (entries.length === 0 || !selectedEmployee) return;
-    if (!confirm(`Reject ${entries.length} pending entries for ${selectedEmployee.name}? Their hours will be removed from the linked tasks.`)) return;
+    if (entries.length === 0) return;
+    setConfirmRejectPeriod(true);
+  };
+
+  const confirmRejectEmployeePeriod = async () => {
+    const entries = reviewablePeriodEntries;
+    if (entries.length === 0) return;
     const ids = entries.map((e) => e.id);
     setIsSaving(true);
     try {
@@ -600,14 +693,15 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
             user: prev.currentPersona.name,
             action: 'REJECTED_EMPLOYEE_TIMESHEETS',
             entity: 'TimesheetEntry',
-            entityId: selectedEmployee.id,
+            entityId: selectedEmployee?.id || 'team',
             ipAddress: '106.51.72.18',
-            details: `Rejected ${ids.length} timesheets for ${selectedEmployee.name} (${periodLabel})`,
+            details: `Rejected ${ids.length} timesheets for ${selectedEmployee?.name || 'selected people'} (${periodLabel})`,
           },
           ...prev.auditLogs,
         ],
       }));
-      showToast(`Rejected ${ids.length} entries for ${selectedEmployee.name}`);
+      showToast(`Rejected ${ids.length} entries for ${selectedEmployee?.name || 'selected people'}`);
+      setConfirmRejectPeriod(false);
     } catch (err) {
       console.error('Failed to reject employee timesheets', err);
       showToast(apiErrorMessage(err, 'Failed to reject timesheets.'));
@@ -626,7 +720,6 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     setFormEndTime(endStr);
     setFormDurationHours('1.0');
     setFormTitle('');
-    setFormType(tab === 'schedule' ? 'meeting' : 'task');
     setLogModalTab(tab);
     setFormMeetingLink('');
     setShowMeetingLinkInput(false);
@@ -660,7 +753,6 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     setFormEmployeeId(entry.employeeId || state.currentPersona?.id || state.employees[0]?.id || '');
     setFormEmployeeIds(entry.employeeId ? [entry.employeeId] : []);
     const isSchedule = entry.entryType === 'schedule' || entry.category === 'Meeting';
-    setFormType(isSchedule ? 'meeting' : 'task');
     setLogModalTab(isSchedule ? 'schedule' : 'task');
     setFormMeetingLink(entry.meetingLink || '');
     setShowMeetingLinkInput(Boolean(entry.meetingLink));
@@ -711,15 +803,23 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
     const isPast = formDate < TODAY_DATE;
     const isFuture = formDate > TODAY_DATE;
-    const saveStatus = isSchedule
-      ? isFuture
-        ? 'Submitted'
-        : isPast
-          ? 'Pending Regularization'
-          : 'Submitted'
-      : isPast
-        ? 'Pending Regularization'
-        : 'Submitted';
+    const ownerRole = String(
+      (emp as { role?: string }).role ||
+        (emp.id === state.currentPersona.id ? state.currentPersona.role : '') ||
+        ''
+    ).toLowerCase();
+    const saveStatus =
+      !isSchedule && ownerRole === 'super_admin'
+        ? 'Approved'
+        : isSchedule
+          ? isFuture
+            ? 'Submitted'
+            : isPast
+              ? 'Pending Regularization'
+              : 'Submitted'
+          : isPast
+            ? 'Pending Regularization'
+            : 'Submitted';
 
     const matchedTaskId = formTaskId || state.tasks.find((t) => t.title.toLowerCase() === title.toLowerCase())?.id;
 
@@ -914,10 +1014,17 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     setLogModalTab('task');
   };
 
-  const handleDeleteEntry = async (entryId: string) => {
+  const handleDeleteEntry = (entryId: string) => {
     const entry = state.timesheets.find((t) => t.id === entryId);
     if (!entry) return;
-    
+    setPendingDeleteEntry(entry);
+  };
+
+  const confirmDeleteEntry = async () => {
+    const entry = pendingDeleteEntry;
+    if (!entry) return;
+    const entryId = entry.id;
+
     setIsSaving(true);
     try {
       await api.projects.deleteTimesheet(entryId);
@@ -953,6 +1060,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       showToast(`Deleted "${entry.taskTitle}"`);
       setShowLogModal(false);
       setEditingEntryId(null);
+      setPendingDeleteEntry(null);
     } catch (err) {
       console.error('Failed to delete timesheet', err);
       alert('Failed to delete timesheet.');
@@ -1268,23 +1376,26 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   );
   const todayDayTotalHours = useMemo(() => todayDayEntries.reduce((sum, e) => sum + getEntryLiveHours(e), 0), [todayDayEntries, now, state.tasks]);
   const currentTimeMinutes = useMemo(() => {
-    const now = new Date();
-    return now.getHours() * 60 + now.getMinutes();
-  }, []);
+    const clock = new Date(now);
+    return clock.getHours() * 60 + clock.getMinutes();
+  }, [now]);
 
-  const TIME_OPTIONS = useMemo(() => {
-    return Array.from({ length: 48 }, (_, i) => {
-      const totalMinutes = i * 30;
-      const h = Math.floor(totalMinutes / 60);
-      const m = totalMinutes % 60;
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      const displayH = h % 12 === 0 ? 12 : h % 12;
-      return `${String(displayH).padStart(2, '0')}:${String(m).padStart(2, '0')} ${ampm}`;
-    });
-  }, []);
+  const blockRange = (entry: TimesheetEntry) => {
+    const startMins = parseTimeToMinutes(entry.startTime || '09:00 AM');
+    if (isRunningEntry(entry)) {
+      return { startMins, endMins: Math.max(startMins + 1, currentTimeMinutes) };
+    }
+    if (entry.endTime) {
+      let endMins = parseTimeToMinutes(entry.endTime);
+      if (endMins <= startMins) endMins = startMins + Math.max(15, Math.round((entry.hours || 0) * 60));
+      return { startMins, endMins };
+    }
+    return { startMins, endMins: startMins + Math.max(1, Math.round(getEntryLiveHours(entry) * 60)) };
+  };
 
   return (
-    <div className="work-page">
+    <div className="work-page timesheets-page" data-mobile-filters={mobileFiltersOpen}>
+      {mobileViewport && <MobileHeaderAction><button type="button" className="m2-icon-button" aria-label="Timesheet filters" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen(open => !open)}><img src="/mobile-v2/home-icon-more.svg" width="22" height="22" alt="" /></button></MobileHeaderAction>}
       {toastMessage && (
         <div className="fixed top-6 right-6 z-70 bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-primary)] px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
           <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
@@ -1295,221 +1406,142 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
         </div>
       )}
 
-      <div className="work-chrome">
-        <div className="work-chrome-row work-head">
-          <h1 className="work-title min-w-0">Log hours</h1>
-          <div className="work-actions ml-auto">
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => handleOpenLogModal(selectedDate, undefined, 'schedule')}
-                className="work-btn-secondary"
-              >
-                <Users className="h-3.5 w-3.5 stroke-[2.5]" />
-                <span className="hidden sm:inline">Schedule people</span>
-                <span className="sm:hidden">Schedule</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => handleOpenLogModal(selectedDate)}
-              className="work-btn-primary"
-            >
-              <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
-              <span>Log Time</span>
-            </button>
+      <div className="work-head">
+        <h1 className="work-title"><span className="work-desktop-label">Log hours</span><span className="work-mobile-label">Timesheets</span></h1>
+        <div className="work-actions">
+          {isAdmin && <button type="button" onClick={() => handleOpenLogModal(selectedDate, undefined, 'schedule')} className="work-btn-secondary work-schedule-action">Schedule people</button>}
+          <button type="button" onClick={() => handleOpenLogModal(selectedDate)} className="work-btn-primary">Log time</button>
+        </div>
+      </div>
+      <div className="work-time-toolbar" role="region" aria-label="Timesheet controls">
+        <div className="work-time-navigation">
+          <div className="work-date-step">
+            <button type="button" onClick={handleToday}>Today</button>
+            <button type="button" onClick={handlePrevDate} aria-label="Previous period"><ChevronLeft size={16} aria-hidden="true" /></button>
+            <button type="button" onClick={handleNextDate} aria-label="Next period"><ChevronRight size={16} aria-hidden="true" /></button>
+          </div>
+          <h2 className="work-period-title" title={headerDateTitle}>{headerDateTitle}</h2>
+        </div>
+        <div className="work-time-controls">
+          <ResponsiveFilters active={Boolean(searchQuery || selectedProjectFilter !== 'All' || statusFilter !== 'All')}>
+            <label className="work-log-search">
+              <Search size={14} aria-hidden="true" />
+              <input type="search" placeholder="Search logs" aria-label="Search logs" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="work-field" />
+            </label>
+            <select value={selectedProjectFilter} onChange={(event) => setSelectedProjectFilter(event.target.value)} className="work-field work-time-project-filter" aria-label="Filter by project">
+              <option value="All">All projects</option><option value="standalone">General / Standalone</option>
+              {activeProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="work-field work-time-status-filter" aria-label="Filter by status">
+              <option value="All">All statuses</option><option value="Pending">Pending</option><option value="Approved">Approved</option><option value="Rejected">Rejected</option>
+            </select>
+            {viewMode === 'list' && <select className="work-field work-time-range-filter" aria-label="List date range" value={listDateScope} onChange={(event) => setListDateScope(event.target.value as 'week' | 'all')}><option value="week">Selected week</option><option value="all">All dates</option></select>}
+            <button type="button" className="mobile-filter-today" onClick={handleToday}>Go to today</button>
+          </ResponsiveFilters>
+          <div className="work-seg work-time-views" role="group" aria-label="Timesheet view">
+            {(['day', 'week', 'month', 'list'] as const).map((mode) => (
+              <button key={mode} type="button" onClick={() => setViewMode(mode)} className={viewMode === mode ? 'is-on' : ''} aria-pressed={viewMode === mode}>{mode}</button>
+            ))}
           </div>
         </div>
-
-        <div className="work-chrome-row">
-          <div className="work-date-step shrink-0">
-            <button type="button" onClick={handleToday}>
-              Today
-            </button>
-            <button type="button" onClick={handlePrevDate} aria-label="Previous period">
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button type="button" onClick={handleNextDate} aria-label="Next period">
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-          <h2 className="m-0 min-w-0 flex-1 text-[13px] font-bold tracking-tight text-[var(--text-primary)] sm:flex-none">
-            {headerDateTitle}
-          </h2>
-
-          <div className="relative min-w-0 w-full sm:w-auto sm:ml-auto">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
-            <input
-              type="text"
-              placeholder="Search logs"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="work-field w-full pl-10 sm:w-40"
-              aria-label="Search logs"
-            />
-          </div>
-          <select
-            value={selectedProjectFilter}
-            onChange={(e) => setSelectedProjectFilter(e.target.value)}
-            className="work-field min-w-0 w-full sm:w-auto"
-            aria-label="Filter by project"
-          >
-            <option value="All">All projects</option>
-            <option value="standalone">General / Standalone</option>
-            {activeProjects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
+      </div>
+      {isAdmin && (
+        <div className="work-time-people">
+          <h3>Team timesheets</h3>
+          <select className="work-field work-mobile-employee" aria-label="Select employee" value={selectedEmployeeFilter} onChange={(event) => setSelectedEmployeeFilter(event.target.value)}>
+            <option value="All">All people</option>
+            {employeeSummaries.map(({emp}) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
           </select>
-          <div className="work-seg w-full sm:w-auto" role="group" aria-label="Timesheet view">
-            {(['day', 'week', 'month', 'list'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setViewMode(m)}
-                className={`flex-1 sm:flex-none ${viewMode === m ? 'is-on' : ''}`}
-                aria-pressed={viewMode === m}
-              >
-                {m}
-              </button>
-            ))}
+          <div className="work-people-strip" role="group" aria-label="Select employee">
+            <button type="button" className={`work-person work-person-all ${selectedEmployeeFilter === 'All' ? 'is-on' : ''}`} onClick={() => setSelectedEmployeeFilter('All')} aria-pressed={selectedEmployeeFilter === 'All'}>All</button>
+            {shownPeople.map(({ emp, hours, pending }) => {
+              const selected = selectedEmployeeFilter === emp.id;
+              return (
+                <button key={emp.id} type="button" className={`work-person ${selected ? 'is-on' : ''}`} data-avatar={avatarTone(emp.name)} onClick={() => setSelectedEmployeeFilter(emp.id)} aria-pressed={selected}>
+                  <span className="work-person-mark" aria-hidden="true">{chipInitials(emp.name)}</span>
+                  <span className="work-person-copy">
+                    <span>{emp.name}</span>
+                    {selected && <small>{formatChipHours(hours)}{pending ? ` • ${pending} pending` : ''}</small>}
+                  </span>
+                </button>
+              );
+            })}
+            {employeeSummaries.length === 0 && <p className="work-people-empty">No people match</p>}
           </div>
-        </div>
-
-        {isAdmin && (
-          <div className="work-chrome-row items-stretch">
-            <div className="flex min-w-0 w-full flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="m-0 text-[13px] font-semibold tracking-tight text-[var(--text-primary)]">
-                  {isSuperAdmin || isHR ? 'Employee timesheets' : 'Team timesheets'}
-                  {selectedEmployee ? (
-                    <span className="font-medium text-[var(--studio-navy)]">
-                      {' '}
-                      · {selectedEmployee.name}
-                    </span>
-                  ) : null}
-                </h3>
-                <div className="relative ml-auto min-w-0">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
-                  <input
-                    type="text"
-                    placeholder="Search people"
-                    value={employeeSearch}
-                    onChange={(e) => setEmployeeSearch(e.target.value)}
-                    className="work-field w-full pl-10 sm:w-44"
-                    aria-label="Search people"
-                  />
-                </div>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="work-field"
-                  aria-label="Filter by status"
-                >
-                  <option value="All">All statuses</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Approved">Approved</option>
-                  <option value="Rejected">Rejected</option>
-                </select>
-              </div>
-
-              <div className="flex min-w-0 items-center gap-2">
-                <div
-                  className="flex min-w-0 flex-1 gap-1 overflow-x-auto custom-scrollbar"
-                  role="group"
-                  aria-label="Select employee"
-                >
-                  {employeeSummaries.map(({ emp, hours, pending }) => {
-                    const active = selectedEmployeeFilter === emp.id;
-                    return (
-                      <button
-                        key={emp.id}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => setSelectedEmployeeFilter(emp.id)}
-                        title={`${emp.name}${emp.designation ? ` · ${emp.designation}` : ''}`}
-                        className={`work-person shrink-0 ${active ? 'is-on' : ''}`}
-                      >
-                        <span className="work-person-mark relative">
-                          {emp.avatar ? (
-                            <img src={emp.avatar} alt="" />
-                          ) : (
-                            getInitials(emp.name)
-                          )}
-                          {active && (
-                            <span className="absolute -right-0.5 -bottom-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--studio-navy)] text-[var(--bg-surface)]">
-                              <Check className="h-2.5 w-2.5 stroke-[3]" />
-                            </span>
-                          )}
-                        </span>
-                        <span className="work-person-name">{emp.name}</span>
-                        {hours > 0 && (
-                          <span className="work-person-meta">{formatHoursHM(hours)}</span>
-                        )}
-                        {pending > 0 && (
-                          <span className="rounded-md bg-[var(--studio-focus)] px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-[var(--studio-navy)]">
-                            {pending}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-
-                  {employeeSummaries.length === 0 && (
-                    <p className="m-0 py-1.5 text-xs text-[var(--text-muted)]">
-                      No people match “{employeeSearch}”.
-                    </p>
-                  )}
-                </div>
-
-                {reviewablePeriodEntries.length > 0 ? (
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      title="Approve pending entries you can review"
-                      onClick={handleApproveEmployeePeriod}
-                      className="h-9 rounded-[var(--control-radius)] bg-[var(--studio-sage)] px-2.5 text-xs font-semibold text-white hover:brightness-95 disabled:opacity-50 cursor-pointer"
-                    >
-                      Approve {reviewablePeriodEntries.length}
+          {morePeople.length > 0 && (
+            <div className="work-people-more" ref={peopleMenuRef}>
+              <button type="button" aria-expanded={peopleMenuOpen} aria-haspopup="listbox" onClick={() => setPeopleMenuOpen((open) => !open)}>+{morePeople.length}</button>
+              {peopleMenuOpen && (
+                <div className="work-people-more-list" role="listbox" aria-label="More people">
+                  {morePeople.map(({ emp, hours, pending }) => (
+                    <button key={emp.id} type="button" role="option" aria-selected={selectedEmployeeFilter === emp.id} className="work-person" data-avatar={avatarTone(emp.name)} onClick={() => { setSelectedEmployeeFilter(emp.id); setPeopleMenuOpen(false); }}>
+                      <span className="work-person-mark" aria-hidden="true">{chipInitials(emp.name)}</span>
+                      <span className="work-person-copy">
+                        <span>{emp.name}</span>
+                        <small>{formatChipHours(hours)}{pending ? ` • ${pending} pending` : ''}</small>
+                      </span>
                     </button>
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      title="Reject pending entries you can review"
-                      onClick={handleRejectEmployeePeriod}
-                      className="h-9 rounded-[var(--control-radius)] px-2.5 text-xs font-semibold text-[var(--studio-error)] hover:bg-[var(--studio-error-surface)] disabled:opacity-50 cursor-pointer"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                ) : (
-                  selectedEmployee &&
-                  approvalDisabledReason &&
-                  approvalDisabledReason !== 'No pending entries in this period.' && (
-                    <p className="m-0 max-w-[220px] shrink-0 text-right text-[11px] leading-snug text-[var(--text-muted)]">
-                      {approvalDisabledReason}
-                    </p>
-                  )
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
+          )}
+          <label className="work-people-search">
+            <Search size={14} aria-hidden="true" />
+            <input type="search" aria-label="Search people" placeholder="Find a person" value={employeeSearch} onChange={(event) => setEmployeeSearch(event.target.value)} />
+          </label>
+          {reviewablePeriodEntries.length > 0 && (
+            <div className="work-period-review">
+              <button type="button" disabled={isSaving} onClick={handleApproveEmployeePeriod} className="work-approve">Approve {reviewablePeriodEntries.length}</button>
+              <button type="button" disabled={isSaving} onClick={handleRejectEmployeePeriod} className="work-reject">Reject</button>
+            </div>
+          )}
+          {selectedEmployee && approvalDisabledReason && approvalDisabledReason !== 'No pending entries in this period.' && <p className="work-review-note">{approvalDisabledReason}</p>}
+        </div>
+      )}
+
+      <div className="work-mobile-timesheets">
+        {viewMode === 'week' && (
+          <div className="work-mobile-week" role="group" aria-label="Choose day">
+            {weekDays.map((day) => <button key={day.dateStr} type="button" aria-pressed={selectedDate === day.dateStr} onClick={() => setSelectedDate(day.dateStr)}><span>{day.dayName}</span><strong>{day.dayNum}</strong><small>{day.totalHours ? formatHoursHM(day.totalHours) : '—'}</small></button>)}
           </div>
         )}
+        {viewMode === 'month' && (
+          <div className="work-mobile-month">
+            {['M','T','W','T','F','S','S'].map((label,index) => <span key={index}>{label}</span>)}
+            {monthDays.map((day) => <button key={day.dateStr} type="button" aria-pressed={selectedDate === day.dateStr} data-outside={!day.isCurrentMonth} onClick={() => setSelectedDate(day.dateStr)}><strong>{day.dayNum}</strong><small>{day.totalHours ? formatHoursHM(day.totalHours) : ''}</small></button>)}
+          </div>
+        )}
+        {viewMode === 'week' && <div className="work-mobile-totals"><div><span>Week total</span><strong>{formatHoursHM(weekDays.reduce((total,day) => total + day.totalHours, 0))}</strong></div><div><span>Pending review</span><strong>{reviewablePeriodEntries.length} entries</strong></div></div>}
+        {viewMode === 'day' && <div className="m2-metric"><span>Logged {selectedDate === TODAY_DATE ? 'today' : 'on ' + selectedDate}</span><strong>{formatHoursHM(todayDayTotalHours)}</strong><small>{todayDayReviewable.length} entries pending review</small></div>}
+          <div className="m2-section-heading"><h2>Time entries</h2><span>{filteredEntries.filter(entry => viewMode === 'list' || entry.date === selectedDate).length} entries</span></div>
+          {viewMode === 'list' && <div className="work-mobile-list-actions"><span>{filteredEntries.length} entries · {formatHoursHM(filteredEntries.reduce((total,entry) => total + getEntryLiveHours(entry), 0))} logged</span><button type="button" className="work-btn-secondary" onClick={handleExportCSV}>Export CSV</button></div>}
+        {(viewMode === 'week' ? weekDays : [{dateStr:selectedDate, dayName:'', dayNum:0, totalHours:todayDayTotalHours}]).map((day) => {
+          const entries = viewMode === 'list' ? filteredEntries : filteredEntries.filter((entry) => entry.date === day.dateStr);
+          return <section key={day.dateStr} className="work-mobile-agenda">
+            {viewMode === 'week' && entries.length > 0 && <h2>{new Date(`${day.dateStr}T00:00:00`).toLocaleDateString('en-GB', {weekday:'short',day:'numeric',month:'short'})}</h2>}
+            {entries.map((entry) => <button key={entry.id} type="button" className="work-mobile-entry" onClick={() => handleEditEntry(entry)}>
+              <strong>{entry.taskTitle || 'Time entry'}</strong><span>{entry.projectName || 'General'}</span><span>{entry.employeeName} · {new Date(`${entry.date.slice(0,10)}T00:00:00`).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</span>
+              <div><span>{entry.startTime || '—'}–{entry.endTime || 'Running'} · {formatHoursHM(getEntryLiveHours(entry))}</span><span className={`work-chip ${entry.status === 'Approved' ? 'work-chip-sage' : entry.status === 'Rejected' ? 'work-chip-error' : 'work-chip-amber'}`}>{isPendingStatus(entry.status) ? 'Pending' : entry.status}</span></div>
+            </button>)}
+            {entries.length === 0 && viewMode !== 'week' && <p className="work-mobile-empty">No time entries for this period.</p>}
+          </section>;
+        })}
       </div>
 
-      {/* VIEW 1: DAY VIEW (Light Theme) */}
+      <div className="m2-timesheet-actions"><button type="button" className="m2-primary" onClick={() => handleOpenLogModal(selectedDate)}>Log time</button>{isAdmin && <button type="button" className="m2-secondary" onClick={() => handleOpenLogModal(selectedDate, undefined, 'schedule')}>Schedule people</button>}</div>
+
+{/* VIEW 1: DAY VIEW (Light Theme) */}
       {viewMode === 'day' && (
-        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-hidden flex flex-col shadow-sm">
+        <div className="work-time-calendar work-time-desktop work-time-day rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-hidden flex flex-col shadow-sm">
           <div className="flex flex-wrap items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-surface)] py-2.5 px-3 sm:px-4 sticky top-0 z-20 gap-2">
             <div className="flex items-center gap-2.5 sm:gap-3">
-              <div className="hidden sm:block w-16 sm:w-20 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+              <div className="hidden sm:block work-time-gutter w-16 sm:w-20 text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
                 GMT+05:30
               </div>
               <div className="flex flex-col items-center">
                 <span className="text-[10px] sm:text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                  {new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short' })}
+                  {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short' })}
                 </span>
                 <div
                   className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full flex items-center justify-center text-sm sm:text-lg mt-0.5 transition-all ${
@@ -1518,7 +1550,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                       : 'text-[var(--text-secondary)] font-medium'
                   }`}
                 >
-                  {new Date(selectedDate).getDate()}
+                  {new Date(`${selectedDate}T00:00:00`).getDate()}
                 </div>
               </div>
               <div className="text-xs text-[var(--text-muted)] pl-1 sm:pl-2">
@@ -1549,9 +1581,9 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
           <div
             ref={timeGridScrollRef}
-            className="overflow-y-auto max-h-[calc(100vh-280px)] custom-scrollbar relative bg-[var(--bg-surface)]"
+            className="work-time-scroll overflow-y-auto max-h-[calc(100vh-280px)] custom-scrollbar relative bg-[var(--bg-surface)]"
           >
-            <div className="relative min-h-[1632px]">
+            <div className="relative" style={{ height: `${24 * HOUR_HEIGHT}px` }}>
               {timeHours.map(({ hour, label }) => (
                 <div
                   key={hour}
@@ -1559,7 +1591,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                   className="absolute inset-x-0 flex items-start border-t border-[var(--border-color)] group cursor-pointer hover:bg-[var(--bg-surface-subtle)]/80 transition-colors"
                   onClick={() => handleOpenLogModal(selectedDate, hour)}
                 >
-                  <div className="w-16 sm:w-20 pr-3 -mt-2 text-right text-[11px] font-medium text-[var(--text-muted)] select-none">
+                  <div className="work-time-gutter w-16 sm:w-20 pr-3 -mt-2 text-right text-[11px] font-medium text-[var(--text-muted)] select-none">
                     {label}
                   </div>
                   <div className="flex-1 h-full flex items-center pl-4 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1574,22 +1606,19 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               {selectedDate === TODAY_DATE && (
                 <div
                   style={{ top: `${(currentTimeMinutes / 60) * HOUR_HEIGHT}px` }}
-                  className="absolute inset-x-0 z-30 flex items-center pointer-events-none"
+                  className="absolute inset-x-0 z-10 flex items-center pointer-events-none"
                 >
-                  <div className="w-16 sm:w-20 flex justify-end pr-2">
+                  <div className="work-time-gutter w-16 sm:w-20 flex justify-end pr-2">
                     <div className="h-3 w-3 rounded-full bg-rose-500 shadow-xs"></div>
                   </div>
                   <div className="flex-1 h-[2px] bg-rose-500"></div>
                 </div>
               )}
 
-              <div className="absolute inset-y-0 left-16 sm:left-20 right-4 z-20 pointer-events-none">
+              <div className="work-day-events absolute inset-y-0 left-16 sm:left-20 right-4 z-20 pointer-events-none">
                 {(() => {
-                  const processed = [...todayDayEntries].map(entry => {
-                    const startMins = parseTimeToMinutes(entry.startTime || '09:00 AM');
-                    const liveHrs = getEntryLiveHours(entry);
-                    const durationMins = Math.max(15, Math.round((liveHrs || 0.25) * 60));
-                    return { ...entry, startMins, endMins: startMins + durationMins };
+                  const processed = todayDayEntries.filter((entry) => showOnCalendar(entry)).map(entry => {
+                    return { ...entry, ...blockRange(entry) };
                   }).sort((a, b) => a.startMins - b.startMins);
 
                   const clusters: (typeof processed)[] = [];
@@ -1654,7 +1683,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                               e.stopPropagation();
                               handleEditEntry(entry);
                             }}
-                            className={`absolute pointer-events-auto rounded-xl px-3 py-2 border shadow-sm cursor-pointer transition-[box-shadow,transform] duration-150 flex flex-col justify-between overflow-hidden hover:shadow-md hover:z-50 ${eventTone.card}`}
+                            className={`work-time-event absolute pointer-events-auto rounded-xl px-3 py-2 border shadow-sm cursor-pointer transition-[box-shadow,transform] duration-150 flex flex-col justify-between overflow-hidden hover:shadow-md hover:z-50 ${eventTone.card}`}
                           >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -1709,83 +1738,106 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
       {/* VIEW 2: WEEK VIEW (Light Theme) */}
       {viewMode === 'week' && (
-        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-x-auto custom-scrollbar touch-pan-x shadow-sm">
-          <div className="min-w-[640px] flex flex-col">
-            <div className="grid grid-cols-8 border-b border-[var(--border-color)] bg-[var(--bg-surface)] py-2.5 sticky top-0 z-20">
-              <div className="p-2 text-center text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider flex items-center justify-center">
-                Time
-              </div>
-              {Array.from({ length: 7 }, (_, i) => {
-                const d = new Date(selectedDate);
-                const day = d.getDay();
-                const diff = d.getDate() - day + (day === 0 ? -6 : 1) + i;
-                const colDate = new Date(d.setDate(diff));
-                const colDateStr = colDate.toISOString().split('T')[0];
-                const isToday = colDateStr === TODAY_DATE;
-
-                return (
-                  <div key={i} className="p-2 text-center">
-                    <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">
-                      {colDate.toLocaleDateString('en-US', { weekday: 'short' })}
-                    </span>
-                    <div
-                      className={`h-7 w-7 rounded-full mx-auto flex items-center justify-center text-xs mt-1 ${
-                        isToday ? 'bg-[var(--studio-navy)] text-white font-bold' : 'text-[var(--text-secondary)] font-semibold'
-                      }`}
-                    >
-                      {colDate.getDate()}
-                    </div>
-                  </div>
-                );
-              })}
+        <div className="work-time-calendar work-time-desktop work-time-week rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-hidden shadow-sm">
+          <div className="grid grid-cols-[4rem_repeat(7,minmax(0,1fr))] border-b border-[var(--border-color)] bg-[var(--bg-surface)] py-2.5">
+            <div className="p-2 text-center text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider flex items-center justify-center">
+              Time
             </div>
+            {weekDays.map((day) => (
+              <div key={day.dateStr} className="p-2 text-center">
+                <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">{day.dayName}</span>
+                <div
+                  className={`h-7 w-7 rounded-full mx-auto flex items-center justify-center text-xs mt-1 ${
+                    day.isToday ? 'bg-[var(--studio-navy)] text-white font-bold' : 'text-[var(--text-secondary)] font-semibold'
+                  }`}
+                >
+                  {day.dayNum}
+                </div>
+                {day.totalHours > 0 && (
+                  <span className="mt-1 block text-[10px] font-semibold text-[var(--text-muted)]">{formatHoursHM(day.totalHours)}</span>
+                )}
+              </div>
+            ))}
+          </div>
 
-            <div className="divide-y divide-[var(--border-color)] max-h-[calc(100vh-280px)] overflow-y-auto custom-scrollbar">
+          <div ref={timeGridScrollRef} className="work-time-scroll overflow-y-auto max-h-[calc(100vh-280px)] custom-scrollbar">
+            <div className="relative min-w-[720px]" style={{ height: `${24 * HOUR_HEIGHT}px` }}>
               {timeHours.map(({ hour, label }) => (
-                <div key={hour} className="grid grid-cols-8 min-h-[50px] divide-x divide-[var(--border-color)]">
-                  <div className="p-2 text-right text-[10px] font-medium text-[var(--text-muted)] select-none">{label}</div>
-                  {Array.from({ length: 7 }, (_, i) => {
-                    const d = new Date(selectedDate);
-                    const day = d.getDay();
-                    const diff = d.getDate() - day + (day === 0 ? -6 : 1) + i;
-                    const colDate = new Date(d.setDate(diff)).toISOString().split('T')[0];
-                    const entriesInSlot = filteredEntries.filter((e) => {
-                      if (e.date !== colDate) return false;
-                      const startH = Math.floor(parseTimeToMinutes(e.startTime || '09:00 AM') / 60);
-                      return startH === hour;
-                    });
-
-                    return (
-                      <div
-                        key={i}
-                        onClick={() => handleOpenLogModal(colDate, hour)}
-                        className="relative p-1 hover:bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)]/30 transition-colors cursor-pointer group"
-                      >
-                        {entriesInSlot.map((entry) => (
-                          <div
-                            key={entry.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditEntry(entry);
-                            }}
-                            className="w-full rounded-lg bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] border border-blue-200/80 p-1.5 text-xs text-blue-900 shadow-2xs mb-1 hover:bg-blue-100/80 transition-all cursor-pointer"
-                          >
-                            <p className="font-bold truncate text-[11px]">{entry.projectName}</p>
-                            <p className="text-[10px] text-blue-700 truncate">{entry.taskTitle || entry.description}</p>
-                            {isAdmin && selectedEmployeeFilter === 'All' && (
-                              <p className="text-[9px] text-[var(--studio-navy)]/80 truncate">{entry.employeeName}</p>
-                            )}
-                            <div className="flex items-center justify-between text-[9px] text-[var(--studio-navy)] mt-1 font-mono">
-                              <span>{entry.startTime || '09:00 AM'}</span>
-                              <span className="font-bold">{formatHoursHM(getEntryLiveHours(entry))}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
+                <div
+                  key={hour}
+                  className="absolute inset-x-0 border-t border-[var(--border-color)]"
+                  style={{ top: `${hour * HOUR_HEIGHT}px`, height: `${HOUR_HEIGHT}px` }}
+                >
+                  <div className="w-[4rem] -mt-2 pr-2 text-right text-[10px] font-medium text-[var(--text-muted)] select-none">{label}</div>
                 </div>
               ))}
+              <div className="absolute inset-y-0 left-[4rem] right-0 grid grid-cols-7">
+                {weekDays.map((day) => {
+                  const dayEntries = filteredEntries
+                    .filter((entry) => entry.date === day.dateStr && showOnCalendar(entry))
+                    .map((entry) => {
+                      const range = blockRange(entry);
+                      return { entry, startMins: range.startMins, endMins: range.endMins };
+                    })
+                    .sort((a, b) => a.startMins - b.startMins);
+                  const columnEnds: number[] = [];
+                  dayEntries.forEach((item) => {
+                    let placed = false;
+                    for (let index = 0; index < columnEnds.length; index += 1) {
+                      if (item.startMins >= columnEnds[index]) {
+                        columnEnds[index] = item.endMins;
+                        (item as { colIndex?: number }).colIndex = index;
+                        placed = true;
+                        break;
+                      }
+                    }
+                    if (!placed) {
+                      (item as { colIndex?: number }).colIndex = columnEnds.length;
+                      columnEnds.push(item.endMins);
+                    }
+                  });
+                  const columnCount = Math.max(1, columnEnds.length);
+
+                  return (
+                    <div key={day.dateStr} className="relative border-l border-[var(--border-color)]">
+                      {timeHours.map(({ hour }) => (
+                        <button
+                          key={hour}
+                          type="button"
+                          aria-label={`Log time on ${day.dateStr} at ${hour}`}
+                          onClick={() => handleOpenLogModal(day.dateStr, hour)}
+                          className="absolute inset-x-0 cursor-pointer hover:bg-[var(--bg-surface-subtle)]/80"
+                          style={{ top: `${hour * HOUR_HEIGHT}px`, height: `${HOUR_HEIGHT}px` }}
+                        />
+                      ))}
+                      {dayEntries.map((item) => {
+                        const colIndex = (item as { colIndex?: number }).colIndex || 0;
+                        const width = 100 / columnCount;
+                        const eventTone = getDayEventAppearance(item.entry.status);
+                        return (
+                          <div
+                            key={item.entry.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditEntry(item.entry);
+                            }}
+                            style={{
+                              top: `${(item.startMins / 60) * HOUR_HEIGHT}px`,
+                              height: `${Math.max(28, ((item.endMins - item.startMins) / 60) * HOUR_HEIGHT - 2)}px`,
+                              width: `calc(${width}% - 6px)`,
+                              left: `calc(${width * colIndex}% + 3px)`,
+                            }}
+                            className={`work-time-event absolute z-10 overflow-hidden rounded-lg border px-1.5 py-1 cursor-pointer ${eventTone.card}`}
+                          >
+                            <p className="truncate text-[11px] font-bold leading-tight">{item.entry.taskTitle}</p>
+                            <p className={`truncate text-[10px] ${eventTone.meta}`}>{formatHoursHM(getEntryLiveHours(item.entry))}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
@@ -1793,7 +1845,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
       {/* VIEW 3: MONTH VIEW (Light Theme) */}
       {viewMode === 'month' && (
-        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-x-auto custom-scrollbar touch-pan-x shadow-sm">
+        <div className="work-time-calendar work-time-desktop work-time-month rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] overflow-x-auto custom-scrollbar touch-pan-x shadow-sm">
           <div className="min-w-[640px] flex flex-col">
             <div className="grid grid-cols-7 border-b border-[var(--border-color)] bg-[var(--bg-surface-subtle)] py-2.5">
               {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
@@ -1803,55 +1855,47 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
               ))}
             </div>
             <div className="grid grid-cols-7 divide-x divide-y divide-[var(--border-color)] min-h-[500px]">
-              {Array.from({ length: 35 }, (_, i) => {
-                const dayNum = (i % 31) + 1;
-                const dateStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-                const dayEntries = filteredEntries.filter((e) => e.date === dateStr);
-                const dayTotalHrs = dayEntries.reduce((sum, e) => sum + (e.hours || 0), 0);
-                const isToday = dateStr === TODAY_DATE;
-
+              {monthDays.map((day) => {
+                const visibleEntries = day.entries.filter((entry) => showOnCalendar(entry));
                 return (
                   <div
-                    key={i}
-                    onClick={() => handleOpenLogModal(dateStr)}
-                    className="min-h-[100px] p-2 hover:bg-[var(--bg-surface-subtle)]/80 cursor-pointer transition-colors flex flex-col justify-between group"
+                    key={day.dateStr}
+                    onClick={() => handleOpenLogModal(day.dateStr)}
+                    className={`min-h-[100px] p-2 hover:bg-[var(--bg-surface-subtle)]/80 cursor-pointer transition-colors flex flex-col justify-between group ${
+                      day.isCurrentMonth ? '' : 'opacity-45'
+                    }`}
                   >
                     <div className="flex items-center justify-between">
                       <span
                         className={`text-xs font-semibold h-6 w-6 rounded-full flex items-center justify-center ${
-                          isToday ? 'bg-[var(--studio-navy)] text-white font-bold' : 'text-[var(--text-secondary)]'
+                          day.isToday ? 'bg-[var(--studio-navy)] text-white font-bold' : 'text-[var(--text-secondary)]'
                         }`}
                       >
-                        {dayNum}
+                        {day.dayNum}
                       </span>
-                      {dayTotalHrs > 0 && (
+                      {day.totalHours > 0 && (
                         <span className="text-[10px] font-bold text-[var(--text-muted)] bg-[var(--bg-surface-subtle)] px-1.5 py-0.5 rounded">
-                          {formatHoursHM(dayTotalHrs)}
+                          {formatHoursHM(day.totalHours)}
                         </span>
                       )}
                     </div>
                     <div className="space-y-1 mt-1">
-                      {dayEntries.slice(0, 2).map((entry) => {
-                        const task = state.tasks.find((t) => t.id === entry.taskId);
-                        return (
-                          <div
-                            key={entry.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditEntry(entry);
-                            }}
-                            className={`text-[10px] font-semibold p-1 rounded border truncate ${
-                              task?.colorClass || 'bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border-blue-200'
-                            }`}
-                          >
-                            {isAdmin && selectedEmployeeFilter === 'All' ? `${getInitials(entry.employeeName)} · ` : ''}
-                            {entry.taskTitle}
-                          </div>
-                        );
-                      })}
-                      {dayEntries.length > 2 && (
+                      {visibleEntries.slice(0, 2).map((entry) => (
+                        <div
+                          key={entry.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditEntry(entry);
+                          }}
+                          className="text-[10px] font-semibold p-1 rounded border truncate bg-[color-mix(in_srgb,var(--primary-blue)_8%,transparent)] text-blue-700 border-blue-200"
+                        >
+                          {isAdmin && selectedEmployeeFilter === 'All' ? `${getInitials(entry.employeeName)} · ` : ''}
+                          {entry.taskTitle}
+                        </div>
+                      ))}
+                      {visibleEntries.length > 2 && (
                         <span className="text-[9px] font-bold text-[var(--text-muted)] block pl-1">
-                          +{dayEntries.length - 2} more
+                          +{visibleEntries.length - 2} more
                         </span>
                       )}
                     </div>
@@ -1865,7 +1909,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
 
       {/* VIEW 4: LIST VIEW (Light Theme) */}
       {viewMode === 'list' && (
-        <div className="space-y-3">
+        <div className="work-time-desktop work-time-list space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3 bg-[var(--bg-surface)] p-3 rounded-xl border border-[var(--border-color)] shadow-sm">
             <div className="flex items-center gap-2">
               <span className="text-xs text-[var(--text-muted)]">
@@ -2040,427 +2084,68 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
         </div>
       )}
 
-      {/* GOOGLE CALENDAR LOG TIME POPOVER MODAL (Light Theme) */}
       {showLogModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in duration-200">
-          <div className="relative w-full max-w-lg max-h-[92vh] overflow-hidden flex flex-col bg-[var(--bg-surface)] text-[var(--text-primary)] rounded-xl sm:rounded-3xl shadow-2xl border border-[var(--border-color)] animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-5 pb-0 shrink-0">
-              <h3 className="text-base font-bold text-[var(--text-primary)]">
-                {logModalTab === 'schedule'
-                  ? isAdmin && !editingEntryId
-                    ? 'Assign meeting'
-                    : 'Schedule Activity'
-                  : 'Log Task'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowLogModal(false);
-                  setFormMeetingLink('');
-                  setShowMeetingLinkInput(false);
-                  setLogModalTab('task');
-                }}
-                className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] p-1.5 rounded-full hover:bg-[var(--bg-surface-subtle)] cursor-pointer transition-colors shrink-0"
-              >
-                <X className="h-5 w-5" />
-              </button>
+        <div className="work-time-modal-overlay fixed inset-0 z-60 flex items-center justify-center p-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="work-time-dialog-title" className="work-time-modal">
+            <header className="work-time-modal-head">
+              <div><h2 id="work-time-dialog-title">{logModalTab === 'schedule' ? 'Assign meeting' : editingEntryId ? 'Edit time entry' : 'Log task'}</h2><p>{new Date(`${formDate}T00:00:00`).toLocaleDateString('en-GB', {weekday:'long',day:'numeric',month:'long'})}</p></div>
+              <button type="button" aria-label="Close time form" onClick={() => setShowLogModal(false)}><X size={18} /></button>
+            </header>
+            <div className="work-time-modal-tabs" role="tablist" aria-label="Time entry type">
+              {(['task','schedule'] as const).map((tab) => <button key={tab} type="button" role="tab" aria-selected={logModalTab === tab} onClick={() => { setLogModalTab(tab); if(tab === 'schedule') { setLogCategory('Meeting'); if(isAdmin && !editingEntryId && !formEmployeeIds.length && formEmployeeId) setFormEmployeeIds([formEmployeeId]); } }}>{tab === 'task' ? 'Task' : 'Schedule'}</button>)}
             </div>
-
-            {/* GCal-style Task / Schedule tabs */}
-            <div className="px-4 sm:px-6 mt-3 shrink-0">
-              <div className="flex items-stretch gap-6 border-b border-[#dadce0]">
-                {(['task', 'schedule'] as const).map((tab) => {
-                  const active = logModalTab === tab;
-                  return (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => {
-                        setLogModalTab(tab);
-                        setFormType(tab === 'schedule' ? 'meeting' : 'task');
-                        if (tab === 'schedule') {
-                          setLogCategory('Meeting');
-                          if (isAdmin && !editingEntryId && formEmployeeIds.length === 0 && formEmployeeId) {
-                            setFormEmployeeIds([formEmployeeId]);
-                          }
-                        }
-                      }}
-                      className={`relative pb-2.5 text-sm font-medium cursor-pointer transition-colors duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] ${
-                        active ? 'text-[#1a73e8]' : 'text-[#3c4043] hover:text-[var(--text-primary)]'
-                      }`}
-                    >
-                      {tab === 'task' ? 'Task' : 'Schedule'}
-                      <span
-                        className={`absolute left-0 right-0 bottom-0 h-[3px] rounded-t-full bg-[#1a73e8] transition-transform duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] origin-left ${
-                          active ? 'scale-x-100' : 'scale-x-0'
-                        }`}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <form
-              onSubmit={handleSaveTimesheet}
-              className="flex-1 overflow-y-auto custom-scrollbar px-4 sm:px-6 py-4 sm:py-5 space-y-4 text-sm"
-            >
-              {logModalTab === 'task' ? (
-                <>
-                  <div>
-                    <label className="block text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
-                      Task / Deliverable Name
-                    </label>
-                    {projectTasks.length > 0 ? (
-                      <div className="relative">
-                        <select
-                          value={formTaskId}
-                          onChange={(e) => {
-                            const selectedId = e.target.value;
-                            setFormTaskId(selectedId);
-                            const t = projectTasks.find((task) => task.id === selectedId);
-                            if (t) setFormTitle(t.title);
-                          }}
-                          className="w-full appearance-none rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 pr-8 text-xs font-semibold text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors shadow-2xs cursor-pointer"
-                        >
-                          <option value="">Select a project task...</option>
-                          {projectTasks.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.title}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-3 top-3 h-4 w-4 text-[var(--text-muted)] pointer-events-none" />
-                      </div>
-                    ) : (
-                      <input
-                        type="text"
-                        placeholder="What did you work on? (e.g. API Integration, Client Meeting)"
-                        value={formTitle}
-                        onChange={(e) => setFormTitle(e.target.value)}
-                        className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-semibold text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors shadow-2xs"
-                        required
-                      />
-                    )}
-                  </div>
-
-                  <div className="flex items-start gap-3 pt-1">
-                    <Clock className="h-5 w-5 text-[var(--text-muted)] shrink-0 mt-2" />
-                    <div className="flex-1 space-y-1.5">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                            Date
-                          </label>
-                          <input
-                            type="date"
-                            value={formDate}
-                            max={TODAY_DATE}
-                            onChange={(e) => setFormDate(e.target.value)}
-                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] cursor-pointer transition-colors"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                            Start Time
-                          </label>
-                          <input
-                            type="time"
-                            value={formStartTime}
-                            onChange={(e) => handleTimeChange(e.target.value, formEndTime)}
-                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                            End Time
-                          </label>
-                          <input
-                            type="time"
-                            value={formEndTime}
-                            onChange={(e) => handleTimeChange(formStartTime, e.target.value)}
-                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors"
-                          />
-                        </div>
-                      </div>
-                      <p className="text-[11px] text-[var(--text-muted)] font-medium">
-                        Duration:{' '}
-                        <strong className="text-[var(--text-primary)] font-bold">
-                          {formatHoursHM(parseFloat(formDurationHours) || 0)}
-                        </strong>{' '}
-                        ({formDurationHours} hrs)
-                      </p>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div>
-                    <label className="block text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
-                      Activity / Meeting Title
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Sprint planning, Client sync, Design review"
-                      value={formTitle}
-                      onChange={(e) => setFormTitle(e.target.value)}
-                      className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-xs font-semibold text-[var(--text-primary)] outline-none focus:border-[#1a73e8] transition-colors shadow-2xs"
-                      required
-                    />
-                  </div>
-
-                  <div className="flex items-start gap-3 pt-1">
-                    <Clock className="h-5 w-5 text-[var(--text-muted)] shrink-0 mt-2" />
-                    <div className="flex-1 space-y-1.5">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                            Date
-                          </label>
-                          <input
-                            type="date"
-                            value={formDate}
-                            onChange={(e) => setFormDate(e.target.value)}
-                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[#1a73e8] cursor-pointer transition-colors"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                            Start
-                          </label>
-                          <input
-                            type="time"
-                            value={formStartTime}
-                            onChange={(e) => handleTimeChange(e.target.value, formEndTime)}
-                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[#1a73e8] transition-colors"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                            End
-                          </label>
-                          <input
-                            type="time"
-                            value={formEndTime}
-                            onChange={(e) => handleTimeChange(formStartTime, e.target.value)}
-                            className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[#1a73e8] transition-colors"
-                          />
-                        </div>
-                      </div>
-                      <p className="text-[11px] text-[var(--text-muted)] font-medium">
-                        Duration:{' '}
-                        <strong className="text-[var(--text-primary)] font-bold">
-                          {formatHoursHM(parseFloat(formDurationHours) || 0)}
-                        </strong>
-                        {formDate > TODAY_DATE && (
-                          <span className="ml-2 text-[#1a73e8] font-semibold">Upcoming</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Meet-style action row */}
-                  <div className="rounded-xl border border-[var(--border-color)] overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setShowMeetingLinkInput((v) => !v)}
-                      className="w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-[var(--bg-surface-subtle)] cursor-pointer transition-colors active:scale-[0.99]"
-                    >
-                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 via-yellow-400 to-blue-500 shrink-0">
-                        <Video className="h-4 w-4 text-white" />
-                      </span>
-                      <span className="text-sm font-medium text-[#70757a]">
-                        {showMeetingLinkInput || formMeetingLink
-                          ? 'Meeting link added'
-                          : 'Add Google Meet video conferencing'}
-                      </span>
-                    </button>
-                    {showMeetingLinkInput && (
-                      <div className="px-3.5 pb-3 flex items-center gap-2 border-t border-slate-50 pt-2">
-                        <Link2 className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
-                        <input
-                          type="url"
-                          placeholder="https://meet.google.com/..."
-                          value={formMeetingLink}
-                          onChange={(e) => setFormMeetingLink(e.target.value)}
-                          className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[#1a73e8] transition-colors"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {/* Shared: Project */}
-              <div className="flex items-center gap-3">
-                <Briefcase className="h-5 w-5 text-[var(--text-muted)] shrink-0" />
-                <div className="flex-1">
-                  <select
-                    value={formProjectId}
-                    onChange={(e) => {
-                      setFormProjectId(e.target.value);
-                      setFormTaskId('');
-                    }}
-                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] transition-colors"
-                  >
-                    <option value="">General / Standalone Project</option>
-                    {activeProjects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+            <form className="work-time-form" onSubmit={handleSaveTimesheet}>
+              <div className="work-time-form-body custom-scrollbar">
+                {logModalTab === 'schedule' && <label htmlFor="time-activity">Activity / meeting title *<input id="time-activity" required value={formTitle} onChange={(event) => setFormTitle(event.target.value)} placeholder="Sprint planning" /></label>}
+                <div className="work-time-form-dates">
+                  <label htmlFor="time-date">Date *<DateInput id="time-date" value={formDate} max={logModalTab === 'task' ? TODAY_DATE : undefined} onChange={(event) => setFormDate(event.target.value)} required /></label>
+                  <label htmlFor="time-start">Start *<input id="time-start" type="time" required value={formStartTime} onChange={(event) => handleTimeChange(event.target.value,formEndTime)} /></label>
+                  <label htmlFor="time-end">End *<input id="time-end" type="time" required value={formEndTime} onChange={(event) => handleTimeChange(formStartTime,event.target.value)} /></label>
                 </div>
+                <p className="work-time-duration">Duration: {formatHoursHM(parseFloat(formDurationHours) || 0)}{formDate > TODAY_DATE ? ' · Upcoming' : ''}</p>
+                {logModalTab === 'schedule' && <label htmlFor="time-meeting-link">Meeting link<input id="time-meeting-link" type="url" value={formMeetingLink} placeholder="https://meet.google.com/…" onChange={(event) => { setFormMeetingLink(event.target.value); setShowMeetingLinkInput(Boolean(event.target.value)); }} /></label>}
+                <label htmlFor="time-project">Project<select id="time-project" value={formProjectId} onChange={(event) => { setFormProjectId(event.target.value); setFormTaskId(''); }}><option value="">General / Standalone</option>{activeProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+                {logModalTab === 'task' && <>
+                  <label htmlFor="time-task">Task<select id="time-task" value={formTaskId} onChange={(event) => { setFormTaskId(event.target.value); const task=projectTasks.find((item) => item.id === event.target.value); setFormTitle(task?.title || ''); }}><option value="">Custom work</option>{projectTasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}</select></label>
+                  {!formTaskId && <label htmlFor="time-title">Work title *<input id="time-title" value={formTitle} onChange={(event) => setFormTitle(event.target.value)} required placeholder="What did you work on?" /></label>}
+                  <label htmlFor="time-category">Category *<select id="time-category" required value={formCategory} onChange={(event) => setLogCategory(event.target.value as TimesheetEntry['category'])}>{(['Development','Design','Testing','Code Review','Meeting','Documentation','Bug Fix'] as const).map((category) => <option key={category}>{category}</option>)}</select></label>
+                </>}
+                <label htmlFor="time-notes">{logModalTab === 'schedule' ? 'Agenda' : 'Notes'}<textarea id="time-notes" rows={3} value={formDescription} onChange={(event) => setFormDescription(event.target.value)} placeholder={logModalTab === 'schedule' ? 'What will you cover?' : 'What did you complete?'} /></label>
+                {isAdmin && logModalTab === 'schedule' && !editingEntryId ? <div className="work-time-meeting-people"><h3>People · {formEmployeeIds.length}</h3><div>{formEmployeeIds.map((id) => <span key={id}>{accessibleEmployees.find((employee) => employee.id === id)?.name || 'Team member'}<button type="button" aria-label={`Remove ${accessibleEmployees.find((employee) => employee.id === id)?.name || 'person'}`} onClick={() => setFormEmployeeIds((ids) => ids.filter((value) => value !== id))}><X size={12}/></button></span>)}</div><label htmlFor="time-add-person">Add person<select id="time-add-person" value="" onChange={(event) => { if(event.target.value) setFormEmployeeIds((ids) => [...ids,event.target.value]); }}><option value="">Choose a person</option>{accessibleEmployees.filter((employee) => !formEmployeeIds.includes(employee.id) && !isTestEntity(employee.name)).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label></div> : isAdmin ? <label htmlFor="time-person">Person<select id="time-person" value={formEmployeeId} onChange={(event) => setFormEmployeeId(event.target.value)}>{accessibleEmployees.filter((employee) => !isTestEntity(employee.name)).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label> : null}
+                {logModalTab === 'task' && <label className="work-time-billable" htmlFor="time-billable"><span>Billable work<small>Include these hours on the client invoice.</small></span><input id="time-billable" type="checkbox" role="switch" checked={formBillable} onChange={(event) => setFormBillable(event.target.checked)} /></label>}
               </div>
-
-              <div className="flex items-start gap-3">
-                <FileText className="h-5 w-5 text-[var(--text-muted)] shrink-0 mt-2" />
-                <div className="flex-1">
-                  <textarea
-                    rows={2}
-                    placeholder={
-                      logModalTab === 'schedule'
-                        ? 'Agenda or notes for this schedule...'
-                        : 'Add deliverable description or notes...'
-                    }
-                    value={formDescription}
-                    onChange={(e) => setFormDescription(e.target.value)}
-                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-2.5 text-xs text-[var(--text-primary)] placeholder-slate-400 outline-none focus:border-[var(--primary-blue)] transition-all resize-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-start gap-4">
-                <Users className="h-5 w-5 text-[var(--text-muted)] shrink-0 mt-2" />
-                <div className="flex-1 text-xs">
-                  {isAdmin && logModalTab === 'schedule' && !editingEntryId ? (
-                    <div className="space-y-1.5">
-                      <p className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider">People</p>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {formEmployeeIds.length === 0 && (
-                          <span className="text-[11px] font-medium text-[var(--text-muted)]">Select who should attend</span>
-                        )}
-                        {formEmployeeIds.map((id) => {
-                          const person = accessibleEmployees.find((e) => e.id === id);
-                          return (
-                            <span
-                              key={id}
-                              className="inline-flex items-center gap-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] py-0.5 pl-2 pr-0.5 text-[11px] font-semibold text-[var(--text-primary)]"
-                            >
-                              {person?.name || 'Unknown'}
-                              <button
-                                type="button"
-                                onClick={() => setFormEmployeeIds((prev) => prev.filter((item) => item !== id))}
-                                className="rounded-full px-1 text-[var(--text-muted)] hover:bg-rose-50 hover:text-rose-600 cursor-pointer"
-                                aria-label={`Remove ${person?.name || 'person'}`}
-                              >
-                                ×
-                              </button>
-                            </span>
-                          );
-                        })}
-                        <select
-                          value=""
-                          onChange={(e) => {
-                            if (e.target.value) setFormEmployeeIds((prev) => [...prev, e.target.value]);
-                          }}
-                          className="rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-2 py-1 text-[11px] font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)]"
-                        >
-                          <option value="">{formEmployeeIds.length ? '+ Add another person' : '+ Add people'}</option>
-                          {accessibleEmployees
-                            .filter((emp) => !formEmployeeIds.includes(emp.id) && !isTestEntity(emp.name))
-                            .map((emp) => (
-                              <option key={emp.id} value={emp.id}>
-                                {emp.name}{emp.designation ? ` (${emp.designation})` : ''}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                    </div>
-                  ) : isAdmin ? (
-                    <select
-                      value={formEmployeeId}
-                      onChange={(e) => setFormEmployeeId(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface-subtle)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] outline-none focus:border-[var(--primary-blue)] focus:bg-[var(--bg-surface)] cursor-pointer transition-colors"
-                    >
-                      {accessibleEmployees.filter((emp) => !isTestEntity(emp.name)).map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.name} ({emp.designation})
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div>
-                      <span className="font-semibold text-[var(--text-primary)]">
-                        {state.currentPersona?.name || 'Rajesh Sharma'}
-                      </span>
-                      <p className="text-[11px] text-[var(--text-muted)] mt-0.5 font-medium">
-                        {logModalTab === 'schedule'
-                          ? 'Visible on dashboard Schedules'
-                          : 'Default visibility • Recorded on timesheet'}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-4 border-t border-[var(--border-color)]">
-                {editingEntryId ? (
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteEntry(editingEntryId)}
-                    className="px-4 py-2 rounded-full text-rose-500 hover:text-rose-700 hover:bg-rose-50 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors active:scale-[0.97]"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    <span>Delete</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowLogModal(false);
-                      setFormMeetingLink('');
-                      setShowMeetingLinkInput(false);
-                      setLogModalTab('task');
-                    }}
-                    className="px-4 py-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-subtle)] rounded-full font-semibold cursor-pointer transition-colors"
-                  >
-                    Cancel
-                  </button>
-                )}
-
-                <div className="flex items-center gap-3">
-                  <button
-                    type="submit"
-                    disabled={
-                      (logModalTab === 'task' && formDate > TODAY_DATE) ||
-                      (logModalTab === 'schedule' && isAdmin && !editingEntryId && formEmployeeIds.length === 0)
-                    }
-                    className={`px-6 py-2 rounded-full text-white text-xs font-bold shadow-sm transition-[transform,background-color] duration-160 ease-out active:scale-[0.97] ${
-                      logModalTab === 'task' && formDate > TODAY_DATE
-                        ? 'bg-slate-300 cursor-not-allowed'
-                        : logModalTab === 'task' && formDate < TODAY_DATE
-                          ? 'bg-amber-600 hover:bg-amber-700 cursor-pointer'
-                          : 'bg-[#1a73e8] hover:bg-[var(--studio-navy-hover)] cursor-pointer'
-                    }`}
-                  >
-                    {logModalTab === 'schedule'
-                      ? editingEntryId
-                        ? 'Update Schedule'
-                        : formEmployeeIds.length > 1
-                          ? `Assign to ${formEmployeeIds.length} people`
-                          : 'Save Schedule'
-                      : formDate > TODAY_DATE
-                        ? 'Future Date Not Allowed'
-                        : formDate < TODAY_DATE
-                          ? 'Apply for Regularization'
-                          : 'Save'}
-                  </button>
-                </div>
-              </div>
+              <footer className="work-time-modal-footer">
+                {editingEntryId && <button type="button" className="work-time-delete" onClick={() => handleDeleteEntry(editingEntryId)}>Delete entry</button>}
+                <button type="button" className="work-btn-secondary" onClick={() => setShowLogModal(false)}>Cancel</button>
+                <button type="submit" disabled={isSaving || (logModalTab === 'task' && formDate > TODAY_DATE) || (logModalTab === 'schedule' && isAdmin && !editingEntryId && !formEmployeeIds.length)} className="work-btn-primary">{isSaving ? 'Saving…' : logModalTab === 'schedule' ? editingEntryId ? 'Update schedule' : `Assign to ${formEmployeeIds.length || 1} ${formEmployeeIds.length === 1 ? 'person' : 'people'}` : formDate < TODAY_DATE ? 'Apply for regularization' : 'Save entry'}</button>
+              </footer>
             </form>
           </div>
         </div>
+      )}
+
+      {confirmRejectPeriod && (
+        <ConfirmDialog
+          title={`Reject ${reviewablePeriodEntries.length} entries?`}
+          description={`Reject ${reviewablePeriodEntries.length} pending entries for ${selectedEmployee?.name || 'selected people'}? Their hours will be removed from the linked tasks.`}
+          confirmLabel="Reject entries"
+          busy={isSaving}
+          busyLabel="Rejecting…"
+          onCancel={() => setConfirmRejectPeriod(false)}
+          onConfirm={() => void confirmRejectEmployeePeriod()}
+        />
+      )}
+
+      {pendingDeleteEntry && (
+        <ConfirmDialog
+          title={`Delete “${pendingDeleteEntry.taskTitle}”?`}
+          description="This timesheet entry will be removed. This cannot be undone."
+          confirmLabel="Delete entry"
+          busy={isSaving}
+          busyLabel="Deleting…"
+          onCancel={() => setPendingDeleteEntry(null)}
+          onConfirm={() => void confirmDeleteEntry()}
+        />
       )}
     </div>
   );

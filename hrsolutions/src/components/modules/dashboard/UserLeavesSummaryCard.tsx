@@ -2,7 +2,7 @@
 
 import React, { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { GoogleIcon } from '@/components/ui/GoogleIcon';
+import { ArrowRight, Plus } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { useDashboardContext } from './DashboardDataContext';
 import { getEffectiveLeaveQuotas, formatLeaveDays } from '@/utils/leaveRules';
@@ -100,7 +100,7 @@ export const UserLeavesSummaryCard: React.FC<{ className?: string }> = ({ classN
           className="text-xs font-semibold text-[var(--studio-navy)] hover:underline inline-flex items-center gap-1 cursor-pointer"
         >
           Apply
-          <GoogleIcon name="add" size={15} weight={600} />
+          <Plus size={15} aria-hidden="true" />
         </button>
       }
     >
@@ -161,7 +161,7 @@ export const UserLeavesSummaryCard: React.FC<{ className?: string }> = ({ classN
           className="w-full h-9 rounded-[7px] text-xs font-semibold text-[var(--studio-navy)] bg-[var(--bg-surface)] hover:bg-[var(--studio-selected)] border border-[var(--border-color)] inline-flex items-center justify-center gap-1.5 cursor-pointer"
         >
           View all leaves
-          <GoogleIcon name="arrow_forward" size={15} weight={500} />
+          <ArrowRight size={15} aria-hidden="true" />
         </button>
       </div>
     </DashPanel>

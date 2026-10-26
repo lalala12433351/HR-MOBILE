@@ -39,6 +39,13 @@ type VerifiedTokenCacheEntry = { payload: CognitoTokenPayload; expiresAt: number
 const VERIFIED_TOKEN_TTL_MS = 5 * 60_000;
 const verifiedTokenCache = new Map<string, VerifiedTokenCacheEntry>();
 
+function tenantCreatedAtIso(value: unknown): string | undefined {
+  if (!value) return undefined;
+  const dt = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(dt.getTime())) return undefined;
+  return dt.toISOString();
+}
+
 function tokenFingerprint(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
@@ -94,7 +101,7 @@ async function resolveGlobalAuthMapping(sub: string, email: string): Promise<any
     const bySub = await pool.query(
       `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.schema_name, t.status as tenant_status,
               t.name as tenant_name, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
-              t.address, t.city, t.state_province, t.postal_code, t.country
+              t.created_at as tenant_created_at, t.address, t.city, t.state_province, t.postal_code, t.country
        FROM public.global_auth_mapping gam
        JOIN public.tenants t ON gam.tenant_id = t.id
        WHERE gam.cognito_sub = $1
@@ -108,7 +115,7 @@ async function resolveGlobalAuthMapping(sub: string, email: string): Promise<any
       const byEmail = await pool.query(
         `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.schema_name, t.status as tenant_status,
                 t.name as tenant_name, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
-                t.address, t.city, t.state_province, t.postal_code, t.country
+                t.created_at as tenant_created_at, t.address, t.city, t.state_province, t.postal_code, t.country
          FROM public.global_auth_mapping gam
          JOIN public.tenants t ON gam.tenant_id = t.id
          WHERE LOWER(gam.email) = $1
@@ -466,6 +473,8 @@ export async function authenticateToken(req: Request, res: Response, next: NextF
       stateProvince: tenantRecord?.state_province || undefined,
       postalCode: tenantRecord?.postal_code || undefined,
       country: tenantRecord?.country || undefined,
+      createdAt: tenantCreatedAtIso(tenantRecord?.tenant_created_at),
+      adminEmail: tenantRecord?.tenant_admin_email || undefined,
     };
 
     req.user = {
@@ -567,6 +576,7 @@ async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promis
       slug: cached.tenantRecord?.tenant_slug || cached.tenantId,
       name: cached.tenantRecord?.tenant_name || undefined,
       industry: cached.tenantRecord?.tenant_industry || undefined,
+      createdAt: tenantCreatedAtIso(cached.tenantRecord?.tenant_created_at),
     };
     req.user = {
       sub,
@@ -588,12 +598,13 @@ async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promis
   let mappingActive: boolean | undefined;
   let tenantName: string | undefined;
   let tenantIndustry: string | undefined;
+  let tenantCreatedAt: string | undefined;
 
   try {
     const bySub = await pool.query(
       `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.schema_name, t.status as tenant_status,
               t.name as tenant_name, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
-              t.address, t.city, t.state_province, t.postal_code, t.country
+              t.created_at as tenant_created_at, t.address, t.city, t.state_province, t.postal_code, t.country
        FROM public.global_auth_mapping gam
        JOIN public.tenants t ON gam.tenant_id = t.id
        WHERE gam.cognito_sub = $1
@@ -606,7 +617,7 @@ async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promis
       const byEmail = await pool.query(
         `SELECT gam.*, t.id as tenant_uuid, t.slug as tenant_slug, t.schema_name, t.status as tenant_status,
                 t.name as tenant_name, t.industry as tenant_industry, t.admin_email as tenant_admin_email,
-                t.address, t.city, t.state_province, t.postal_code, t.country
+                t.created_at as tenant_created_at, t.address, t.city, t.state_province, t.postal_code, t.country
          FROM public.global_auth_mapping gam
          JOIN public.tenants t ON gam.tenant_id = t.id
          WHERE LOWER(gam.email) = $1
@@ -624,6 +635,7 @@ async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promis
       mappingActive = row.is_active;
       tenantName = row.tenant_name || undefined;
       tenantIndustry = row.tenant_industry || undefined;
+      tenantCreatedAt = tenantCreatedAtIso(row.tenant_created_at);
     }
   } catch (dbErr: any) {
     log.warn('Notice: Control plane lookup error for student JWT', { error: dbErr.message });
@@ -654,6 +666,7 @@ async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promis
       is_active: mappingActive,
       tenant_name: tenantName,
       tenant_industry: tenantIndustry,
+      tenant_created_at: tenantCreatedAt,
     },
     effectiveRole: 'student',
     tenantId,
@@ -667,6 +680,7 @@ async function attachStudentContext(req: Request, appJwt: AppJwtPayload): Promis
     slug: tenantId,
     name: tenantName,
     industry: tenantIndustry,
+    createdAt: tenantCreatedAt,
   };
 
   req.user = {
