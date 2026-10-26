@@ -342,7 +342,7 @@ function ChatPageInner() {
   const typingUsers = conversation ? (typing[conversation.id] || []).filter((u) => u.employeeId !== meId) : [];
 
   return (
-    <div className="chat-workspace">
+    <div className="chat-workspace" data-conversation-open={Boolean(selectedId)}>
       <aside
         aria-label="Conversations"
         className={`chat-rail flex-col ${selectedId ? 'hidden md:flex' : 'flex'}`}

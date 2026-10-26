@@ -31,8 +31,8 @@ function MobileDashboardContent() {
  return <div className="m2-page m2-home">
   {manager ? <>
    <SetupPromptModal />
-   <div className="m2-metric"><span>Present today</span><strong>{present} of {employees.length}</strong><small>{Math.max(0,employees.length-present)} yet to clock in</small></div>
-   <MobileSection title="Needs your attention" action={<span>{pendingLeaves.length + pendingCorrections.length} pending</span>}>
+   <div className="m2-metric" data-accent="teal"><span>Present today</span><strong>{present} of {employees.length}</strong><small>{Math.max(0,employees.length-present)} yet to clock in</small></div>
+   <MobileSection title="Needs your attention" action={<span className="m2-pending-count">{pendingLeaves.length + pendingCorrections.length} pending</span>}>
     {pendingLeaves.slice(0,2).map(l => <MobileRow key={l.id} title={l.employeeName + ' requested leave'} detail={l.leaveType + ' · ' + l.startDate.slice(0,10)} href="/attendance?tab=leaves" />)}
     {pendingCorrections.slice(0,2).map(r => <MobileRow key={r.id} title="Attendance correction" detail={r.employeeName + ' · ' + r.date} href="/attendance?tab=regularization" />)}
     {!pendingLeaves.length && !pendingCorrections.length && <p className="m2-empty">You're all caught up. No requests need your review.</p>}

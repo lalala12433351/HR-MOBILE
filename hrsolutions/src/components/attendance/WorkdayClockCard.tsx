@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useMobileViewport } from '@/hooks/useMobileViewport';
+import styles from './mobile-workday.module.css';
 
 export type WorkdayStatusKind = 'idle' | 'live' | 'break' | 'done';
 
@@ -81,12 +82,34 @@ export function WorkdayClockCard({
   const hasActions = Boolean(locationSelect || secondaryAction || primaryAction);
 
   if (mobile) {
-    return <section className={'m2-workday' + (compact ? ' m2-workday--home' : '')} aria-label={compact ? "Today's shift" : 'My workday'}>
-      <p className={'m2-workday-status is-' + statusKind}>{compact && statusKind === 'idle' ? 'Today’s shift' : chip}</p>
-      {compact && statusKind === 'idle' ? <strong className="m2-workday-hours">{shiftHours.replace(' - ', ' – ')}</strong> : <strong className="m2-workday-clock" suppressHydrationWarning>{clock.hours}:{clock.minutes}:{clock.seconds}</strong>}
-      <p className="m2-workday-shift">{shiftName}{!(compact && statusKind === 'idle') && ' · ' + shiftHours}</p>
-      {locationSelect && <div className="m2-workday-location">{locationSelect}</div>}
-      {hasActions && <div className="m2-workday-actions">{primaryAction}{secondaryAction}</div>}
+    const today = new Date();
+    const dateLabel = today.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    const overTarget = targetSeconds > 0 && elapsedSeconds > targetSeconds;
+    return <section className={`m2-workday ${styles.card}`} data-status={statusKind} aria-label={compact ? "Today's attendance" : 'My workday'}>
+      <header className={styles.header}>
+        <span className={styles.date} suppressHydrationWarning>{dateLabel}</span>
+        <span className={styles.status}>{chip}</span>
+      </header>
+      <div className={styles.shift}>
+        <span>{shiftName}</span>
+        <strong>{shiftHours}</strong>
+      </div>
+      <div className={styles.hours}>
+        <span className={styles.label}>Logged today</span>
+        <div className={styles.clock} suppressHydrationWarning><strong>{clock.hours}:{clock.minutes}</strong></div>
+        <span className={styles.target}><strong>{targetLabel}</strong><span>daily target</span></span>
+      </div>
+      <div className={styles.progressGroup}>
+        <div className={styles.progress} role="progressbar" aria-label="Today's shift progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)} aria-valuetext={`${formatWorkdayTarget(elapsedSeconds)} logged of ${targetLabel} scheduled`}>
+          <span style={{ width: `${progress}%` }} />
+        </div>
+        <div className={styles.progressCaption}><span>{overTarget ? 'Daily target reached' : 'Daily target'}</span><span suppressHydrationWarning>{overTarget ? `+${formatWorkdayTarget(elapsedSeconds - targetSeconds)} extra` : `${Math.round(progress)}% logged`}</span></div>
+      </div>
+      {(locationSelect || primaryAction) && <div className={styles.controls}>
+        {locationSelect && <div className={styles.location}><span className={styles.label}>Work location</span>{locationSelect}</div>}
+        {primaryAction && <div className={styles.actions}>{primaryAction}</div>}
+      </div>}
+      {secondaryAction && <div className={styles.secondaryAction}>{secondaryAction}</div>}
     </section>;
   }
 

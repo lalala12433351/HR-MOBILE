@@ -287,7 +287,7 @@ export async function ensurePunchPhotoColumn(req: Request): Promise<boolean> {
 
 type TenantSql = (text: string, params?: unknown[]) => Promise<{ rows: any[] }>;
 
-const OUTSIDE_DWELL_MS = 5 * 60 * 1000;
+export const OUTSIDE_DWELL_MS = 10 * 60 * 1000;
 const GEOFENCE_DEVICE = 'Left office geofence';
 const MISSED_TIME_DEVICE = 'Missed punch-out time';
 
@@ -670,7 +670,10 @@ async function insertGeofenceCheckout(
   );
 }
 
-export async function completeDueGeofenceSignOuts(query: TenantSql): Promise<void> {
+export async function completeDueGeofenceSignOuts(
+  query: TenantSql,
+  dwellMs: number = OUTSIDE_DWELL_MS
+): Promise<void> {
   await ensureAttendanceWatchTables(query);
   const due = await query(
     `SELECT pres.employee_id, pres.latitude, pres.longitude, pres.outside_since, pres.last_inside_at,
@@ -685,8 +688,9 @@ export async function completeDueGeofenceSignOuts(query: TenantSql): Promise<voi
      ) p ON TRUE
      LEFT JOIN offices o ON o.id = p.office_id
      WHERE pres.outside_since IS NOT NULL
-       AND pres.outside_since <= NOW() - INTERVAL '5 minutes'
-       AND LOWER(p.punch_type) = 'check_in'`
+       AND pres.outside_since <= NOW() - ($1::double precision * INTERVAL '1 millisecond')
+       AND LOWER(p.punch_type) = 'check_in'`,
+    [dwellMs]
   );
   for (const row of due.rows) {
     const punch = row as OpenPunch;
@@ -902,7 +906,7 @@ export async function findOpenCheckIn(
 export async function applyAutoClockOut(req: Request, _employeeId?: string, _policy?: AttendancePolicy): Promise<void> {
   if (!req.tenantQuery) return;
   await markMissedCheckouts(req.tenantQuery);
-  await completeDueGeofenceSignOuts(req.tenantQuery);
+  await completeDueGeofenceSignOuts(req.tenantQuery, OUTSIDE_DWELL_MS);
 }
 
 export function selfieLooksPresent(value: unknown): boolean {

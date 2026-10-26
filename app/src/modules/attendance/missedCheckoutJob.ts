@@ -2,7 +2,7 @@ import { pool } from '../../config/database.js';
 import { env } from '../../config/env.js';
 import { withTenantContext } from '../../db/queryRunner.js';
 import { log } from '../../utils/logger.js';
-import { completeDueGeofenceSignOuts, markMissedCheckouts } from './attendancePolicy.js';
+import { completeDueGeofenceSignOuts, markMissedCheckouts, OUTSIDE_DWELL_MS } from './attendancePolicy.js';
 
 const INTERVAL_MS = 60 * 1000;
 
@@ -30,7 +30,7 @@ export async function runMissedCheckoutSweep(): Promise<void> {
       try {
         await withTenantContext(tenant.schema_name, async (_client, query) => {
           await markMissedCheckouts(query);
-          await completeDueGeofenceSignOuts(query);
+          await completeDueGeofenceSignOuts(query, OUTSIDE_DWELL_MS);
         });
       } catch (err) {
         log.warn(`Attendance sweep failed for ${tenant.schema_name}`, err);

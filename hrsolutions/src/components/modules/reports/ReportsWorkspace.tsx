@@ -533,8 +533,8 @@ export function ReportsWorkspace({ state }: { state: AppState }) {
         <label><span className="sr-only">Department</span><select value={department} onChange={event => setDepartment(event.target.value)}>{departments.map(item => <option key={item} value={item}>{item === 'All' ? 'My team' : item}</option>)}</select></label>
       </div>
       {period === 'custom' && <div className="m2-report-filters"><label>Start date<DateInput value={customStart} onChange={event => setCustomStart(event.target.value)} /></label><label>End date<DateInput value={customEnd} min={customStart || undefined} onChange={event => setCustomEnd(event.target.value)} /></label></div>}
-      <div className="m2-metric"><span>Attendance rate</span><strong>{percentage(attendanceMetrics.rate)}</strong></div>
-      <div className="m2-metric"><span>Project completion</span><strong>{percentage(taskRate)}</strong></div>
+      <div className="m2-metric" data-accent="teal"><span>Attendance rate</span><strong>{percentage(attendanceMetrics.rate)}</strong></div>
+      <div className="m2-metric" data-accent="indigo"><span>Project completion</span><strong>{percentage(taskRate)}</strong></div>
       <MobileSection title="Explore reports">
         <MobileRow title="Attendance & leave" detail="Presence, hours and absence trends" onClick={() => setReport('attendance')} />
         <MobileRow title="Time & productivity" detail="Logged hours by project and person" onClick={() => setReport('compliance')} />

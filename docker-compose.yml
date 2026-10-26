@@ -78,7 +78,7 @@ services:
       PORT: 3000
       HOSTNAME: "0.0.0.0"
       BACKEND_INTERNAL_URL: "http://backend:8080"
-      NEXT_PUBLIC_BACKEND_URL: "http://localhost:8080"
+      NEXT_PUBLIC_BACKEND_URL: "https://api.pixbe.in"
     ports:
       - "3000:3000"
     depends_on:

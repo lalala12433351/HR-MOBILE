@@ -3195,12 +3195,17 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           {/* Mobile Tasks Cards */}
           <div className="m2-task-list md:hidden">
   <div className="m2-section-heading"><h2>Today</h2><span>{filteredTasks.length} tasks</span></div>
-  {filteredTasks.length === 0 ? <div className="m2-empty">No tasks match these filters. Add a task to start the list.</div> : filteredTasks.map(task => (
+  {filteredTasks.length === 0 ? <div className="m2-empty">No tasks match these filters. Add a task to start the list.</div> : filteredTasks.map(task => {
+    const status = normalizeTaskStatus(task.status);
+    const overdue = isTaskOverdue(task);
+    const tone = overdue ? 'is-overdue' : status === 'Completed' ? 'is-complete' : status === 'In Progress' ? 'is-active' : 'is-todo';
+    return (
     <button type="button" key={task.id} className="m2-task-row" onClick={() => setSelectedTask(task)}>
-      <strong>{task.title}</strong><span>{[task.projectName, task.dueDate ? 'Due ' + task.dueDate.slice(0, 10) : null].filter(Boolean).join(' · ')}</span>
-      <small className={isTaskOverdue(task) ? 'is-overdue' : normalizeTaskStatus(task.status) === 'Completed' ? 'is-complete' : 'is-progress'}>{isTaskOverdue(task) ? 'Overdue' : normalizeTaskStatus(task.status)}</small>
+      <span className="m2-task-line"><strong>{task.title}</strong><small className={tone}>{overdue ? 'Overdue' : status}</small></span>
+      <span>{[task.projectName, task.dueDate ? 'Due ' + task.dueDate.slice(0, 10) : null].filter(Boolean).join(' · ')}</span>
     </button>
-  ))}
+    );
+  })}
 </div>
 {/* Desktop Backlog Table */}
           <div className="work-table hidden md:block overflow-hidden">
@@ -3338,11 +3343,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedProjectForDetails(proj); } }}
                 className="work-card work-project-card flex cursor-pointer flex-col gap-3 p-5"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-semibold text-[var(--text-muted)]">{proj.code}</p>
-                    <h3 className="truncate text-[15px] font-bold text-[var(--text-primary)]">{proj.name}</h3>
-                  </div>
+                <p className="work-project-code">{proj.code}</p>
+                <div className="work-project-title">
+                  <h3 className="truncate text-[15px] font-bold text-[var(--text-primary)]">{proj.name}</h3>
                   <span className={projectStatusChip(proj.status)}>{proj.status || 'In Progress'}</span>
                 </div>
                 <p className="line-clamp-2 text-[12px] text-[var(--text-secondary)]">
@@ -3359,7 +3362,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                       {projApprovedHours}h / {totalHoursAllocated > 0 ? `${totalHoursAllocated}h` : '—'}
                     </span>
                   </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-surface-subtle)]">
+                  <div className="work-project-meter h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-surface-subtle)]">
                     <div
                       className={`h-full rounded-full ${hoursPercent > 90 ? 'bg-amber-500' : 'bg-[var(--studio-navy)]'}`}
                       style={{ width: `${hoursPercent}%` }}

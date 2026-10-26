@@ -92,6 +92,13 @@
   --control-height: 40px;
   --accent-teal-foreground: #0b6e64;
   --accent-teal-surface: #e5f5f0;
+  --accent-teal-border: #b6dfd3;
+  --accent-indigo-foreground: #4555ad;
+  --accent-indigo-surface: #eef0fd;
+  --accent-indigo-border: #ced5f5;
+  --accent-cyan-foreground: #156b87;
+  --accent-cyan-surface: #e7f5fa;
+  --accent-cyan-border: #bbdde9;
   --accent-amber-foreground: #926015;
   --accent-amber-surface: #fff4df;
   --accent-violet-foreground: #6946b8;

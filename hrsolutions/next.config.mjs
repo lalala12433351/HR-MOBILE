@@ -14,7 +14,7 @@ const nextConfig = {
   },
   ...(!isMobile ? {
     async rewrites() {
-      const rawUrl = process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
+      const rawUrl = process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'https://api.pixbe.in';
       const backendUrl = rawUrl.replace(/\/+$/, '');
       return [
         { source: '/api/v1/:path*', destination: `${backendUrl}/api/v1/:path*` },

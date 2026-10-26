@@ -13,10 +13,7 @@ export const MAX_GEOFENCE_LIMIT_METERS = 1000;
 export const MIN_GEOFENCE_LIMIT_METERS = 20;
 
 export const API_CONFIG = {
-  BASE_URL:
-    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_BACKEND_URL
-      ? `${process.env.NEXT_PUBLIC_BACKEND_URL.replace(/\/+$/, '')}/api/v1`
-      : '') || '/api/v1',
+  BASE_URL: `${(process.env.NEXT_PUBLIC_BACKEND_URL || 'https://api.pixbe.in').replace(/\/+$/, '')}/api/v1`,
 } as const;
 
 export const DEFAULT_WORKING_HOURS = {

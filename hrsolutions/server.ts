@@ -35,7 +35,7 @@ async function startServer() {
 
   // Reverse Proxy to Backend API (/api/v1/*)
   app.all("/api/v1/*", async (req, res) => {
-    const rawBackendUrl = process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+    const rawBackendUrl = process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://api.pixbe.in";
     const backendUrl = rawBackendUrl.replace(/\/+$/, "");
     const targetUrl = `${backendUrl}${req.originalUrl}`;
     try {

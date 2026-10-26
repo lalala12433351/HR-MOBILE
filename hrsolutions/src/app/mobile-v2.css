@@ -28,11 +28,18 @@
 .m2-workday-actions { display:flex;gap:12px; }
 .m2-workday-actions > * { flex:1;min-width:0;min-height:44px;justify-content:center;border-radius:8px;font-size:14px; }
 .m2-workday-location :is(label,.dash-clock-location) { display:flex;align-items:center;gap:8px; }
-.m2-workday-location :is(select,.dash-clock-location select) { min-width:0;width:100%;min-height:32px;padding:4px 0;border:0;background:transparent;color:var(--text-secondary);font-size:12px; }
+.pixbe-app .m2-workday-location :is(select,.dash-clock-location select,.work-field) { min-width:0;width:100%;min-height:48px;padding:0 36px 0 12px;border:1px solid #dde4e9;border-radius:8px;background:#fff;color:#172234;font-size:14px;font-weight:500; }
+.pixbe-app .m2-workday-location select:disabled { opacity:1;-webkit-text-fill-color:#172234;color:#172234;background:#fff;border-color:#dde4e9; }
 .m2-workday-location .dash-kpi-label { display:none; }
-.m2-account-dialog { position:fixed;inset:0;margin:0;padding:0;width:100%;max-width:none;height:100dvh;max-height:none;border:0;background:transparent;overflow:hidden;color:#172234; }
-.m2-account-dialog::backdrop { background:rgba(13,20,33,.32); }
-.m2-account-panel { display:flex;flex-direction:column;width:min(326px,calc(100% - 64px));height:100%;padding:calc(32px + env(safe-area-inset-top)) 24px max(32px,env(safe-area-inset-bottom));background:white;overflow-y:auto; }
+.m2-account-dialog { position:fixed;inset:0;margin:0;padding:0;width:100%;max-width:none;height:100dvh;max-height:none;border:0;background:transparent;overflow:hidden;color:#172234;transition:display 200ms allow-discrete,overlay 200ms allow-discrete; }
+.m2-account-dialog::backdrop { background:rgba(13,20,33,.32);opacity:0;transition:opacity 200ms var(--ease-out); }
+.m2-account-dialog[open]::backdrop { opacity:1; }
+.m2-account-panel { display:flex;flex-direction:column;width:min(360px,calc(100% - 40px));height:100%;margin-left:auto;padding:calc(16px + env(safe-area-inset-top)) 24px max(24px,env(safe-area-inset-bottom));background:white;overflow-y:auto;overscroll-behavior:contain;transform:translateX(100%);transition:transform 200ms var(--ease-out); }
+.m2-account-dialog[open] .m2-account-panel { transform:translateX(0); }
+@starting-style {
+ .m2-account-dialog[open] .m2-account-panel { transform:translateX(100%); }
+ .m2-account-dialog[open]::backdrop { opacity:0; }
+}
 .m2-account-heading { display:flex;align-items:center;justify-content:space-between;min-height:44px; }
 .m2-account-heading h2 { font-size:13px;font-weight:500;color:#5e6c7b; }
 .m2-account-person { display:flex;flex-direction:column;gap:4px;min-height:160px;padding:16px 0 32px;border-bottom:1px solid #dde4e9; }
@@ -71,25 +78,38 @@
  .pixbe-app .work-tab::after { display:none; }
  .pixbe-app :is(.work-toolbar,.work-time-toolbar,.work-time-people,.people-studio__panel,.people-studio__sheet,.settings-studio__body,.employee-profile-content) { padding:0;border:0;border-radius:0;box-shadow:none;background:transparent; }
  .pixbe-app :is(.work-field,.settings-field input,.settings-field select,.settings-field textarea,.people-studio__search input,.people-studio__select) { min-height:48px;border:0;border-radius:8px;background:#f3f5f7;padding:12px;font-size:14px; }
+ /* Keep search text clear of its leading icon. */
+ .pixbe-app .people-studio__search input { padding-inline:36px; }
  .pixbe-app :is(.work-btn-primary,.work-btn-secondary,.people-studio__btn,.settings-button,.finance-button) { min-height:48px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:none; }
  .pixbe-app :is(.work-chip,.people-studio__status,.work-task-due,.workday-chip) { min-height:0;padding:0;border:0;border-radius:0;background:transparent;font-size:12px;font-weight:500; }
  .pixbe-app :is(.work-chip-sage,.workday-chip.is-live) { color:#0b6e64; }
  .pixbe-app .work-chip-error { color:#be123c; }
- .pixbe-app :is(.work-chip-navy,.work-chip-muted) { background:transparent; }
- .pixbe-app .projects-page .work-tabs { order:-1;margin:0; }
+ .pixbe-app .work-chip-navy { background:transparent;color:#2d628e; }
+ .pixbe-app .work-chip-muted { background:transparent;color:#5e6c7b; }
+ .pixbe-app .projects-page .work-tabs { order:-1;margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;gap:8px;overflow:visible; }
  .pixbe-app .projects-page .work-toolbar { flex-wrap:wrap;gap:12px; }
  .pixbe-app .projects-page .work-toolbar .work-search { width:100%;max-width:none;flex:1 0 100%; }
- .pixbe-app .projects-page .work-card.work-task-card { padding:16px 0;border:0;border-bottom:1px solid #dde4e9;border-radius:0;background:transparent;box-shadow:none; }
- .pixbe-app .projects-page .work-task-card h4 { font-size:15px;line-height:1.45;font-weight:500; }
- .pixbe-app .projects-page .work-task-project { font-size:12px;background:transparent;padding:0;color:var(--text-secondary); }
- .pixbe-app .projects-page .work-task-footer { padding-top:8px;border:0;font-size:12px; }
- .pixbe-app .projects-page .work-col-head { padding:0 0 16px;border:0; }
- .pixbe-app .projects-page .work-col-body { padding:0;gap:0; }
+ .pixbe-app .projects-page .work-card.work-task-card { display:flex;flex-direction:column;gap:12px;padding:14px;border:1px solid #dde4e9;border-radius:8px;background:#fff;box-shadow:none; }
+ .pixbe-app .projects-page .work-card.work-task-card > * { margin:0; }
+ .pixbe-app .projects-page .work-task-card h4 { font-size:15px;line-height:22px;font-weight:600; }
+ .pixbe-app .projects-page .work-task-project { align-items:center;min-height:24px;font-size:12px;line-height:16px;background:transparent;padding:0;color:var(--text-secondary); }
+ .pixbe-app .projects-page .work-task-project > button { width:24px;height:24px;margin:0; }
+ .pixbe-app .projects-page .work-task-card .work-chip { height:auto;padding:0;background:transparent; }
+ .pixbe-app .projects-page .work-task-card .work-task-meta { margin:0;align-items:center; }
+ .pixbe-app .projects-page .work-task-footer { align-items:center;min-height:24px;padding:0;border:0;font-size:12px; }
+ .pixbe-app .projects-page .work-task-footer .work-assignees > span { max-width:none;margin-left:8px;line-height:16px; }
+ .pixbe-app .projects-page .work-col-head { align-items:center;padding:0 0 12px;border:0; }
+ .pixbe-app .projects-page .work-col-head .work-count { min-width:0;height:auto;padding:0;line-height:20px; }
+ .pixbe-app .projects-page .work-col-body { padding:0;gap:12px; }
  .pixbe-app .projects-page .work-count { background:transparent;font-size:12px;font-weight:400; }
  .pixbe-app .projects-page .work-project-card { min-height:0;padding:16px 0;border:0;border-bottom:1px solid #dde4e9;border-radius:0; }
- .pixbe-app .projects-page .work-project-card h3 { font-size:16px;font-weight:600; }
+ .pixbe-app .projects-page .work-project-card h3 { font-size:16px;line-height:22px;font-weight:600; }
+ .pixbe-app .projects-page .work-project-title .work-chip { font-weight:600; }
+ .pixbe-app .projects-page .work-project-meter { display:none; }
  .pixbe-app .projects-page .work-project-people { border:0; }
- .pixbe-app .work-board-status button strong { font-size:11px;background:transparent; }
+ .pixbe-app .work-board-status { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;width:100%;overflow:visible; }
+ .pixbe-app .work-board-status button { flex-direction:row;align-items:center;justify-content:center;min-width:0;min-height:44px;padding:12px 0;font-size:13px;line-height:16px; }
+ .pixbe-app .work-board-status button strong { display:none; }
  .pixbe-app .mobile-record-table > tbody { gap:0; }
  .pixbe-app .mobile-record-table > tbody > tr { padding:20px 0;border:0;border-bottom:1px solid #dde4e9;border-radius:0;background:transparent;gap:12px; }
  .pixbe-app .mobile-record-table td[data-mobile-title="true"] { border:0;padding:0;font-size:15px;font-weight:500; }
@@ -162,15 +182,18 @@
 
 .m2-mobile-label { display:none; }
 .m2-task-list { flex-direction:column;gap:20px; }
-.m2-task-row { display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;min-height:94px;padding:16px 0;border:0;border-bottom:1px solid #dde4e9;border-radius:0;background:transparent;text-align:left; }
-.m2-task-row strong { font-size:15px;line-height:22px;font-weight:500;color:var(--text-primary); }
+.m2-task-row { display:flex;flex-direction:column;align-items:stretch;gap:4px;width:100%;min-height:94px;padding:16px 0;border:0;border-bottom:1px solid #dde4e9;border-radius:0;background:transparent;text-align:left; }
+.m2-task-line { display:flex;align-items:baseline;justify-content:space-between;gap:16px;width:100%; }
+.m2-task-row strong { flex:1;min-width:0;font-size:15px;line-height:22px;font-weight:600;color:var(--text-primary); }
 .m2-task-row > span { font-size:12px;line-height:17px;color:var(--text-secondary); }
-.m2-task-row small { font-size:12px;line-height:17px;font-weight:500; }
-.m2-task-row .is-progress { color:#a65c00; }.m2-task-row .is-overdue { color:#be123c; }.m2-task-row .is-complete { color:#0b6e64; }
+.m2-task-row small { flex:none;font-size:12px;line-height:17px;font-weight:600; }
+.m2-task-row .is-todo,.m2-task-row .is-progress { color:#a65c00; }
+.m2-task-row .is-active { color:#2d628e; }
+.m2-task-row .is-overdue { color:#be123c; }
+.m2-task-row .is-complete { color:#0b6e64; }
 @media(max-width:767px) {
  .m2-task-list { display:flex; }
  .m2-mobile-label { display:inline; }.m2-desktop-label { display:none; }
- .pixbe-app .projects-page .work-tabs { justify-content:flex-start; }
  .projects-page .work-tabs > button:nth-child(1) { order:2; }.projects-page .work-tabs > button:nth-child(2) { order:0; }.projects-page .work-tabs > button:nth-child(3) { order:1; }
  .pixbe-app .projects-page .work-toolbar > div:first-child { width:100%;flex:1 0 100%; }
  .pixbe-app .projects-page .work-toolbar > div:first-child input { padding-left:12px; }
@@ -193,7 +216,6 @@
  .att-dialog--location .att-dialog-foot > small { text-align:center;color:var(--text-secondary);font-size:12px; }
 }
 
-.m2-auth-switch { display:none; }
 .m2-secondary { display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:12px;border:1px solid #dde4e9;border-radius:8px;background:white;color:#17324e;font-size:14px;font-weight:600; }
 .m2-report-filters { display:flex;align-items:center;gap:20px; }
 .m2-report-filters label { min-width:0;font-size:12px;color:var(--text-secondary); }
@@ -214,7 +236,6 @@
  .figma-auth .fa-student h2,.figma-auth .fa-student p { display:none; }
  .figma-auth .fa-student button { font-size:12px; }
  .figma-auth .fa-footer { margin-top:auto; }
- .m2-auth-switch { display:block;min-height:48px;margin-top:20px;padding:0;border:0;background:transparent;color:#17324e;font-size:13px;font-weight:500; }
  .figma-auth .fa-code { display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px; }
  .figma-auth .fa-code input { width:100%;min-width:0;height:52px;border:1px solid #dde4e9;border-radius:8px;background:white; }
  .figma-auth .fa-mail { background:transparent;padding:0; }
@@ -231,7 +252,8 @@
  .m2-add { font-size:26px;font-weight:400; }
  .m2-task-list { gap:0; }
  .m2-task-list > .m2-section-heading { margin-bottom:20px; }
- .pixbe-app .projects-page .work-tabs > .work-tab { flex:0 0 auto;min-width:0; }
+ .pixbe-app .projects-page .work-tabs > .work-tab { display:flex;align-items:center;justify-content:center;min-width:0;width:100%;min-height:48px;padding:12px 8px;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;font-size:14px;line-height:20px;text-align:center; }
+ .pixbe-app .projects-page .work-tabs > .work-tab[aria-selected="true"] { border-bottom-color:var(--studio-navy);background:transparent;color:var(--studio-navy);font-weight:600; }
  .pixbe-app .projects-page .work-head { display:none; }
  .pixbe-app .projects-page .work-toolbar input.work-field { background:#f3f5f7; }
  .pixbe-app .projects-page .work-toolbar .mobile-filter-disclosure { display:none; }
@@ -241,7 +263,7 @@
 .m2-timesheet-actions { display:none; }
 @media(max-width:767px) {
  .pixbe-app .projects-page .work-toolbar .mobile-filter-disclosure { display:block; }
- .pixbe-app .projects-page .work-toolbar .mobile-filter-disclosure > summary { min-height:32px;padding:0;border:0;border-radius:0;font-size:12px;justify-content:flex-start;gap:8px; }
+ .pixbe-app .projects-page .work-toolbar .mobile-filter-disclosure > summary { min-height:32px;padding:0;border:0;border-radius:0;font-size:12px;line-height:16px;justify-content:flex-start;align-items:center;gap:6px; }
  .m2-timesheet-actions { display:flex;flex-direction:column;gap:12px; }
  .m2-timesheet-actions > button { width:100%; }
  .pixbe-app .timesheets-page > .work-head { display:none; }
@@ -271,14 +293,41 @@
  .figma-auth .fa-form.is-login .fa-field small:not(.is-error) { display:none; }
  .figma-auth .fa-footer { display:none; }
  .pixbe-app .m2-attendance-desktop-tabs { display:none; }
- .pixbe-app .m2-attendance-nav .work-tab { flex:0 0 auto; }
+ .pixbe-app .attendance-studio > .m2-attendance-nav { gap:20px; overflow:visible; border-bottom:1px solid #dde4e9; }
+ .pixbe-app .attendance-studio > .m2-attendance-nav .work-tab { flex:0 0 auto; min-height:40px; margin-bottom:-1px; padding:10px 0 12px; border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:#5e6c7b; font-size:13px; line-height:16px; font-weight:500; }
+ .pixbe-app .attendance-studio > .m2-attendance-nav .work-tab[aria-selected="true"] { border-bottom-color:#17324e; color:#17324e; font-weight:600; background:transparent; }
+ .pixbe-app .attendance-studio > .m2-attendance-nav .work-tab::after { content:none; display:none; }
  .pixbe-app .attendance-studio[data-mobile-attendance="overview"] .attendance-punch-panel { display:none; }
  .pixbe-app .attendance-studio[data-mobile-attendance="overview"] .attendance-week-rail { display:none; }
  .pixbe-app .attendance-studio[data-mobile-attendance="overview"] .m2-attendance-overview { display:flex;flex-direction:column;gap:20px; }
  .pixbe-app .attendance-studio[data-mobile-attendance="history"] .workday-stack .m2-workday { display:none; }
- .pixbe-app .attendance-studio .attendance-punch-panel { padding:0;border:0;border-radius:0;box-shadow:none; }
- .pixbe-app .attendance-studio .attendance-punch-card { padding:16px 0;border:0;border-bottom:1px solid #dde4e9;border-radius:0;box-shadow:none; }
- .pixbe-app .attendance-studio .attendance-log-mobile { gap:0; }
+ .pixbe-app .attendance-studio .workday-week { padding:0;gap:8px; }
+ .pixbe-app .attendance-studio .workday-week-title { font-size:12px;font-weight:500;color:#5e6c7b; }
+ .pixbe-app .attendance-studio .workday-week-hours { margin:0;font-size:13px;font-weight:400;color:#5e6c7b; }
+ .pixbe-app .attendance-studio .workday-week-hours strong { font-size:28px;line-height:35px;font-weight:600;letter-spacing:-.5px;color:#172234; }
+ .pixbe-app .attendance-studio .workday-week-meter { height:4px;margin:4px 0 0;border-radius:4px; }
+ .pixbe-app .attendance-week-target { margin:0;color:#5e6c7b; }
+ .pixbe-app .attendance-studio .attendance-punch-panel { gap:16px;margin-top:4px;padding:20px 0 0;border:0;border-top:1px solid #dde4e9;border-radius:0;box-shadow:none; }
+ .pixbe-app .attendance-panel-heading h2 { font-size:16px;line-height:20px;font-weight:600;letter-spacing:-.35px; }
+ .pixbe-app .attendance-punch-panel .work-toolbar { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;align-self:stretch;gap:12px; }
+ .pixbe-app .attendance-punch-panel .work-toolbar > .work-field { min-width:0;width:100%;text-overflow:ellipsis;min-height:44px;height:44px;padding:10px 28px 10px 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-surface);box-shadow:none;font-size:13px;font-weight:500;color:#172234; }
+ .pixbe-app .attendance-punch-panel .work-toolbar > .work-btn-secondary { grid-column:1/-1;width:100%;min-height:44px;justify-content:center;padding:10px 16px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-surface);box-shadow:none;color:#17324e;font-size:14px;font-weight:600; }
+ .pixbe-app .attendance-studio .attendance-punch-card { padding:0 16px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface);box-shadow:none; }
+ .pixbe-app .attendance-studio .attendance-log-mobile { gap:12px; }
+ .pixbe-app .attendance-punch-row { display:flex;align-items:flex-start;justify-content:space-between;gap:12px;width:100%;margin:0;padding:16px 0;border:0;background:transparent;color:inherit;text-align:left; }
+ .pixbe-app .attendance-punch-copy { display:flex;flex-direction:column;gap:4px;min-width:0; }
+ .pixbe-app .attendance-punch-date { display:inline-flex;align-items:center;gap:6px;font-size:15px;line-height:22px;font-weight:500;color:#172234; }
+ .pixbe-app .attendance-punch-detail,.pixbe-app .attendance-punch-meta { font-size:12px;line-height:17px;color:#5e6c7b; }
+ .pixbe-app .attendance-punch-card .work-chip { align-self:center; }
+ .pixbe-app .attendance-punch-card dl { display:none;margin:0;padding:0 0 16px; }
+ .pixbe-app .attendance-punch-card.is-open dl { display:grid;grid-template-columns:1fr 1fr;gap:12px 16px; }
+ .pixbe-app .attendance-punch-card dt { margin:0 0 2px;font-size:12px;color:#687789; }
+ .pixbe-app .attendance-punch-card dd { margin:0;font-size:13px;color:#172234; }
+ .pixbe-app .attendance-punch-card .att-log-sessions { margin:0 0 16px; }
+ .pixbe-app .attendance-studio .att-log-foot { padding:16px 0 0;border:0; }
+ .pixbe-app .attendance-studio .att-page-btn { min-width:32px;height:32px;border:0;background:transparent;color:#5e6c7b; }
+ .pixbe-app .attendance-studio .att-page-btn.is-current { background:transparent;color:#17324e;font-weight:600; }
+ .pixbe-app .attendance-studio .att-log-foot select.work-field { min-height:32px;height:32px;padding:0 18px 0 0;border:0!important;border-radius:0;background:transparent!important;font-size:12px; }
 }
 
 @media(max-width:767px) {
@@ -294,4 +343,69 @@
 @media(max-width:767px) {
   [data-theme="light"] .pixbe-app .projects-page .work-toolbar input.work-field { background-color:#f3f5f7 !important; }
   [data-theme="light"] .pixbe-app :is(.chat-list-search,.chat-search) input { background-color:transparent !important; }
+}
+
+/* A phone conversation owns the space normally reserved for app navigation. */
+@media(max-width:767px) {
+ .pixbe-app:has(.chat-workspace[data-conversation-open="true"]) .pixbe-mobile-tabs { display:none; }
+ .pixbe-app .chat-main:has(.chat-workspace[data-conversation-open="true"]) { padding-bottom:0; }
+}
+
+.m2-account-workspace { margin-top:16px;border-top:1px solid var(--border-color); }
+.m2-account-workspace h3 { margin:0 0 8px;font-size:12px;font-weight:600;color:var(--text-secondary); }
+.m2-account-link-copy { display:flex;flex-direction:column;gap:3px;min-width:0;padding:10px 0; }
+.m2-account-link-copy small { font-size:12px;line-height:18px;font-weight:400;color:var(--text-secondary); }
+.m2-account-options a > img { flex-shrink:0; }
+.m2-account-person,.m2-account-heading,.m2-account-options,.m2-account-session { flex-shrink:0; }
+.pixbe-mobile-tab--announcements,.pixbe-mobile-tab--announcements[aria-current="page"] { font-size:9px;letter-spacing:-.2px; }
+.m2-account-dialog[data-motion="instant"],.m2-account-dialog[data-motion="instant"]::backdrop,.m2-account-dialog[data-motion="instant"] .m2-account-panel { transition-duration:0s; }
+@media (hover:hover) and (pointer:fine) {
+ .m2-account-options a:hover { color:var(--primary-blue); }
+}
+@media (prefers-reduced-motion:reduce) {
+ .m2-account-dialog { transition:display 150ms allow-discrete,overlay 150ms allow-discrete; }
+ .m2-account-dialog .m2-account-panel { transform:none;opacity:0;transition:opacity 150ms var(--ease-out); }
+ .m2-account-dialog[open] .m2-account-panel { transform:none;opacity:1; }
+ .m2-account-dialog::backdrop { transition-duration:150ms; }
+ @starting-style { .m2-account-dialog[open] .m2-account-panel { transform:none;opacity:0; } }
+}
+
+@media(max-width:767px) {
+ .pixbe-app .announcements-page .people-studio__head > .people-studio__title { display:none; }
+ .pixbe-app .announcements-page .people-studio__head:not(:has(.people-studio__actions)) { display:none; }
+}
+/* Figma 260:9182: white information surfaces, semantic accents in small details. */
+.m2-account-heading { position:sticky;top:0;z-index:1;background:var(--bg-surface,#fff); }
+.m2-account-heading .m2-icon-button { width:44px;height:44px;min-width:44px;cursor:pointer;touch-action:manipulation; }
+.m2-account-heading .m2-icon-button > svg { pointer-events:none; }
+@media(max-width:767px) {
+ .m2-metric[data-accent="teal"] > strong { color:var(--accent-teal-foreground); }
+ .m2-metric[data-accent="indigo"] > strong { color:var(--accent-indigo-foreground); }
+ .m2-section-heading > .m2-pending-count { color:var(--accent-amber-foreground); }
+ .m2-quick-actions > a[href="/leaves"] > span { background:var(--accent-rose-surface); }
+ .m2-quick-actions > a[href="/payroll"] > span { background:var(--accent-amber-surface); }
+ .m2-quick-actions > a[href="/timesheets"] > span { background:var(--accent-teal-surface); }
+ .m2-quick-actions > a[href^="/hr"] > span { background:var(--accent-violet-surface); }
+ .m2-header-avatar,.m2-account-avatar { background:var(--accent-violet-surface)!important;color:var(--accent-violet-foreground)!important; }
+ .m2-account-person > span:last-child { color:var(--accent-violet-foreground); }
+ .m2-account-session button { color:var(--accent-rose-foreground); }
+ .m2-task-row .is-progress,.m2-task-row .is-active { color:var(--accent-indigo-foreground); }
+ .m2-task-row .is-todo { color:var(--accent-amber-foreground); }
+ .m2-task-row .is-overdue { color:var(--accent-rose-foreground); }
+ .m2-task-row .is-complete { color:var(--accent-teal-foreground); }
+ .pixbe-app [data-attendance-status]:is([data-attendance-status="present"],[data-attendance-status="on_time"],[data-attendance-status="approved"]) { color:var(--accent-teal-foreground); }
+ .pixbe-app [data-attendance-status]:is([data-attendance-status="late"],[data-attendance-status="pending"]) { color:var(--accent-amber-foreground); }
+ .pixbe-app [data-attendance-status]:is([data-attendance-status="absent"],[data-attendance-status="on_leave"],[data-attendance-status="rejected"]) { color:var(--accent-rose-foreground); }
+ .pixbe-app [data-attendance-status="wfh"] { color:var(--accent-cyan-foreground); }
+ .pixbe-app .my-leaves-balance-value strong { color:var(--accent-rose-foreground); }
+ .pixbe-app .my-leaves-upcoming > svg { color:var(--accent-rose-foreground); }
+ .pixbe-app .workday-week-meter > span { background:var(--accent-teal-foreground); }
+ .pixbe-app .timesheets-page .work-mobile-entry > div > :first-child { color:var(--accent-indigo-foreground); }
+}
+@media(max-width:767px) {
+ .pixbe-mobile-tab[href="/projects"][aria-current="page"] { color:var(--accent-indigo-foreground); }
+ .pixbe-mobile-tab[href="/attendance"][aria-current="page"] { color:var(--accent-teal-foreground); }
+ .pixbe-mobile-tab[href="/chat"][aria-current="page"] { color:var(--accent-cyan-foreground); }
+ .pixbe-app .projects-page .work-tabs > .work-tab[aria-selected="true"] { border-bottom-color:var(--accent-indigo-foreground);color:var(--accent-indigo-foreground); }
+ .pixbe-app .attendance-studio > .m2-attendance-nav .work-tab[aria-selected="true"] { border-bottom-color:var(--accent-teal-foreground);color:var(--accent-teal-foreground); }
 }

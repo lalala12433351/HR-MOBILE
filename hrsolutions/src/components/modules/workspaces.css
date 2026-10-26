@@ -48,7 +48,11 @@
 .projects-page .work-chip, .timesheets-page .work-chip { border: 0; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: 500; }
 .projects-page .work-project-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .projects-page .work-project-card { border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; box-shadow: none; min-height: 222px; }
-.projects-page .work-project-card h3 { font-size: 14px; line-height: 1.5; font-weight: 600; margin-top: 8px; }
+.projects-page .work-project-card h3 { font-size: 14px; line-height: 1.5; font-weight: 600; margin: 0; }
+.work-project-code { margin: 0; font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.work-project-title { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-width: 0; }
+.work-project-title h3 { flex: 1; min-width: 0; }
+.work-project-title .work-chip { flex: none; }
 .work-project-people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: auto; }
 .work-project-people dt { margin-bottom: 6px; text-transform: uppercase; font-size: 10px; color: var(--text-muted); }
 .work-project-people dd { font-size: 12px; color: var(--text-primary); overflow-wrap: anywhere; }
@@ -514,6 +518,5 @@
   .timesheets-page .work-log-search > input.work-field { font-size: 13px; }
 }
 @media (max-width: 767px) {
-  .timesheets-page .mobile-filter-disclosure[open] > summary::after { content: '\2212'; }
   .timesheets-page .work-head .work-btn-primary { min-height: 44px; }
 }

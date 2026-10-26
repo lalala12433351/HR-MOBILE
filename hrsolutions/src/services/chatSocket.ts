@@ -13,7 +13,7 @@ function backendOrigin(): string {
   try {
     return new URL(API_CONFIG.BASE_URL).origin;
   } catch {
-    return 'http://localhost:8080';
+    return 'https://api.pixbe.in';
   }
 }
 

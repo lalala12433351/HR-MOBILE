@@ -6,7 +6,13 @@ import { api } from '@/services/apiClient';
 import { persistClockOutTaskSessions } from '@/utils/taskBoard';
 import { applyRemoteCheckout } from '@/utils/attendancePunches';
 import { publishAttendanceCheckout } from '@/utils/attendanceSessionEvents';
-import { getCurrentPosition, showAppNotification, watchPosition, type PositionWatchHandle } from '@/lib/native';
+import {
+  getCurrentPosition,
+  requestAppNotificationPermission,
+  showAppNotification,
+  watchPosition,
+  type PositionWatchHandle,
+} from '@/lib/native';
 
 type MissedCheckout = {
   workDate: string;
@@ -72,15 +78,18 @@ export function AttendanceSessionGuard() {
       window.sessionStorage.setItem(signOutKey(signOut.at), '1');
       applyCheckout(signOut.workDate, signOut.checkOutLabel);
       triggerToast({
-        title: 'Signed out',
-        message: 'You left the office area, so this shift was punched out.',
+        title: 'Punched out',
+        message: 'You stayed outside the office location, so this shift was punched out.',
         type: 'info',
       });
-      void showAppNotification({
-        id: signOutKey(signOut.at),
-        title: 'Signed out',
-        body: 'You left the office area, so this shift was punched out.',
-      });
+      void showAppNotification(
+        {
+          id: signOutKey(signOut.at),
+          title: 'Punched out',
+          body: 'You stayed outside the office location, so this shift was punched out.',
+        },
+        { force: true }
+      );
       void persistClockOutTaskSessions(
         tasksRef.current,
         sheetsRef.current,
@@ -102,14 +111,17 @@ export function AttendanceSessionGuard() {
             outsideToast.current = res.data.outsideSince;
             triggerToast({
               title: 'Outside the office',
-              message: 'You will be signed out in 5 minutes if you stay outside the office area.',
+              message: 'You are outside the office location. You will be punched out in 10 minutes.',
               type: 'info',
             });
-            void showAppNotification({
-              id: `outside:${res.data.outsideSince}`,
-              title: 'Outside the office',
-              body: 'You will be signed out in 5 minutes if you stay outside the office area.',
-            });
+            void showAppNotification(
+              {
+                id: `outside:${res.data.outsideSince}`,
+                title: 'Outside the office',
+                body: 'You are outside the office location. You will be punched out in 10 minutes.',
+              },
+              { force: true }
+            );
           }
           if (res.data.status === 'inside') outsideToast.current = '';
           if (res.data.status === 'signed_out' && res.data.workDate && res.data.checkOutLabel) {
@@ -134,6 +146,7 @@ export function AttendanceSessionGuard() {
     const startWatch = () => {
       if (tracking.current) return;
       tracking.current = true;
+      void requestAppNotificationPermission();
       const onCoords = (coords: { latitude: number; longitude: number; accuracy?: number }) => {
         sendFix(coords.latitude, coords.longitude, coords.accuracy);
       };

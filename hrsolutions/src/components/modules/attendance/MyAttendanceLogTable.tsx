@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { AttendanceStatusPill } from './AttendanceStatusPill';
 import { ATT_TABLE_HEAD, ATT_TABLE_SHELL } from './attendanceUi';
+import styles from './attendance-log-mobile.module.css';
 
 export interface MyAttendanceLogRow {
   date: string;
@@ -33,6 +34,12 @@ function deficitClass(deficit: string) {
   if (deficit.startsWith('+')) return 'att-log-over';
   if (deficit === '0m' || deficit === '-0m') return '';
   return 'att-log-short';
+}
+
+function formatLogDate(iso: string) {
+  const parsed = new Date(`${iso.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 function statusKind(status: string): 'present' | 'late' | 'on_leave' | 'wfh' {
@@ -176,30 +183,39 @@ export function MyAttendanceLogTable({
         </table>
       </div>
 
-      <div className="attendance-log-mobile">
+      <div className={`attendance-log-mobile ${styles.log}`}>
         {rows.length === 0 ? (
           <div className="work-empty">No punches in this range. Clock in above, or widen the filters.</div>
         ) : rows.map((row) => {
           const rowKey = `${row.date}-${row.in}`;
           const open = openDate === rowKey;
           return (
-            <article key={rowKey} className="attendance-punch-card">
-              <header>
-                <button type="button" onClick={() => setOpenDate(open ? null : rowKey)} aria-expanded={open}>
-                  {row.date}<ChevronDown size={14} />
-                </button>
-                <AttendanceStatusPill kind={statusKind(row.status)} label={row.status} />
-              </header>
-              <dl>
-                <div><dt>Clock in / out</dt><dd>{row.in} / {row.out}</dd></div>
-                <div><dt>In / out location</dt><dd>{row.inLoc} / {row.outLoc}</dd></div>
+            <article key={rowKey} className={`attendance-punch-card ${styles.record}${open ? ' is-open' : ''}`}>
+              <button type="button" className={styles.summary} onClick={() => setOpenDate(open ? null : rowKey)} aria-expanded={open} aria-label={`${formatLogDate(row.date)}, ${row.status}, ${open ? 'hide' : 'show'} attendance details`}>
+                <span className={styles.heading}>
+                  <span className={styles.date}>{formatLogDate(row.date)}</span>
+                  <span className={styles.status}><AttendanceStatusPill kind={statusKind(row.status)} label={row.status} /></span>
+                </span>
+                <span className={styles.times}>
+                  <span className={styles.time}><span className={styles.label}>Clock in</span><strong suppressHydrationWarning>{row.in.replace(/(\d{1,2}:\d{2}):\d{2}/, '$1')}</strong></span>
+                  <span className={styles.time}><span className={styles.label}>Clock out</span><strong suppressHydrationWarning>{row.out.replace(/(\d{1,2}:\d{2}):\d{2}/, '$1')}</strong></span>
+                </span>
+                <span className={styles.footer}>
+                  <span className={styles.location}>{row.inLoc && row.inLoc !== '—' ? row.inLoc : 'Location unavailable'}</span>
+                  {!isStudentMode && row.logged !== '—' && <span className={styles.logged} suppressHydrationWarning>{row.logged} logged</span>}
+                  <ChevronDown size={16} className={`${styles.caret}${open ? ` ${styles.expanded}` : ''}`} aria-hidden="true" />
+                </span>
+              </button>
+              {open && <dl className={styles.details}>
+                <div><dt>In location</dt><dd>{row.inLoc}</dd></div>
+                <div><dt>Out location</dt><dd>{row.outLoc}</dd></div>
                 {!isStudentMode && (
                   <>
-                    <div><dt>Schedule / logged</dt><dd>{row.sched} / {row.logged}</dd></div>
+                    <div><dt>Scheduled</dt><dd>{row.sched}</dd></div>
                     <div><dt>Variance</dt><dd className={deficitClass(row.deficit)}>{row.deficit}</dd></div>
                   </>
                 )}
-              </dl>
+              </dl>}
               {open && row.sessions && (
                 <ul className="att-log-sessions">
                   {row.sessions.map((session) => (

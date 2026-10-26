@@ -16,9 +16,10 @@ import { getDefaultState, AppState, saveStoredState } from '@/services/store';
 import { CognitoPasswordPolicyGuide } from '@/components/auth/CognitoPasswordPolicyGuide';
 import { evaluateCognitoPassword } from '@/utils/cognitoPasswordPolicy';
 import { fromApiAuthRole, toAuthSessionRole } from '@/utils/roleMapping';
-import { Eye, EyeOff, Loader2, Building2, GraduationCap, Mail, Check, BadgeCheck } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Building2, GraduationCap, Mail, Check, BadgeCheck, ArrowLeft } from 'lucide-react';
 import { PixbePixelMark, PixbeWordmark, PixbeDesignWordmark } from '@/components/common/PixbeBrand';
 import '@/components/modules/setup/workspace-setup.css';
+import styles from './auth-mobile.module.css';
 
 interface AuthOnboardingViewProps {
   initialView?: 'login' | 'signup' | 'otp' | 'onboarding';
@@ -41,14 +42,21 @@ function WorkspaceTypeIcon({ kind }: { kind: 'Office' | 'Institute' | 'Other' })
   return <Icon size={20} strokeWidth={1.6} aria-hidden="true"/>;
 }
 
-export const AuthSplitLayout: React.FC<{ children: React.ReactNode; maxWidth?: string; contentKey?: string }> = ({ children, contentKey }) => (
-  <div className="figma-auth" data-screen={contentKey}>
-    <header className="m2-auth-header"><button type="button" className="m2-icon-button" aria-label="Go back" onClick={() => { if (window.history.length > 1) window.history.back(); }}><img src="/mobile-v2/auth-back.svg" width="24" height="24" alt="" /></button><span>pixbe</span></header>
+export const AuthSplitLayout: React.FC<{ children: React.ReactNode; maxWidth?: string; contentKey?: string }> = ({ children, contentKey }) => {
+  const router = useRouter();
+  const showBack = contentKey !== 'login' && contentKey !== 'register';
+  return (
+  <div className={`figma-auth ${styles.shell}`} data-screen={contentKey}>
+    <header className="m2-auth-header">
+      {showBack && <button type="button" className={styles.back} aria-label="Back to sign in" onClick={() => router.push('/login')}><ArrowLeft size={20} strokeWidth={1.8} aria-hidden="true" /></button>}
+      <PixbeDesignWordmark className={styles.brand} />
+    </header>
     <PixbeDesignWordmark/>
     <main className="fa-panel">{children}</main>
     <footer className="fa-footer"><span>&copy; {new Date().getFullYear()} Pixbe</span><span><span>Privacy</span><OnboardingHelp label="Get help"/></span></footer>
   </div>
-);
+  );
+};
 
 function AuthWizardLayout({ children, currentStep, onStepChange, name, email }: { children: React.ReactNode; currentStep: number; onStepChange: (step: number) => void; name: string; email: string }) {
   return <div className="figma-setup organization-onboarding" data-step={currentStep}>
@@ -72,8 +80,8 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
   const [view, setView] = useState<'login' | 'signup' | 'otp' | 'onboarding'>(initialView);
 
   useEffect(() => {
-    setView(initialView);
-  }, [initialView]);
+    setView(mobile ? 'login' : initialView);
+  }, [initialView, mobile]);
 
   // Login State
   const [loginRoleTab, setLoginRoleTab] = useState<'workspace' | 'student'>('workspace');
@@ -941,11 +949,11 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
   // ==========================================
   // VIEW 1: SIGN IN & SIGN UP
   // ==========================================
-  if (view === 'login' || view === 'signup') {
-    const isLogin = view === 'login';
+  if (mobile || view === 'login' || view === 'signup') {
+    const isLogin = mobile || view === 'login';
     const changeAuthView = (next: 'login' | 'signup') => { setSignupNameError(''); setSignupEmailError(''); setSignupPasswordError(''); setLoginError(''); setPasswordMismatch(false); setView(next); };
     return <AuthSplitLayout contentKey={isLogin ? 'login' : 'register'}>
-      <div className="fa-tabs" role="tablist" aria-label="Authentication mode"><button type="button" role="tab" aria-selected={isLogin} onClick={() => changeAuthView('login')}>Sign in</button><button type="button" role="tab" aria-selected={!isLogin} onClick={() => changeAuthView('signup')}>Register</button></div>
+      {!mobile && <div className="fa-tabs" role="tablist" aria-label="Authentication mode"><button type="button" role="tab" aria-selected={isLogin} onClick={() => changeAuthView('login')}>Sign in</button><button type="button" role="tab" aria-selected={!isLogin} onClick={() => changeAuthView('signup')}>Register</button></div>}
       <header className="fa-intro"><h1>{isLogin ? (mobile ? 'Welcome back.' : 'Welcome back') : (mobile ? 'Start something good.' : 'Create your account')}</h1><p>{isLogin ? 'Sign in to your Pixbe workspace.' : 'Start with your details. Your workspace comes next.'}</p></header>
       <form onSubmit={isLogin ? handleLogin : handleSignup} className={`fa-form ${isLogin ? 'is-login' : 'is-register'}`}>
         <div className="fa-fields">
@@ -958,7 +966,6 @@ export const AuthOnboardingView: React.FC<AuthOnboardingViewProps> = ({
         {isLogin && loginError && <p className="fa-error" role="alert">{loginError}</p>}
         <div className="fa-submit-area"><button type="submit" className="fa-primary" disabled={isSubmitting}>{isSubmitting && <Loader2 size={16} className="animate-spin"/>}{isSubmitting ? isLogin ? 'Signing in…' : 'Sending code…' : isLogin ? 'Sign in' : mobile ? 'Create account' : 'Continue to verification'}</button>{!isLogin && <p className="fa-terms">By continuing, you agree to Pixbe’s <span>Terms of service</span> and <span>Privacy policy</span>.</p>}</div>
       </form>
-      <button type="button" className="m2-auth-switch" onClick={() => changeAuthView(isLogin ? 'signup' : 'login')}>{isLogin ? 'New here? Create an account' : 'Already have an account? Sign in'}</button>
       {isLogin && <section className="fa-student"><h2>Here as a student?</h2><p>Use your institute account to view attendance.</p><button type="button" onClick={() => router.push('/student-login')}>Go to student portal →</button></section>}
     </AuthSplitLayout>;
   }

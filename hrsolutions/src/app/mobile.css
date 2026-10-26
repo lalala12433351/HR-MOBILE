@@ -166,9 +166,10 @@
 .mobile-filter-content { display: contents; }
 @media(max-width:767px) {
   .mobile-filter-disclosure { display: block; grid-column: 1 / -1; min-width: 0; }
-  .mobile-filter-disclosure > summary { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary); font-size: 12px; background: var(--bg-surface); cursor: pointer; list-style: none; }
-  .mobile-filter-disclosure > summary::after { content: '+'; font-size: 18px; }
-  .mobile-filter-disclosure[open] > summary::after { content: '−'; }
+  .mobile-filter-disclosure > summary { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary); font-size: 12px; line-height: 16px; background: var(--bg-surface); cursor: pointer; list-style: none; }
+  .mobile-filter-disclosure > summary::marker { content: none; }
+  .mobile-filter-disclosure > summary::after { content: ''; flex: 0 0 12px; width: 12px; height: 12px; background: linear-gradient(currentColor, currentColor) center / 9px 1.5px no-repeat, linear-gradient(currentColor, currentColor) center / 1.5px 9px no-repeat; transform: translateY(1px); }
+  .mobile-filter-disclosure[open] > summary::after { background: linear-gradient(currentColor, currentColor) center / 9px 1.5px no-repeat; }
   .mobile-filter-disclosure > summary::-webkit-details-marker { display: none; }
   .mobile-filter-content { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; padding-top: 12px; }
   .mobile-filter-disclosure:not([open]) > .mobile-filter-content { display: none; }

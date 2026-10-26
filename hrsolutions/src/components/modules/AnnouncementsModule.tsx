@@ -429,7 +429,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
   };
 
   return (
-    <div className="people-studio">
+    <div className="people-studio announcements-page">
       <div className="people-studio__head">
         <h1 className="people-studio__title">
           Announcements

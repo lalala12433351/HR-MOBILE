@@ -420,6 +420,7 @@ export const DashboardClockInCard: React.FC = () => {
           <label className="dash-clock-location">
             <span className="dash-kpi-label">Location</span>
             <select
+              aria-label="Punch location"
               value={selectedLocation}
               onChange={(e) => setSelectedLocation(e.target.value)}
               disabled={isCheckedIn}

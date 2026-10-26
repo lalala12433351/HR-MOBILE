@@ -15,7 +15,6 @@ import { AIAssistantModal } from '@/components/ai/AIAssistantModal';
 import { AttendanceSessionGuard } from '@/components/attendance/AttendanceSessionGuard';
 import { NativeShellBootstrap } from '@/components/native/NativeShellBootstrap';
 import { isNativePlatform } from '@/lib/native';
-import { useWorkplaceLocationWatch } from '@/hooks/useWorkplaceLocationWatch';
 import { AppToaster } from '@/components/ui/AppToaster';
 import { DesktopPushPrompt } from '@/components/common/DesktopPushPrompt';
 import { IMPERSONATION_TENANT_KEY, isMasterAdminHost } from '@/config/origins';
@@ -57,7 +56,6 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
   const [personaTimedOut, setPersonaTimedOut] = useState(false);
   const [pushAskOpen, setPushAskOpen] = useState(false);
   const personaHydrateAttempted = useRef(false);
-  useWorkplaceLocationWatch();
 
   const isAuthPage =
     pathname === '/login' ||
