@@ -39,6 +39,8 @@
     "node_modules",
     "src/App.tsx",
     "src/main.tsx",
-    "server.ts"
+    "server.ts",
+    ".mobile-build",
+    "out"
   ]
 }

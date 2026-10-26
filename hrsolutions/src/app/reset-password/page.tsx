@@ -1,12 +1,8 @@
-import { ResetPasswordView } from '@/components/auth/ResetPasswordView';
+import { Suspense } from 'react';
+import { QueryAuthView } from '@/components/auth/QueryAuthView';
 
 export const metadata = { title: 'Reset password | Pixbe' };
 
-export default async function ResetPasswordPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
-  const { token } = await searchParams;
-  return <ResetPasswordView token={typeof token === 'string' ? token : ''} />;
+export default function Page() {
+  return <Suspense fallback={null}><QueryAuthView kind="reset" /></Suspense>;
 }

@@ -11,9 +11,6 @@ on:
         options:
           - debug
           - release
-      server_url:
-        description: URL of the new mobile UI deployed from this repository
-        required: true
   push:
     branches: [main, master]
     paths:
@@ -21,7 +18,11 @@ on:
       - 'hrsolutions/capacitor.config.ts'
       - 'hrsolutions/package.json'
       - 'hrsolutions/package-lock.json'
-      - 'hrsolutions/www/**'
+      - 'hrsolutions/src/**'
+      - 'hrsolutions/public/**'
+      - 'hrsolutions/scripts/**'
+      - 'hrsolutions/next.config.mjs'
+      - 'hrsolutions/postcss.config.mjs'
       - '.github/workflows/android-build.yml'
   pull_request:
     branches: [main, master]
@@ -30,7 +31,11 @@ on:
       - 'hrsolutions/capacitor.config.ts'
       - 'hrsolutions/package.json'
       - 'hrsolutions/package-lock.json'
-      - 'hrsolutions/www/**'
+      - 'hrsolutions/src/**'
+      - 'hrsolutions/public/**'
+      - 'hrsolutions/scripts/**'
+      - 'hrsolutions/next.config.mjs'
+      - 'hrsolutions/postcss.config.mjs'
       - '.github/workflows/android-build.yml'
 
 concurrency:
@@ -71,10 +76,16 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Sync Capacitor Android
-        run: npx cap sync android
+      - name: Build bundled mobile UI
+        run: npm run build:mobile
         env:
-          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || vars.MOBILE_UI_URL }}
+          NEXT_PUBLIC_BACKEND_URL: ${{ vars.MOBILE_BACKEND_URL || 'https://api.pixbe.in' }}
+          NEXT_PUBLIC_SERVER_API_ORIGIN: ${{ vars.MOBILE_SERVER_API_ORIGIN }}
+
+      - name: Sync Capacitor Android
+        run: npm run cap:sync:android
+        env:
+          CAPACITOR_SERVER_URL: ''
 
       - name: Decode release keystore
         if: ${{ (github.event.inputs.build_type || 'debug') == 'release' }}

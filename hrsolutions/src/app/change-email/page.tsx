@@ -1,12 +1,8 @@
-import { ChangeEmailView } from '@/components/auth/ChangeEmailView';
+import { Suspense } from 'react';
+import { QueryAuthView } from '@/components/auth/QueryAuthView';
 
 export const metadata = { title: 'Change login email | Pixbe' };
 
-export default async function ChangeEmailPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
-  const { email } = await searchParams;
-  return <ChangeEmailView email={typeof email === 'string' ? email : ''} />;
+export default function Page() {
+  return <Suspense fallback={null}><QueryAuthView kind="email" /></Suspense>;
 }

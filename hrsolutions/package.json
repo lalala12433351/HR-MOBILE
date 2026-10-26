@@ -20,7 +20,8 @@
     "cap:copy": "node scripts/capacitor-sync.mjs --copy",
     "mobile:dev": "next dev --hostname 0.0.0.0 --port 3010",
     "cap:sync:android": "node scripts/capacitor-sync.mjs android",
-    "cap:sync:ios": "node scripts/capacitor-sync.mjs ios"
+    "cap:sync:ios": "node scripts/capacitor-sync.mjs ios",
+    "build:mobile": "node scripts/build-mobile.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

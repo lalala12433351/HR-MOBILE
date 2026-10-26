@@ -68,7 +68,11 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
         activeLeads: state.leads.length,
       };
 
-      const res = await fetch('/api/ai/assistant', {
+      const serverOrigin = (process.env.NEXT_PUBLIC_SERVER_API_ORIGIN || '').replace(/\/+$/, '');
+      if (process.env.NEXT_PUBLIC_MOBILE_BUILD === '1' && !serverOrigin) {
+        throw new Error('The mobile AI service is not configured. Set NEXT_PUBLIC_SERVER_API_ORIGIN to a backend that provides /api/ai/assistant.');
+      }
+      const res = await fetch(serverOrigin + '/api/ai/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: activeQuery, context: businessContext }),

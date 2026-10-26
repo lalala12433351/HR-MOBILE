@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useChatUnread } from '@/hooks/useChat';
 import { useApp } from '@/context/AppContext';
 export function MobileBottomBar() {
- const pathname = usePathname() || '/dashboard';
+ const pathname = usePathname()?.replace(/\/+$/, '') || '/';
  const { currentPersona } = useApp();
  const chatUnread = useChatUnread();
  const student = currentPersona?.role === 'student';

@@ -7,7 +7,7 @@ import { UserAvatar } from '@/components/common/UserAvatar';
 import { flattenWorkspaceNav } from '@/utils/workspaceNav';
 export function MobileHeader() {
  const { state, currentPersona, logout } = useApp();
- const pathname = usePathname();
+ const pathname = usePathname()?.replace(/\/+$/, '') || '/';
  const params = useSearchParams();
  const query = params.toString();
  const [open, setOpen] = useState(false);

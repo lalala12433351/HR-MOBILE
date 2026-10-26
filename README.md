@@ -20,12 +20,13 @@ npm run dev
 
 ### Mobile (Capacitor)
 
-The native apps load the new frontend from this repository. Run `npm run mobile:dev` inside `hrsolutions` and sync with `npm run cap:sync:android` (Android emulator) or `npm run cap:sync:ios` (iOS simulator). Installed builds require this frontend’s deployed URL via `CAPACITOR_SERVER_URL`; no older website is selected automatically.
+The native apps bundle this repository's UI. In `hrsolutions`, run `npm run build:mobile` and `npm run cap:sync:android` (or `cap:sync:ios`). No deployed frontend URL is required; `CAPACITOR_SERVER_URL` is only an optional live-reload override.
 
 ```bash
 cd hrsolutions
 npm install
-npx cap sync
+npm run build:mobile
+npm run cap:sync:android
 npm run cap:android   # Android Studio
 npm run cap:ios       # Xcode (Mac)
 ```

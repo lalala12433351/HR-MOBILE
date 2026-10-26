@@ -32,7 +32,7 @@ const PERSONA_HYDRATE_MS = 4000;
 
 function AppShellContent({ children }: { children?: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = usePathname()?.replace(/\/+$/, '') || '/';
   const {
     state,
     isLoaded,

@@ -3,9 +3,6 @@ name: iOS IPA
 on:
   workflow_dispatch:
     inputs:
-      server_url:
-        description: URL of the new mobile UI deployed from this repository
-        required: true
       upload_testflight:
         description: Upload IPA to TestFlight after build
         required: true
@@ -43,10 +40,16 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Sync Capacitor iOS
-        run: npx cap sync ios
+      - name: Build bundled mobile UI
+        run: npm run build:mobile
         env:
-          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || vars.MOBILE_UI_URL }}
+          NEXT_PUBLIC_BACKEND_URL: ${{ vars.MOBILE_BACKEND_URL || 'https://api.pixbe.in' }}
+          NEXT_PUBLIC_SERVER_API_ORIGIN: ${{ vars.MOBILE_SERVER_API_ORIGIN }}
+
+      - name: Sync Capacitor iOS
+        run: npm run cap:sync:ios
+        env:
+          CAPACITOR_SERVER_URL: ''
 
       - name: Import signing certificate
         env:

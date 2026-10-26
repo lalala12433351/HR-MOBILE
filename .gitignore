@@ -10,3 +10,7 @@ coverage/
 playwright-report/
 test-results/
 app/tmp/
+
+# Generated bundled mobile frontend
+hrsolutions/.mobile-build/
+hrsolutions/out/

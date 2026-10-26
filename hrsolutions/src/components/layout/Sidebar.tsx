@@ -42,7 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeModule,
   onSelectModule,
 }) => {
-  const pathname = usePathname();
+  const pathname = usePathname()?.replace(/\/+$/, '') || '/';
   const { state, currentPersona: contextPersona, setCommandPaletteOpen, setAiAssistantOpen } = useApp();
   const currentPersona = propPersona || contextPersona || state.currentPersona;
 

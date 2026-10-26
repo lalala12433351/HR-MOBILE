@@ -46,7 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileSidebar,
 }) => {
   const router = useRouter();
-  const pathname = usePathname();
+  const pathname = usePathname()?.replace(/\/+$/, '') || '/';
   const { state, updateState, triggerToast, logout, deleteNotification, clearAllNotifications } = useApp();
   const [showPersonaMenu, setShowPersonaMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
