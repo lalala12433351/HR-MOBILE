@@ -414,7 +414,7 @@ export const DashboardClockInCard: React.FC = () => {
         statusKind={statusKind}
         elapsedSeconds={elapsedSeconds}
         targetSeconds={shiftTargetSeconds(shiftStart, shiftEnd)}
-        shiftName="General shift"
+        shiftName={`General shift · ${selectedLocation === 'wfh' ? 'Work from home' : selectedLocation}`}
         shiftHours={`${shiftStart} – ${shiftEnd}`}
         locationSelect={
           <label className="dash-clock-location">

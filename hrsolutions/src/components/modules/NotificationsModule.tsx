@@ -1,5 +1,7 @@
 'use client';
 
+import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileNotifications } from '@/components/mobile/MobileNotifications';
 import { api } from '../../services/apiClient';
 import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -30,6 +32,7 @@ export const NotificationsModule: React.FC<NotificationsModuleProps> = ({
   onNavigateModule,
 }) => {
   const router = useRouter();
+  const mobile = useMobileViewport();
   const [activeTab, setActiveTab] = useState<NotifTab>('all');
   const [isSaving, setIsSaving] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -214,6 +217,8 @@ export const NotificationsModule: React.FC<NotificationsModuleProps> = ({
 
   return (
     <div className="notifications-page w-full max-w-3xl mx-auto space-y-5 font-sans text-[var(--text-primary)] animate-fade-in">
+      {mobile && <MobileNotifications items={filteredNotifications} unread={unreadCount} tab={activeTab} onTab={setActiveTab} onOpen={handleNavigate} onMarkAll={()=>void handleMarkAllRead()} onClear={()=>void handleClearAll()} onSettings={()=>setShowSettings(true)} saving={isSaving}/>}
+      <div className="m2-notifications-desktop">
       <div className="flex items-center justify-between gap-3">
         <h1
           className="font-bold tracking-tight text-[var(--text-primary)]"
@@ -372,6 +377,7 @@ export const NotificationsModule: React.FC<NotificationsModuleProps> = ({
         </div>
       </div>
 
+      </div>
       {showSettings && (
         <SlideOverDrawer title="Notification Settings" onClose={() => setShowSettings(false)}>
           <div className={`${slideOverBodyClass} text-[var(--text-secondary)] space-y-3`}>

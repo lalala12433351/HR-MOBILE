@@ -409,3 +409,7 @@
  .pixbe-app .projects-page .work-tabs > .work-tab[aria-selected="true"] { border-bottom-color:var(--accent-indigo-foreground);color:var(--accent-indigo-foreground); }
  .pixbe-app .attendance-studio > .m2-attendance-nav .work-tab[aria-selected="true"] { border-bottom-color:var(--accent-teal-foreground);color:var(--accent-teal-foreground); }
 }
+@media(max-width:767px) {
+ .attendance-studio[data-mobile-attendance="history"] > .m2-attendance-nav,
+ .attendance-studio[data-mobile-attendance="history"] .workday-stack { display:none; }
+}

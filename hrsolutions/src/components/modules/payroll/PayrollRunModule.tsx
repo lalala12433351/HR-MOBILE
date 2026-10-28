@@ -15,6 +15,9 @@ import {
 } from '@/utils/payrollRun';
 import { BankDisbursementRow, buildBankDisbursementRows, downloadPayrollWorkbook } from '@/utils/payrollExcel';
 import { PayrollHeaderSwitch } from './PayrollHeaderSwitch';
+import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileRow } from '@/components/mobile/MobilePrimitives';
+import { MobilePageTitle } from '@/components/mobile/MobilePageTitle';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { Check, Settings2 } from 'lucide-react';
 import { FinanceNote, FinanceStatus } from './FinanceUi';
@@ -204,6 +207,7 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
 
   return (
     <div className="finance-page payroll-studio flex flex-1 flex-col gap-5">
+      <div className="m2-payroll-title"><MobilePageTitle title={step==='review'?'Payroll review':step==='adjustments'?'Payroll incentives':'Payroll export'} onBack={()=>router.back()}/></div>
       <header className="finance-page-head">
         <h1>Payroll</h1>
         <PayrollHeaderSwitch active="payroll" />
@@ -218,6 +222,8 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
           return <Link key={item.id} href={item.href} aria-current={step === item.id ? 'step' : undefined} data-complete={index < current}><span>{index < current ? <Check size={13} /> : index + 1}</span>{item.label}</Link>;
         })}
       </nav>
+      <label className="m2-form-field m2-pay-period">Pay month / year<input id="mobile-pay-period" aria-label="Pay month and year" type="month" value={year+'-'+String(month).padStart(2,'0')} onChange={event=>{if(!event.target.value)return;const [nextYear,nextMonth]=event.target.value.split('-').map(Number);setYear(nextYear);setMonth(nextMonth);}}/></label>
+      <button type="button" className="m2-secondary m2-change-pay-period" onClick={()=>{const input=document.getElementById('mobile-pay-period') as HTMLInputElement|null;if(input?.showPicker)input.showPicker();else input?.focus();}}>Change pay period</button>
       <div className="finance-pay-filters">
         <label htmlFor="pay-month">Pay month<select id="pay-month" value={month} onChange={(event) => setMonth(Number(event.target.value))} className={controlClass}>
           {monthOptions.map((value) => <option key={value} value={value}>{new Date(2026, value - 1, 1).toLocaleDateString('en-IN', { month: 'long' })}</option>)}
@@ -248,6 +254,7 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
         />
       </div>
 
+      <div className="m2-payroll-summary"><span>Company net · {run.totals.employeeCount} employees</span><strong>{inr(run.totals.totalNet)}</strong><small>Gross + incentives {inr(run.totals.totalGross+run.totals.totalIncentives)} · Deductions & LOP {inr(run.totals.totalDeductions)} · {run.totals.shortHoursCount} employees short</small></div>
       {step === 'review' && (
         <>
           <PayrollTable
@@ -256,7 +263,7 @@ export const PayrollRunModule: React.FC<PayrollRunModuleProps> = ({ state, onUpd
             lines={visibleLines}
             onSelect={(id) => setReportEmployeeId(id)}
           />
-          <div className="flex shrink-0 justify-end pt-1">
+          <div className="m2-payroll-continue flex shrink-0 justify-end pt-1">
             <button type="button" disabled={!run.lines.length} onClick={() => router.push('/payroll/adjustments')} className={primaryBtn}>
               Continue to incentives
             </button>
@@ -401,6 +408,8 @@ function PayrollTable({
   showIncentives?: boolean;
   formatMoney: (value: number) => string;
 }) {
+  const mobile=useMobileViewport();
+  if(mobile) return <section className="m2-payroll-people">{lines.map(line=><MobileRow key={line.id} title={[line.employeeName,employees.find(e=>e.id===line.employeeId)?.employeeId].filter(Boolean).join(' · ')} detail={formatMoney(line.netPay)+' · '+line.daysWorked+'/'+line.daysRequired+' days · '+line.hoursWorked+'/'+line.hoursRequired+'h'} onClick={()=>onSelect?.(line.employeeId)}/>)}{!lines.length&&<p className="m2-empty">No matching employees for this payroll cycle.</p>}</section>;
   if (!lines.length) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center rounded-[9px] border border-[var(--border-color)] bg-[var(--bg-surface)] px-5 text-[14px] text-[var(--text-secondary)]">

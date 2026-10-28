@@ -3,6 +3,7 @@ import { ResponsiveFilters } from '@/components/common/ResponsiveFilters';
 import './workspaces.css';
 import { DateInput } from '@/components/common/DateInput';
 import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileRow } from '@/components/mobile/MobilePrimitives';
 import { MobileHeaderAction } from '@/components/mobile/MobileHeaderAction';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
@@ -1439,7 +1440,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
             <button type="button" className="mobile-filter-today" onClick={handleToday}>Go to today</button>
           </ResponsiveFilters>
           <div className="work-seg work-time-views" role="group" aria-label="Timesheet view">
-            {(['day', 'week', 'month', 'list'] as const).map((mode) => (
+            {(mobileViewport ? (['day','week','month'] as const) : (['day', 'week', 'month', 'list'] as const)).map((mode) => (
               <button key={mode} type="button" onClick={() => setViewMode(mode)} className={viewMode === mode ? 'is-on' : ''} aria-pressed={viewMode === mode}>{mode}</button>
             ))}
           </div>
@@ -1513,7 +1514,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
           </div>
         )}
         {viewMode === 'week' && <div className="work-mobile-totals"><div><span>Week total</span><strong>{formatHoursHM(weekDays.reduce((total,day) => total + day.totalHours, 0))}</strong></div><div><span>Pending review</span><strong>{reviewablePeriodEntries.length} entries</strong></div></div>}
-        {viewMode === 'day' && <div className="m2-metric"><span>Logged {selectedDate === TODAY_DATE ? 'today' : 'on ' + selectedDate}</span><strong>{formatHoursHM(todayDayTotalHours)}</strong><small>{todayDayReviewable.length} entries pending review</small></div>}
+        {viewMode === 'day' && <div className="m2-metric"><span>Logged {selectedDate === TODAY_DATE ? 'today' : 'on ' + selectedDate}</span><strong>{formatHoursHM(todayDayTotalHours)}</strong><small className="m2-success">{filteredEntries.filter(entry=>entry.date===selectedDate && isPendingStatus(entry.status)).length} entries pending review</small></div>}
           <div className="m2-section-heading"><h2>Time entries</h2><span>{filteredEntries.filter(entry => viewMode === 'list' || entry.date === selectedDate).length} entries</span></div>
           {viewMode === 'list' && <div className="work-mobile-list-actions"><span>{filteredEntries.length} entries · {formatHoursHM(filteredEntries.reduce((total,entry) => total + getEntryLiveHours(entry), 0))} logged</span><button type="button" className="work-btn-secondary" onClick={handleExportCSV}>Export CSV</button></div>}
         {(viewMode === 'week' ? weekDays : [{dateStr:selectedDate, dayName:'', dayNum:0, totalHours:todayDayTotalHours}]).map((day) => {
@@ -1521,15 +1522,17 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
           return <section key={day.dateStr} className="work-mobile-agenda">
             {viewMode === 'week' && entries.length > 0 && <h2>{new Date(`${day.dateStr}T00:00:00`).toLocaleDateString('en-GB', {weekday:'short',day:'numeric',month:'short'})}</h2>}
             {entries.map((entry) => <button key={entry.id} type="button" className="work-mobile-entry" onClick={() => handleEditEntry(entry)}>
-              <strong>{entry.taskTitle || 'Time entry'}</strong><span>{entry.projectName || 'General'}</span><span>{entry.employeeName} · {new Date(`${entry.date.slice(0,10)}T00:00:00`).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</span>
-              <div><span>{entry.startTime || '—'}–{entry.endTime || 'Running'} · {formatHoursHM(getEntryLiveHours(entry))}</span><span className={`work-chip ${entry.status === 'Approved' ? 'work-chip-sage' : entry.status === 'Rejected' ? 'work-chip-error' : 'work-chip-amber'}`}>{isPendingStatus(entry.status) ? 'Pending' : entry.status}</span></div>
+              <strong>{entry.taskTitle || 'Time entry'}</strong>
+              <span>{entry.projectName || 'General'} · {entry.startTime?to12HourStr(entry.startTime):'-'} – {entry.endTime?to12HourStr(entry.endTime):'Running'}</span>
+              <small className="m2-warning">{formatHoursHM(getEntryLiveHours(entry))}{viewMode==='list'?' · '+entry.status:''}</small>
             </button>)}
             {entries.length === 0 && viewMode !== 'week' && <p className="work-mobile-empty">No time entries for this period.</p>}
           </section>;
         })}
       </div>
 
-      <div className="m2-timesheet-actions"><button type="button" className="m2-primary" onClick={() => handleOpenLogModal(selectedDate)}>Log time</button>{isAdmin && <button type="button" className="m2-secondary" onClick={() => handleOpenLogModal(selectedDate, undefined, 'schedule')}>Schedule people</button>}</div>
+      <div className="m2-timesheet-actions"><button type="button" className="m2-primary" onClick={() => handleOpenLogModal(selectedDate)}>Log time</button><button type="button" className="m2-secondary" onClick={()=>{setViewMode('list');setMobileFiltersOpen(true);}}>Review timesheet</button></div>
+      <div className="m2-timesheet-links"><MobileRow title="Month view" detail="Calendar of time entries" onClick={()=>setViewMode('month')}/><MobileRow title="Review time entries" detail="List and approval actions" onClick={()=>{setViewMode('list');setMobileFiltersOpen(true);}}/>{isAdmin&&<MobileRow title="Schedule people" detail="Assign a meeting to teammates" onClick={()=>handleOpenLogModal(selectedDate,undefined,'schedule')}/>}</div>
 
 {/* VIEW 1: DAY VIEW (Light Theme) */}
       {viewMode === 'day' && (

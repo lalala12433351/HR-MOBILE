@@ -1,6 +1,8 @@
 'use client';
 import { DateInput } from '@/components/common/DateInput';
 
+import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileRow } from '@/components/mobile/MobilePrimitives';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   ChevronLeft,
@@ -73,6 +75,7 @@ export const HolidayCalendarView: React.FC<HolidayCalendarViewProps> = ({
     triggerToast = appContext.triggerToast;
   } catch (_) {}
 
+  const mobile = useMobileViewport();
   const [activeYear, setActiveYear] = useState<number>(() => {
     const y = new Date().getFullYear();
     return y >= 2024 && y <= 2028 ? y : 2026;
@@ -646,6 +649,7 @@ export const HolidayCalendarView: React.FC<HolidayCalendarViewProps> = ({
 
   const previewMultiTemplateCount = selectedTemplateItems.length;
 
+  if (mobile && !isHR) return <div className="m2-page m2-holidays"><label className="m2-form-field">Year<select value={activeYear} onChange={event=>setActiveYear(Number(event.target.value))}>{Array.from(new Set([new Date().getFullYear()-1,new Date().getFullYear(),new Date().getFullYear()+1,...allHolidays.map(h=>holidayYear(h))])).sort().map(year=><option key={year}>{year}</option>)}</select></label><small className="m2-caption">{yearHolidays.length} published holidays · Only approved dates appear</small><div>{yearHolidays.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(holiday=><MobileRow key={holiday.id} title={holiday.name} detail={new Date(holiday.date+'T12:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} arrow={false}/>)}</div>{!yearHolidays.length&&<p className="m2-empty">No published holidays for this year.</p>}<small className="m2-caption">No attendance is expected on a published holiday.</small></div>;
   return (
     <div className="space-y-4 w-full">
       {/* Top Feedback Banner */}

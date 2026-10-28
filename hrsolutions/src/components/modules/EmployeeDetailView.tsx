@@ -1,5 +1,8 @@
 'use client';
 import './people-attendance.css';
+import {useMobileViewport} from '@/hooks/useMobileViewport';
+import {MobileEmployeeGeneral} from '@/components/mobile/MobileEmployeeGeneral';
+import {MobilePageTitle} from '@/components/mobile/MobilePageTitle';
 import { EmployeeAttendanceCalendar } from './hrms/EmployeeAttendanceCalendar';
 import { DateInput } from '@/components/common/DateInput';
 
@@ -280,6 +283,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   initialTab,
 }) => {
   const router = useRouter();
+  const mobile=useMobileViewport();
   const { updateState } = useApp();
 
   // Strict RBAC: Only Super Admin and HR can edit employee profiles
@@ -1634,11 +1638,13 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
         ? 'border-[#8b3133]/25 bg-[#faeeee] text-[#8b3133]'
         : 'border-[#d8e8f2] bg-[#f8fbfe] text-[#17324e]';
 
+  if(mobile && activeTab==='general' && !isEditingPersonalInfo && !isEditingAddress && !isEditingEmergency && !isEditingBankDetails) return <MobileEmployeeGeneral employee={employee} canEdit={canEdit} onBack={onBack} onEdit={()=>setIsEditingPersonalInfo(true)} onTab={setActiveTab}/>;
   // Read-only full detail for non-editors (self view). Edit controls stay gated by canEdit.
   // (Previously short-circuited to EmployeeProfileCardModal.)
 
   return (
     <div className="employee-profile-studio space-y-6" data-public-profile={activeTab === 'public_profile'}>
+      {mobile&&<MobilePageTitle title={activeTab==='general'?'Edit details':activeTab==='job'?'Job & role':activeTab==='documents'?'Employee documents':activeTab==='setting'?'Employee settings':activeTab==='payroll'?'Salary structure':activeTab==='public_profile'?'Public profile':'Employee attendance'} onBack={()=>{setActiveTab('general');setIsEditingPersonalInfo(false);setIsEditingAddress(false);setIsEditingEmergency(false);setIsEditingBankDetails(false);}}/>}
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-6 right-6 z-50 bg-[#17324e] text-white px-4 py-2.5 rounded-[7px] shadow-xl text-[13px] font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">

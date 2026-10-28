@@ -1,0 +1,26 @@
+/* Figma 316:10165 — attendance history. */
+.history { display:flex;flex-direction:column;gap:20px;min-width:0; }
+.tabs { display:flex;gap:20px; }
+.tabs button { min-height:44px;padding:10px 0 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--text-secondary);font-size:13px;font-weight:500; }
+.tabs button[aria-selected="true"] { border-bottom-color:var(--studio-navy);color:var(--studio-navy);font-weight:600; }
+.metric { display:flex;flex-direction:column;gap:12px; }
+.metric > span { font-size:12px;font-weight:500;color:var(--text-secondary); }
+.metric > strong { font-size:28px;line-height:35px;font-weight:600;letter-spacing:-.5px; }
+.metric > small { color:var(--accent-teal-foreground);font-size:12px;line-height:18px; }
+.history h2 { margin:0;font-size:16px;line-height:20px;font-weight:600;letter-spacing:-.35px; }
+.days { min-width:0; }
+.day { border-bottom:1px solid var(--border-color); }
+.row { display:flex;align-items:center;gap:12px;min-height:76px;width:100%;padding:16px 0;border:0;background:transparent;text-align:left;color:var(--text-primary);cursor:pointer; }
+.copy { display:flex;flex:1;flex-direction:column;gap:4px;min-width:0; }
+.copy > span { font-size:15px;font-weight:500;line-height:22px; }
+.copy small { font-size:12px;line-height:18px;color:var(--text-secondary);overflow-wrap:anywhere; }
+.copy .warning { color:var(--accent-amber-foreground); }
+.row img { flex-shrink:0; }
+.details { padding:0 0 16px;font-size:12px;line-height:18px; }
+.details dl { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0; }
+.details dt { color:var(--text-secondary); }.details dd { margin:4px 0 0;overflow-wrap:anywhere; }
+.details ul { padding:12px 0 0;margin:0;list-style:none; }.details li { display:flex;flex-direction:column;gap:4px;padding:8px 0; }
+.details button { min-height:44px;padding:12px 0 0;border:0;background:transparent;color:var(--studio-navy);font-size:12px;font-weight:600; }
+.correction { display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:12px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface);color:var(--studio-navy);font-size:14px;font-weight:600; }
+.empty { padding:16px 0;font-size:13px;line-height:20px;color:var(--text-secondary); }
+.history button:focus-visible { outline:2px solid var(--primary-blue);outline-offset:3px; }

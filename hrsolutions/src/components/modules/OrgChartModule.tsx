@@ -1,6 +1,9 @@
 'use client';
 
 import './org-chart.css';
+import {useMobileViewport} from '@/hooks/useMobileViewport';
+import {MobileRow} from '@/components/mobile/MobilePrimitives';
+import {MobilePageTitle} from '@/components/mobile/MobilePageTitle';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
@@ -124,6 +127,8 @@ const getRoleRank = (emp: Employee): number => {
 };
 
 export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateState, onSelectEmployee }) => {
+  const mobile=useMobileViewport();
+  const [mobileManage,setMobileManage]=useState(false);
   const [viewMode, setViewMode] = useState<'tree' | 'plan'>('tree');
   const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
@@ -655,6 +660,7 @@ export const OrgChartModule: React.FC<OrgChartModuleProps> = ({ state, onUpdateS
     </div>;
   };
 
+  if(mobile && !mobileManage) return <div className="m2-page m2-organization"><MobilePageTitle title="Organisation chart"/><div className="m2-text-tabs" role="tablist" aria-label="Organisation views">{(['tree','plan'] as const).map(view=><button key={view} type="button" role="tab" aria-selected={viewMode===view} onClick={()=>setViewMode(view)}>{view==='tree'?'Tree':'Hierarchy'}</button>)}</div><label className="m2-form-field">Department<select value={selectedDept} onChange={e=>setSelectedDept(e.target.value)}>{departments.map(value=><option key={value} value={value}>{value==='All'?'All departments':value}</option>)}</select></label><label className="m2-form-field">Search<input value={searchQuery} placeholder="Name or role" onChange={e=>setSearchQuery(e.target.value)}/></label><div>{planEmployees.map(employee=>{const manager=employees.find(person=>person.id===resolveSavedManagerId(employee,employees));const reports=employees.filter(person=>resolveSavedManagerId(person,employees)===employee.id).length;return <MobileRow key={employee.id} title={employee.name} detail={[employee.designation,reports?reports+' direct reports':manager?'Reports to '+manager.name:null].filter(Boolean).join(' · ')} onClick={onSelectEmployee?()=>onSelectEmployee(employee):undefined}/>;})}{!planEmployees.length&&<p className="m2-empty">No people match this view.</p>}</div>{canEditOrgChart&&<details className="m2-secondary-options"><summary>Reporting options</summary><button type="button" onClick={()=>{setViewMode('plan');setMobileManage(true);}}>Edit reporting relationships</button></details>}</div>;
   return (
     <div className="people-org-chart org-chart-studio">
       {/* Toast Notification */}

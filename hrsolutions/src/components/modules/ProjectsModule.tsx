@@ -6,6 +6,8 @@ import { DateInput } from '@/components/common/DateInput';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileProjectOverview } from '@/components/mobile/MobileProjectOverview';
+import { MobilePageTitle } from '@/components/mobile/MobilePageTitle';
 import { MobileHeaderAction } from '@/components/mobile/MobileHeaderAction';
 import Link from 'next/link';
 import {
@@ -2946,7 +2948,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   return (
-    <div className="work-page projects-page">
+    <div className="work-page projects-page" data-mobile-work-view={activeTab}>
       {mobileViewport && <MobileHeaderAction><button type="button" className="m2-icon-button m2-add" aria-label="Add task" onClick={() => handleOpenCreateTaskModal()}>＋</button></MobileHeaderAction>}
       <div className="work-head">
         <h1 className="work-title"><span className="work-desktop-label">Plan project work</span><span className="work-mobile-label">Projects</span></h1>
@@ -2979,7 +2981,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           <input
             type="text"
             aria-label={activeTab === 'projects' ? 'Search projects' : 'Search tasks'}
-            placeholder={activeTab === 'projects' ? 'Search projects' : 'Search tasks and projects'}
+            placeholder={activeTab === 'projects' ? 'Search projects' : 'Find a task or project'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="work-field w-full pl-10"
@@ -3032,6 +3034,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       {/* TAB 1: KANBAN BOARD WITH DRAG & DROP */}
       {activeTab === 'kanban' && (
         <>
+        {mobileViewport && <MobilePageTitle title={state.projects.find(p=>p.id===selectedProjectId)?.name || 'Task board'} onBack={()=>setActiveTab('backlog')}/>}
         <div className="work-board-status" role="group" aria-label="Board status">
           {columns.map((status) => (
             <button key={status} type="button" aria-pressed={mobileBoardStatus === status} onClick={() => setMobileBoardStatus(status)}>
@@ -3162,6 +3165,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                             {repeatText && <span className="work-task-repeat">{repeatText}</span>}
                           </div>
 
+                          {mobileViewport && <small className="m2-board-task-status">{overdue ? 'Overdue' : col}</small>}
                           <div className="work-task-footer flex items-center justify-between border-t border-[var(--border-color)] pt-2.5">
                             {renderAssigneeStack(task)}
                             <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
@@ -3186,6 +3190,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
             );
           })}
         </div>
+        {mobileViewport && <button type="button" className="m2-secondary" onClick={()=>handleOpenCreateTaskModal()}>Add task</button>}
         </>
       )}
 
@@ -3201,8 +3206,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
     const tone = overdue ? 'is-overdue' : status === 'Completed' ? 'is-complete' : status === 'In Progress' ? 'is-active' : 'is-todo';
     return (
     <button type="button" key={task.id} className="m2-task-row" onClick={() => setSelectedTask(task)}>
-      <span className="m2-task-line"><strong>{task.title}</strong><small className={tone}>{overdue ? 'Overdue' : status}</small></span>
-      <span>{[task.projectName, task.dueDate ? 'Due ' + task.dueDate.slice(0, 10) : null].filter(Boolean).join(' · ')}</span>
+      <strong>{task.title}</strong><span>{[task.projectName,task.dueDate ? task.dueDate.slice(0,10)===new Date().toLocaleDateString('en-CA')?'Due today':'Due '+new Date(task.dueDate.slice(0,10)+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'}):null].filter(Boolean).join(' · ')}</span><small className={tone}>{overdue?'Overdue':status}</small>
     </button>
     );
   })}
@@ -3310,7 +3314,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
       )}
 
       {/* TAB 4: PROJECTS LIST OVERVIEW */}
-      {activeTab === 'projects' && (
+      {activeTab === 'projects' && (mobileViewport ? <MobileProjectOverview projects={filteredProjects} tasks={state.tasks} onOpen={setSelectedProjectForDetails} onNew={canCreateProjects?handleOpenCreateProjectModal:undefined} onBack={()=>setActiveTab('backlog')}/> : (
         <div className="work-project-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Add Project Card (Admin Only) */}
           {canCreateProjects && (
@@ -3373,7 +3377,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
             );
           })}
         </div>
-      )}
+      ))}
 
       {/* Task Detail Slide-over Drawer */}
       {selectedTask && (() => {

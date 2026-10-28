@@ -1,5 +1,7 @@
 'use client';
 
+import {useMobileViewport} from '@/hooks/useMobileViewport';
+import {MobileStudents} from '@/components/mobile/MobileStudents';
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import {
@@ -84,6 +86,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
   const isStudent = state.currentPersona.role === 'student';
   const canManageStudents = (isSuperAdmin || isHR || isFaculty) && !isStudent;
 
+  const mobile=useMobileViewport();
   const [activeTab, setActiveTab] = useState<'roster' | 'overview' | 'timetable'>('roster');
 
   // Search & Filter State
@@ -527,7 +530,9 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
   };
 
   return (
-    <div className="space-y-4 w-full">
+    <div className="space-y-4 w-full" data-mobile-students={mobile&&activeTab==='roster'}>
+      {mobile&&activeTab==='roster'&&<MobileStudents students={state.students||[]} onSelect={setInspectedStudent} onAdd={canManageStudents?()=>setShowAddStudentDrawer(true):undefined} onExport={handleDownloadCSV} onTimetable={()=>setActiveTab('timetable')}/>}
+      <div className="m2-student-desktop">
       {/* Header & Title Actions (Transparent Header) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-1">
         <div>
@@ -1107,6 +1112,7 @@ export const StudentDirectoryModule: React.FC<StudentDirectoryModuleProps> = ({
         </>
       )}
 
+      </div>
       {/* Slide-Over Drawer: Add New Student */}
       {showAddStudentDrawer && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-xs animate-fade-in">

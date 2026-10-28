@@ -580,7 +580,8 @@ export const WorkspaceSetupWizard: React.FC = () => {
 
   const stage = (number: number) => number < step ? 'done' : number === step ? 'current' : 'upcoming';
 
-  return <div className="figma-setup workspace-onboarding">
+  return <div className="figma-setup workspace-onboarding" data-mobile-step={step}>
+    <header className="m2-setup-page-header">{step>1&&<button type="button" aria-label="Previous setup step" onClick={()=>setStep((step-1) as Step)}><img src="/mobile-v2/auth-back.svg" width="20" height="20" alt=""/></button>}<h1>{['Your workplace','Build your structure','Set the rhythm','Better, together.','Ready when you are.'][step-1]}</h1></header>
     <main className="fs-shell">
       <aside className="fs-rail"><div className="fs-rail-top">
         <PixbeDesignWordmark/><div className="fs-journey">

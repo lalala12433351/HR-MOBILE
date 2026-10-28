@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import './mobile.css';
 import './mobile-v2.css';
+import './mobile-figma.css';
 import { AppShell } from '@/components/layout/AppShell';
 
 export const metadata: Metadata = {

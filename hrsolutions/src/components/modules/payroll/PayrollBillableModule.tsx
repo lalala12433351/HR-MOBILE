@@ -1,5 +1,8 @@
 'use client';
 import './finance-studio.css';
+import {useMobileViewport} from '@/hooks/useMobileViewport';
+import {MobileRow} from '@/components/mobile/MobilePrimitives';
+import {MobilePageTitle} from '@/components/mobile/MobilePageTitle';
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -94,6 +97,8 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyClientForm);
+  const mobile=useMobileViewport();
+  const [mobileClientForm,setMobileClientForm]=useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [clientFilter, setClientFilter] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
@@ -176,6 +181,7 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
   const invoiceClientId = clientFilter || selected[0]?.clientId || '';
 
   const startEdit = (client: BillingClient) => {
+    setMobileClientForm(true);
     setEditingId(client.id);
     setForm({
       name: client.name,
@@ -221,6 +227,7 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
     toast.success(editingId ? 'Client updated.' : 'Client created.');
     setForm(emptyClientForm());
     setEditingId(null);
+    setMobileClientForm(false);
     void loadAll();
   };
 
@@ -326,7 +333,8 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
   const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
   return (
-    <div className="finance-page billable-studio flex flex-1 flex-col gap-5">
+    <div className="finance-page billable-studio flex flex-1 flex-col gap-5" data-mobile-client-form={mobileClientForm}>
+      {mobile&&<MobilePageTitle title={innerTab==='clients' ? mobileClientForm ? editingId?'Edit client':'New client':'Clients' : innerTab==='unbilled'?'Project billing':'Invoices'} onBack={mobileClientForm?()=>setMobileClientForm(false):undefined}/>}
       <header className="finance-page-head"><h1>Billable hours</h1><PayrollHeaderSwitch active="billable" /></header>
 
       <div className="finance-billable-tabs work-tabs shrink-0 overflow-x-auto no-scrollbar" role="tablist" aria-label="Billable views">
@@ -344,7 +352,8 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
         ))}
       </div>
 
-      {innerTab === 'clients' && (
+      {innerTab === 'clients' && (<>
+        {mobile&&!mobileClientForm&&<div className="m2-client-list"><div>{clients.map(client=><MobileRow key={client.id} title={client.companyName||client.name} detail={[client.name,client.defaultHourlyRate?money(client.defaultHourlyRate,client.currency)+'/h':'No fallback rate',client.paymentTermsDays+'-day terms'].join(' · ')} onClick={()=>startEdit(client)}/>)}{!clients.length&&<p className="m2-empty">No clients yet. Add one to start billing project work.</p>}</div><button type="button" className="m2-primary" onClick={()=>{setEditingId(null);setForm(emptyClientForm());setMobileClientForm(true);}}>New client</button></div>}
         <div className="finance-client-layout grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
           <div className="finance-client-list">
           <section className="finance-table-panel" aria-busy={loading}>
@@ -401,11 +410,11 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
             <label htmlFor="billing-rate">Hourly rate ({form.currency})<input id="billing-rate" type="number" step="0.01" className={controlClass} value={form.defaultHourlyRate} onChange={(event) => setForm({ ...form, defaultHourlyRate: event.target.value })} /></label>
             <p className="finance-field-hint">Optional fallback rate for hourly work.</p>
             <div className="finance-form-actions">
-              {editingId && <button type="button" className={secondaryBtn} onClick={() => { setEditingId(null); setForm(emptyClientForm()); }}>Cancel</button>}
+              {editingId && <button type="button" className={secondaryBtn} onClick={() => { setEditingId(null); setForm(emptyClientForm()); setMobileClientForm(false); }}>Cancel</button>}
               <button type="submit" disabled={saving} className={primaryBtn}>{saving ? 'Saving...' : editingId ? 'Save client' : 'Create client'}</button>
             </div>
           </form>
-        </div>
+        </div></>
       )}
 
       {innerTab === 'unbilled' && (
@@ -539,7 +548,7 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
         </div>
       )}
 
-      {innerTab === 'invoices' && !detail && (
+      {innerTab === 'invoices' && !detail && (mobile ? <div className="m2-invoice-list">{invoices.map(invoice=><MobileRow key={invoice.id} title={[invoice.invoice_number,invoice.client_name||invoice.customer_name].filter(Boolean).join(' · ')} detail={[invoice.kind||'Project',money(Number(invoice.total_amount)||0),String(invoice.status||'draft').replaceAll('_',' ')].join(' · ')} onClick={()=>setTab('invoices',invoice.id)}/>)}{!invoices.length&&<p className="m2-empty">No invoices yet.</p>}</div> : (
         <section className="finance-table-panel finance-invoices-panel" aria-busy={loading}>
           <header><h2>Invoices</h2><span>{loading ? 'Loading...' : `${invoices.length} saved invoices`}</span></header>
           <div className="finance-table-scroll"><table className="finance-invoice-table w-full text-left text-xs">
@@ -570,7 +579,7 @@ export function PayrollBillableModule({ state }: { state: AppState }) {
             </tbody>
           </table></div>
         </section>
-      )}
+      ))}
 
       {innerTab === 'invoices' && detail && (
         <InvoiceDocument

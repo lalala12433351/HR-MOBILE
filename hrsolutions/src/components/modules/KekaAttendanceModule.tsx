@@ -7,6 +7,8 @@ import { DateInput } from '@/components/common/DateInput';
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobileTeamAttendance } from '@/components/mobile/MobileTeamAttendance';
+import { MobileTimeOff } from '@/components/mobile/MobileTimeOff';
 import { MobileRow, MobileSection } from '@/components/mobile/MobilePrimitives';
 import {
   Clock,
@@ -61,7 +63,7 @@ import {
   Briefcase,
   Printer,
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AppState } from '../../services/store';
 import { AttendanceRecord, AttendanceRegularization, Employee, LeaveRequest } from '../../types';
 import { AttendanceReportsModal } from './attendance/AttendanceReportsModal';
@@ -72,6 +74,7 @@ import { AttendanceOverviewChart } from './attendance/AttendanceOverviewChart';
 import { AttendanceStatusPill } from './attendance/AttendanceStatusPill';
 import { MyAttendanceTodayPanel } from './attendance/MyAttendanceTodayPanel';
 import { MyAttendanceLogTable } from './attendance/MyAttendanceLogTable';
+import { MobileAttendanceHistory } from './attendance/MobileAttendanceHistory';
 import {
   ATT_BTN_PRIMARY,
   ATT_BTN_SECONDARY,
@@ -577,7 +580,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   const defaultSubTab = (initialOpenApplyModal ? 'leaves' : initialSubTab) || (isStudentLogin ? 'my_attendance' : isStudentMode ? 'team_attendance' : 'my_attendance');
   const mobileViewport = useMobileViewport();
-  const [mobileAttendancePane, setMobileAttendancePane] = useState<'overview' | 'history'>('overview');
+  const attendancePath = usePathname();
+  const attendanceParams = useSearchParams();
+  const mobileAttendancePane = attendanceParams.get('view') === 'history' ? 'history' : 'overview';
+  const setMobileAttendancePane = (pane: 'overview' | 'history') => {
+    const query = new URLSearchParams(attendanceParams.toString());
+    if (pane === 'history') query.set('view', 'history'); else query.delete('view');
+    router.replace(attendancePath + (query.size ? '?' + query.toString() : ''), { scroll: false });
+  };
   const [subTab, setSubTab] = useState<'my_attendance' | 'team_attendance' | 'leaves' | 'regularizations' | 'holidays' | 'settings'>(defaultSubTab);
 
   useEffect(() => {
@@ -4055,7 +4065,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   );
 
   const mainContent = (
-    <div className="work-page attendance-studio" data-mobile-attendance={mobileAttendancePane}>
+    <div className="work-page attendance-studio" data-mobile-attendance={mobileAttendancePane} data-mobile-subtab={subTab}>
       {(state.currentPersona.role !== 'student' || mobileViewport) && (
         <>{mobileViewport && <nav className="work-tabs m2-attendance-nav" aria-label="Attendance views">
 <button type="button" className="work-tab" aria-selected={subTab === 'my_attendance' && mobileAttendancePane === 'overview'} onClick={() => { setSubTab('my_attendance'); setMobileAttendancePane('overview'); }}>Overview</button>
@@ -4260,7 +4270,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
               </div>
             </div>}
 
-            <section className="attendance-punch-panel" aria-label="Punch log">
+            {mobileViewport && mobileAttendancePane === 'history' ? <MobileAttendanceHistory rows={attendanceHistory} today={todayIsoStr} onCorrection={!isStudentMode && state.currentPersona.role !== 'student' ? date => openRegModal({ date }) : undefined} /> : <section className="attendance-punch-panel" aria-label="Punch log">
             <header className="attendance-panel-heading"><h2>Punch log</h2></header>
           <AttendanceFilterToolbar
             leading={
@@ -4333,12 +4343,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             }}
             isStudentMode={isStudentMode}
           />
-          </section>
+          </section>}
         </div>
       )}
 
       {/* VIEW 2: TEAM ATTENDANCE (FOR HR / MANAGERS / FACULTY) */}
-      {state.currentPersona.role !== 'student' && subTab === 'team_attendance' && (
+      {state.currentPersona.role !== 'student' && subTab === 'team_attendance' && (mobileViewport ? <MobileTeamAttendance records={teamAttendanceStats.enrichedRecords} date={teamAttendanceDate} onDate={setTeamAttendanceDate} student={isStudentMode} onSelect={onSelectEmployee} onReport={canAccessReports?()=>{setReportsModalInitialType('daily');setShowReportsModal(true);}:undefined} onPhoto={att=>void openAttendancePhotos(att)}/> : (
         <div className="space-y-5 text-[var(--text-primary)]">
           <div className="work-head">
             <h1 className="work-title">
@@ -5070,7 +5080,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           </div>
           {(!isStudentMode || !teamGroupByBatch) && <WorkspacePagination total={filteredTeamRecords.length} page={currentTeamPage} pageSize={teamPageSize} onPageChange={setTeamPage} onPageSizeChange={(size) => { setTeamPageSize(size); setTeamPage(1); }}/>}
         </div>
-      )}
+      ))}
 
       {/* VIEW 3: REGULARIZATIONS */}
       {!isStudentMode && state.currentPersona.role !== 'student' && subTab === 'regularizations' && (
@@ -5107,12 +5117,16 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             { id: 'scope', label: 'People in this view', value: new Set(visibleRegularizations.map((request) => request.employeeId)).size, tone: 'neutral' },
           ]} />
 
-          <RegularizationRequestsView requests={visibleRegularizations} currentEmployeeId={state.currentPersona.id} canReview={(request) => canApproveRegularization(state.currentPersona, request, state.employees)} onReview={handleApproveRegularization} />
+          <RegularizationRequestsView onApply={()=>openRegModal()} onRequestWFH={!isInstitution?()=>openRegModal({reason:'Work From Home',remarks:'Work from home request'}):undefined} requests={visibleRegularizations} currentEmployeeId={state.currentPersona.id} canReview={(request) => canApproveRegularization(state.currentPersona, request, state.employees)} onReview={handleApproveRegularization} />
         </div>
       )}
 
       {/* VIEW: LEAVES & TIME OFF */}
-      {!isStudentMode && subTab === 'leaves' && (
+      {!isStudentMode && subTab === 'leaves' && (mobileViewport && leaveView === 'mine' ? <MobileTimeOff balances={[
+        {label:'Casual leave',remaining:casualLeft,quota:personalQuota('casualLeave'),used:casualUsed,pending:casualPending,restricted:isTargetInProbation},
+        {label:'Sick leave',remaining:sickLeft,quota:personalQuota('sickLeave'),used:sickUsed,pending:sickPending,restricted:isTargetInProbation},
+        {label:'Earned leave',remaining:earnedLeft,quota:personalQuota('earnedLeave'),used:earnedUsed,pending:earnedPending,restricted:isTargetInProbation},
+      ]} requests={targetEmpLeaves} holidays={state.customOptions?.holidays || []} onApply={()=>{setSelectedLeaveEmpId(targetEmployeeObj.id);setShowApplyLeaveModal(true);}} onCancel={handleCancelLeave} saving={isSaving} canCancelManagerApproved={isSuperAdmin||isHR} onApprovals={!isUserView?()=>setLeaveView('approvals'):undefined} /> : (
         <div className="leave-workspace space-y-5">
           {(isUserView || leaveView === 'mine') && leaveView !== 'policy' && <header className="my-leaves-page-head"><h2 className="work-title">My leaves</h2><div>{canAccessReports && <button type="button" className={ATT_BTN_SECONDARY} onClick={() => { setReportsModalInitialType('leaves'); setShowReportsModal(true); }}><Printer size={15}/>Export report</button>}<button type="button" className={ATT_BTN_PRIMARY} onClick={() => { setSelectedLeaveEmpId(targetEmployeeObj.id); setShowApplyLeaveModal(true); }}><Plus size={16}/>Apply for leave</button></div></header>}
 
@@ -5399,7 +5413,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
           {leaveView === 'approvals' && <WorkspacePagination total={leaveRows.length} page={currentLeavePage} pageSize={leavePageSize} onPageChange={setLeavePage} onPageSizeChange={(size) => { setLeavePageSize(size); setLeavePage(1); }}/>}
           </>}
         </div>
-      )}
+      ))}
 
 
 

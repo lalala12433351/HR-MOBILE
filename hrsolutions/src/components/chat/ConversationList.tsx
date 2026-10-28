@@ -1,5 +1,10 @@
 'use client';
 
+import { useMobileViewport } from '@/hooks/useMobileViewport';
+import {MobilePageTitle} from '@/components/mobile/MobilePageTitle';
+import { MobileHeaderAction } from '@/components/mobile/MobileHeaderAction';
+import { MobileRow } from '@/components/mobile/MobilePrimitives';
+import { UserAvatar } from '@/components/common/UserAvatar';
 import React, { useEffect, useMemo, useState } from 'react';
 import { BellOff, Plus, Search } from 'lucide-react';
 import { conversationTitle, useChat } from '@/hooks/useChat';
@@ -41,6 +46,8 @@ function lastLine(conversation: ChatConversation, meId?: string): string {
 
 export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewChat, onNewHrRequest }: ConversationListProps) {
   const { conversations, me, isHr, online, hrTickets, hrTicketsLoading, loadHrTickets } = useChat();
+  const mobile=useMobileViewport();
+  const [mobileFilter,setMobileFilter]=useState<'all'|'unread'|'hr'>('all');
   const [query, setQuery] = useState('');
   const [inboxStatus, setInboxStatus] = useState<TicketStatus | 'all'>('all');
   const [inboxAssigned, setInboxAssigned] = useState<'all' | 'me' | 'unassigned'>('all');
@@ -158,6 +165,11 @@ export function ConversationList({ tab, onTabChange, activeId, onSelect, onNewCh
 
   const empty = (text: string) => <p className="px-3 py-8 text-center text-[12px] leading-relaxed text-[var(--text-muted)]">{text}</p>;
 
+  if(mobile && tab==='inbox') return <div className="m2-page m2-conversations"><MobilePageTitle title="HR inbox" onBack={()=>onTabChange('teams')}/><div className="m2-text-tabs" role="tablist" aria-label="HR request status">{(['open','in_progress','resolved'] as const).map(value=><button key={value} type="button" role="tab" aria-selected={inboxStatus===value||(inboxStatus==='all'&&value==='open')} onClick={()=>setInboxStatus(value)}>{TICKET_STATUS_LABELS[value]}</button>)}</div><div>{hrTickets.filter(c=>!c.ticket||c.ticket.status===(inboxStatus==='all'?'open':inboxStatus)).map(c=><MobileRow key={c.id} title={conversationTitle(c,meId)} detail={[c.createdByName,c.ticket?.category,c.ticket?TICKET_STATUS_LABELS[c.ticket.status]:null].filter(Boolean).join(' · ')} onClick={()=>onSelect(c.id)}/>)}{!hrTickets.length&&<p className="m2-empty">{hrTicketsLoading?'Loading requests…':'No requests match this view.'}</p>}</div><small className="m2-caption">Only authorised HR staff can access employee requests.</small></div>;
+  if(mobile && tab!=='inbox') {
+    const rows=visible.filter(matches).filter(c=>mobileFilter==='unread'?c.unreadCount>0:mobileFilter==='hr'?c.type==='hr_ticket':true).sort((a,b)=>String(b.lastMessageAt||'').localeCompare(String(a.lastMessageAt||'')));
+    return <div className="m2-page m2-conversations"><MobileHeaderAction><button type="button" className="m2-icon-button m2-add" aria-label={mobileFilter==='hr'?'New HR request':'Start a new chat'} onClick={mobileFilter==='hr'?onNewHrRequest:onNewChat}>+</button></MobileHeaderAction><input type="search" className="m2-search-field" aria-label="Search conversations" placeholder="People, groups and conversations" value={query} onChange={event=>setQuery(event.target.value)}/><div className="m2-text-tabs" role="tablist" aria-label="Chat sections">{(['all','unread','hr'] as const).map(filter=><button key={filter} type="button" role="tab" aria-selected={mobileFilter===filter} onClick={()=>setMobileFilter(filter)}>{filter==='all'?'All':filter==='unread'?'Unread '+unreadOf(visible):'Ask HR'}</button>)}</div><div>{rows.map(c=><MobileRow key={c.id} title={conversationTitle(c,meId)+(c.unreadCount?' · '+c.unreadCount:'')} detail={[lastLine(c,meId),formatListTime(c.lastMessageAt||c.createdAt)].filter(Boolean).join(' · ')} onClick={()=>onSelect(c.id)} arrow={false}><UserAvatar name={conversationTitle(c,meId)} src={c.type==='direct'?c.participants.find(p=>p.employeeId!==meId)?.avatarUrl:undefined} className="m2-person-avatar"/></MobileRow>)}{!rows.length&&<p className="m2-empty">{query?'No conversations match your search.':mobileFilter==='hr'?'No HR requests yet. Use + to ask HR.':'No conversations in this view.'}</p>}</div>{isHr&&<MobileRow title="HR inbox" detail="Review employee requests" onClick={()=>onTabChange('inbox')}/>}</div>;
+  }
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="chat-rail-head">

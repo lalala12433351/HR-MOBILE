@@ -1,5 +1,7 @@
 'use client';
 import './people-attendance.css';
+import { useMobileViewport } from '@/hooks/useMobileViewport';
+import { MobilePeople } from '@/components/mobile/MobilePeople';
 import { DateInput } from '@/components/common/DateInput';
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -124,6 +126,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
     'general' | 'public_profile' | 'job' | 'attendance_leave' | 'payroll' | 'documents' | 'setting'
   >(initialEmployeeTab || (initialTab === 'attendance' || (initialTab as string) === 'attendance_leaves' ? 'attendance_leave' : 'general'));
 
+  const mobileViewport = useMobileViewport();
   const allowCoworkerDirectoryAccess =
     state.customOptions?.profileSelfServiceSettings?.allowCoworkerDirectoryAccess ?? true;
   const [publicProfileEmployee, setPublicProfileEmployee] = useState<Employee | null>(null);
@@ -1492,7 +1495,8 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
             ];
 
   return (
-    <div className={moduleScope === 'employees' ? 'people-studio employees-page' : 'w-full min-w-0 max-w-full space-y-3.5'}>
+    <div className={moduleScope === 'employees' ? 'people-studio employees-page' : 'w-full min-w-0 max-w-full space-y-3.5'} data-mobile-org={mobileViewport && activeTab==='org_chart'} data-mobile-roster={mobileViewport && ['employees','my_team','organization','directory'].includes(activeTab)}>
+      {mobileViewport && ['employees','my_team','organization','directory'].includes(activeTab) && <MobilePeople employees={canEditProfiles || allowCoworkerDirectoryAccess ? state.employees : accessibleEmployees} team={accessibleEmployees} manage={canEditProfiles} directory={activeTab==='directory'||!canEditProfiles} organization={state.organization?.name} onSelect={handleSelectEmployee} onAdd={()=>setShowAddEmployeeModal(true)} onExport={handleDownloadCSV} onDirectory={()=>setActiveTab('directory')} onOrganization={()=>setActiveTab('org_chart')} onDepartment={handleSelectDepartment}/>}
       <div className={moduleScope === 'employees' ? 'people-studio__head' : 'flex flex-col justify-between gap-3 sm:flex-row sm:items-center'}>
         <h1 className={moduleScope === 'employees' ? 'people-studio__title' : 'text-lg font-bold tracking-tight text-[#0f172a] sm:text-xl'}>
           {activeTab === 'directory'
@@ -1585,9 +1589,9 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       )}
 
       {/* TAB 1: EMPLOYEES TABLE (ORGANIZATION / MY TEAM) */}
-      {(activeTab === 'employees' ||
+      {(!mobileViewport && (activeTab === 'employees' ||
         (activeTab as string) === 'my_team' ||
-        (activeTab as string) === 'organization') && (
+        (activeTab as string) === 'organization')) && (
         <EmployeeTableTab
           state={state}
           isUserView={isUserView}
@@ -1618,7 +1622,7 @@ export const HRMSModule: React.FC<HRMSModuleProps> = ({
       )}
 
       {/* TAB 2: DIRECTORY / STAFF CARDS */}
-      {activeTab === 'directory' && (
+      {!mobileViewport && activeTab === 'directory' && (
         <StaffCardsTab
           state={state}
           isInstitution={isInstitution}

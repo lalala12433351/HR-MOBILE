@@ -81,6 +81,12 @@ export function WorkdayClockCard({
   const chip = statusLabel || STATUS_COPY[statusKind];
   const hasActions = Boolean(locationSelect || secondaryAction || primaryAction);
 
+  if (mobile && compact) return <section className="m2-home-shift" aria-label="Today's shift">
+    <span>Today’s shift</span><strong>{shiftHours}</strong>
+    <details><summary>{shiftName}</summary>{locationSelect}</details>
+    {statusKind !== 'idle' && <small className="m2-success">{chip} · {clock.hours}h {clock.minutes}m logged</small>}
+    <div className="m2-home-shift-action">{primaryAction}</div>{secondaryAction && <div className="m2-home-shift-action">{secondaryAction}</div>}
+  </section>;
   if (mobile) {
     const today = new Date();
     const dateLabel = today.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
