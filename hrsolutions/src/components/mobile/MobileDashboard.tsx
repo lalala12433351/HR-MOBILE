@@ -28,7 +28,7 @@ function MobileDashboardContent() {
  const pendingTime = (data.timesheets || state.timesheets || []).filter(t=>ids.has(t.employeeId) && ['Pending','Submitted','Review'].includes(t.status));
  const onLeave = (state.leaves || []).filter(l=>ids.has(l.employeeId) && l.status==='Approved' && l.startDate.slice(0,10)<=today && l.endDate.slice(0,10)>=today).length;
  const quick = [
-  { label: 'Leave', href: '/leaves', asset: 'calendar' }, { label: 'Payslips', href: '/payroll', asset: 'file' },
+  { label: 'Leave', href: '/leaves', asset: 'calendar' }, { label: 'Payslips', href: '/payslips', asset: 'file' },
   { label: 'Log time', href: '/timesheets', asset: 'time' }, { label: 'People', href: '/hr?tab=directory', asset: 'people' },
  ];
  if (data.loading) return <div className="m2-page" aria-busy="true" aria-label="Loading your day"><div className="m2-skeleton" /><div className="m2-skeleton" /><div className="m2-skeleton" /></div>;

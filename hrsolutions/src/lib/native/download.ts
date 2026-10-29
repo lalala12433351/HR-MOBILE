@@ -51,7 +51,8 @@ export async function downloadBlob(
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
+  // Keep the blob alive until the browser has started reading the download.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
 /**

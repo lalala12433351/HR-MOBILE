@@ -25,7 +25,7 @@ export function PayrollPageShell({ step }: { step: 'review' | 'adjustments' | 'e
       return;
     }
     if (!isExecutiveOrAdmin(uiState.currentPersona)) {
-      router.replace('/dashboard');
+      router.replace('/payslips');
     }
   }, [isLoaded, uiState.isAuthenticated, uiState.currentPersona, router]);
 

@@ -1,3 +1,4 @@
+import { PayslipsPage } from '../src/components/modules/payroll/PayslipsPage';
 // Local-only visual fixture. API calls are replaced by inert responses by mobile-preview.cjs.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -51,6 +52,7 @@ function Preview(){const {state,updateState,mobileSidebarOpen,setMobileSidebarOp
  case'hr':content=<HRMSModule {...props} initialTab={(params.get('tab') as any)||'employees'}/>;break;
  case'settings':content=<SettingsWorkspace {...props}/>;break;
  case'reports':content=<ReportsWorkspace state={state}/>;break;
+ case'payslips':content=<PayslipsPage state={state}/>;break;
  case'payroll':case'adjustments':case'export':content=<PayrollRunModule {...props} step={screen==='payroll'?'review':screen as any}/>;break;
  case'billable':content=<PayrollBillableModule state={state}/>;break;
  case'announcements':content=<AnnouncementsModule {...props}/>;break;

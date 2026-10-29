@@ -27,7 +27,7 @@ export const UserActionCards: React.FC<{ showClock?: boolean }> = ({ showClock =
       id: 'payslips',
       title: 'Get a payslip',
       description: 'Download a recent slip',
-      path: '/payroll',
+      path: '/payslips',
       icon: FileText,
     },
   ];
