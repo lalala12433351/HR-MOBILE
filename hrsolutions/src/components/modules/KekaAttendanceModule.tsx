@@ -139,6 +139,7 @@ import {
 import {
   eachDateInclusive,
   ensurePendingWfhRegularization,
+  hasActiveWfhAuthorization,
   isWfhRegularization,
 } from '../../utils/wfhRegularization';
 import { useWfhRejectionWatch } from '@/hooks/useWfhRejectionWatch';
@@ -1950,6 +1951,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   const isCheckedOut = hasPunchedToday && !isCheckedIn;
   const todaySessions = sessionsFromRecord(myTodayRecord);
   const todaySessionCount = todaySessions.length;
+  const hasWfhAuthorization =
+    hasActiveWfhAuthorization(
+      state.regularizations || [],
+      todayIsoStr,
+      state.currentPersona?.id
+    ) || todaySessions.some((session) => isRemotePlace(session.locationName));
   const hasConfiguredOffice = useMemo(() => {
     const records = Array.isArray(state.customOptions?.officeRecords)
       ? state.customOptions.officeRecords
@@ -3564,7 +3571,14 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   // From map: go straight to camera if in geofence; otherwise show out-of-geofence warning
   const handleProceedFromMap = () => {
-    if (!isGeofenceOptional && selectedLocation !== 'wfh' && !hasConfiguredOfficeCoords) {
+    const remoteAuthorized = selectedLocation === 'wfh' || hasWfhAuthorization;
+    // Clock-out is allowed outside the geofence without filing another WFH request.
+    if (isCheckedIn) {
+      if (requireSelfieNow) handleOpenSelfieCamera(remoteAuthorized);
+      else void handleFinalConfirmPunch(remoteAuthorized, null);
+      return;
+    }
+    if (!isGeofenceOptional && !remoteAuthorized && !hasConfiguredOfficeCoords) {
       setPingToast(
         'Office location coordinates are not configured. Set latitude/longitude in Attendance Settings before punching at the office, or punch in as work from home.'
       );
@@ -3579,6 +3593,11 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       }
     };
     if (selectedLocation === 'wfh') {
+      proceed(true);
+      return;
+    }
+    // Already applied WFH for today — punch remote without asking again.
+    if (hasWfhAuthorization && !isInsideRadius) {
       proceed(true);
       return;
     }
@@ -5672,15 +5691,17 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 <div className="att-dialog-alert">
                   {isInstitution || isStudentMode || isStudentLogin
                     ? 'Campus attendance is blocked outside the campus boundary. You need to be on campus to punch.'
-                    : outOfRadiusAction === 'Warn'
-                      ? `You are outside ${activeOfficeDisplayName}. You can still punch there, or switch this login to work from home.`
-                      : `Office attendance is blocked outside the radius. Punch in as work from home and your manager will review it.`}
+                    : hasWfhAuthorization
+                      ? 'You already have a work-from-home request for today. You can punch in remotely without filing another one.'
+                      : outOfRadiusAction === 'Warn'
+                        ? `You are outside ${activeOfficeDisplayName}. You can still punch there, or switch this login to work from home.`
+                        : `Office attendance is blocked outside the radius. Punch in as work from home and your manager will review it.`}
                 </div>
                 <div className="dash-clock-dialog-actions" style={{ justifyContent: 'stretch' }}>
                   <button type="button" className="work-btn-secondary flex-1" onClick={() => setPunchStep('map')}>
                     Back to map
                   </button>
-                  {outOfRadiusAction === 'Warn' && (
+                  {outOfRadiusAction === 'Warn' && !hasWfhAuthorization && (
                     <button
                       type="button"
                       className="work-btn-secondary flex-1"
@@ -5703,7 +5724,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                       }}
                       disabled={isSaving}
                     >
-                      Punch in as WFH
+                      {hasWfhAuthorization ? 'Continue as WFH' : 'Punch in as WFH'}
                     </button>
                   )}
                 </div>

@@ -71,7 +71,7 @@ export async function createAnnouncement(req: Request, res: Response): Promise<v
         title, content, author_employee_id, target_department_id, priority, category, pin_to_header_banner, tags,
         attachment_file_name, attachment_file_url, attachment_file_size, attachment_mime_type
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)
        RETURNING *`,
       [
         title,

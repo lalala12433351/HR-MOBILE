@@ -52,14 +52,10 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
   onTriggerToast,
 }) => {
   const currentPersona = state.currentPersona;
+  // Must match backend requireRole on POST /audit-comms/announcements
   const isLeadershipOrHR =
     currentPersona.role === 'super_admin' ||
-    currentPersona.role === 'hr_manager' ||
-    currentPersona.role === 'project_manager' ||
-    currentPersona.designation.toLowerCase().includes('ceo') ||
-    currentPersona.designation.toLowerCase().includes('hr') ||
-    currentPersona.designation.toLowerCase().includes('vp') ||
-    currentPersona.designation.toLowerCase().includes('director');
+    currentPersona.role === 'hr_manager';
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -344,78 +340,77 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
           .filter(Boolean),
       });
 
-      if (!res.success && res.error) {
-        alert(`Failed to broadcast announcement to backend: ${res.error.message}`);
-        setIsSaving(false);
-        return;
-      }
+      const parsedTags = newTags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
 
-    const parsedTags = newTags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
+      const newAnnouncement: Announcement = {
+        id: res.data?.id || `ann_${Date.now()}`,
+        title: newTitle.trim(),
+        content: newContent.trim(),
+        category: newCategory,
+        priority: newPriority,
+        authorName: currentPersona.name,
+        authorRole: currentPersona.designation,
+        authorAvatar: currentPersona.avatar,
+        date: new Date().toISOString().split('T')[0],
+        pinned: newIsPinned,
+        department: newDepartment,
+        tags: parsedTags.length > 0 ? parsedTags : [newCategory],
+        readBy: [currentPersona.id],
+        reactions: [
+          { emoji: '👍', count: 1, users: [currentPersona.id] },
+        ],
+        comments: [],
+        attachments: (attachedFile || newAttachmentName.trim())
+          ? [
+              {
+                name: attachedFile?.name || newAttachmentName.trim(),
+                size: attachedFile?.size || '1.5 MB',
+                type: (attachedFile?.type || (newAttachmentName.endsWith('.pdf') ? 'pdf' : 'doc')) as any,
+              },
+            ]
+          : undefined,
+      };
 
-    const newAnnouncement: Announcement = {
-      id: res.data?.id || `ann_${Date.now()}`,
-      title: newTitle.trim(),
-      content: newContent.trim(),
-      category: newCategory,
-      priority: newPriority,
-      authorName: currentPersona.name,
-      authorRole: currentPersona.designation,
-      authorAvatar: currentPersona.avatar,
-      date: new Date().toISOString().split('T')[0],
-      pinned: newIsPinned,
-      department: newDepartment,
-      tags: parsedTags.length > 0 ? parsedTags : [newCategory],
-      readBy: [currentPersona.id],
-      reactions: [
-        { emoji: '👍', count: 1, users: [currentPersona.id] },
-      ],
-      comments: [],
-      attachments: (attachedFile || newAttachmentName.trim())
-        ? [
-            {
-              name: attachedFile?.name || newAttachmentName.trim(),
-              size: attachedFile?.size || '1.5 MB',
-              type: (attachedFile?.type || (newAttachmentName.endsWith('.pdf') ? 'pdf' : 'doc')) as any,
-            },
-          ]
-        : undefined,
-    };
+      onUpdateState((prev) => ({
+        ...prev,
+        announcements: [newAnnouncement, ...(prev.announcements || [])],
+        notifications: [
+          {
+            id: `notif_${Date.now()}`,
+            title: `New Announcement: ${newAnnouncement.title}`,
+            message: `${newAnnouncement.authorName} broadcasted: ${newAnnouncement.title}`,
+            timestamp: 'Just now',
+            category: 'System',
+            read: false,
+            linkModule: 'announcements',
+          },
+          ...prev.notifications,
+        ],
+      }));
 
-    onUpdateState((prev) => ({
-      ...prev,
-      announcements: [newAnnouncement, ...(prev.announcements || [])],
-      notifications: [
-        {
-          id: `notif_${Date.now()}`,
-          title: `New Announcement: ${newAnnouncement.title}`,
-          message: `${newAnnouncement.authorName} broadcasted: ${newAnnouncement.title}`,
-          timestamp: 'Just now',
-          category: 'System',
-          read: false,
-          linkModule: 'announcements',
-        },
-        ...prev.notifications,
-      ],
-    }));
-
-    setShowCreateDrawer(false);
-    setNewTitle('');
-    setNewContent('');
-    setNewTags('');
-    setNewAttachmentName('');
-    setAttachedFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    setNewIsPinned(false);
+      setShowCreateDrawer(false);
+      setNewTitle('');
+      setNewContent('');
+      setNewTags('');
+      setNewAttachmentName('');
+      setAttachedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setNewIsPinned(false);
 
       if (onTriggerToast) {
         onTriggerToast('Announcement broadcasted successfully!', 'success');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create announcement', err);
-      alert('Failed to broadcast announcement.');
+      const detail = err?.message || 'Unknown error';
+      if (onTriggerToast) {
+        onTriggerToast(`Failed to broadcast announcement: ${detail}`, 'warning');
+      } else {
+        alert(`Failed to broadcast announcement: ${detail}`);
+      }
     } finally {
       setIsSaving(false);
     }

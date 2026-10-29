@@ -49,6 +49,8 @@ interface WorkdayPunchDialogsProps {
   officeLng?: number | null;
   radiusMeters: number;
   isInstitution: boolean;
+  /** Pending or approved WFH for today — skip asking to request WFH again. */
+  hasWfhAuthorization?: boolean;
   saving: boolean;
   clockOutNotes: string;
   onClockOutNotesChange: (value: string) => void;
@@ -70,6 +72,7 @@ export function WorkdayPunchDialogs({
   officeLng,
   radiusMeters,
   isInstitution,
+  hasWfhAuthorization = false,
   saving,
   clockOutNotes,
   onClockOutNotesChange,
@@ -79,6 +82,7 @@ export function WorkdayPunchDialogs({
   const mobile = useMobileViewport();
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const isWfh = selectedLocation === 'wfh';
+  const remoteAuthorized = isWfh || hasWfhAuthorization;
   const hasOfficeCoords =
     Number.isFinite(Number(officeLat)) &&
     Number.isFinite(Number(officeLng)) &&
@@ -153,8 +157,10 @@ export function WorkdayPunchDialogs({
       } catch (error) {
         setIsLocating(false);
         setHasDeviceGps(false);
-        setGpsStatus(geofenceOptional || isWfh ? 'granted' : 'denied');
-        if (geofenceOptional || isWfh) setInsideRadius(true);
+        // Clock-out and existing WFH auth do not require GPS to continue.
+        const gpsOptional = geofenceOptional || isWfh || hasWfhAuthorization || isCheckedIn;
+        setGpsStatus(gpsOptional ? 'granted' : 'denied');
+        if (gpsOptional) setInsideRadius(isWfh || geofenceOptional);
         const message = error instanceof Error ? error.message : '';
         const denied = /denied|permission/i.test(message);
         setPunchAddress(
@@ -168,7 +174,7 @@ export function WorkdayPunchDialogs({
         );
       }
     })();
-  }, [geofenceOptional, hasOfficeCoords, isWfh, officeLat, officeLng, radiusMeters]);
+  }, [geofenceOptional, hasOfficeCoords, hasWfhAuthorization, isCheckedIn, isWfh, officeLat, officeLng, radiusMeters]);
 
   useEffect(() => {
     if (!open) {
@@ -290,9 +296,15 @@ export function WorkdayPunchDialogs({
   };
 
   const proceedFromMap = () => {
-    if (!isWfh && !geofenceOptional && !hasOfficeCoords) return;
-    if (isWfh || geofenceOptional || insideRadius || outOfRadiusAction === 'Allow') {
-      openSelfieOrFinish(isWfh);
+    // Clock-out is allowed outside the geofence without a new WFH request.
+    if (isCheckedIn) {
+      openSelfieOrFinish(remoteAuthorized);
+      return;
+    }
+    if (!remoteAuthorized && !geofenceOptional && !hasOfficeCoords) return;
+    if (remoteAuthorized || geofenceOptional || insideRadius || outOfRadiusAction === 'Allow') {
+      // Outside + existing WFH auth → punch remote. Inside office → office punch.
+      openSelfieOrFinish(remoteAuthorized && !insideRadius ? true : isWfh);
       return;
     }
     setStep('confirm_out_radius');
@@ -324,18 +336,19 @@ export function WorkdayPunchDialogs({
 
   if (!open) return null;
 
-  const officeCoordsMissing = !geofenceOptional && !isWfh && !hasOfficeCoords;
+  const officeCoordsMissing = !geofenceOptional && !remoteAuthorized && !isCheckedIn && !hasOfficeCoords;
   const gpsRequiredMissing =
     requireGps &&
     !geofenceOptional &&
-    !isWfh &&
+    !remoteAuthorized &&
+    !isCheckedIn &&
     hasOfficeCoords &&
     (!hasDeviceGps || gpsStatus !== 'granted');
   const isPunchDisabled =
     saving ||
     officeCoordsMissing ||
     gpsRequiredMissing ||
-    (isLocating && !isWfh && !geofenceOptional);
+    (isLocating && !remoteAuthorized && !isCheckedIn && !geofenceOptional);
 
   const timeLabel = formatClock(now);
   const dateLabel = formatDate(now);
@@ -476,15 +489,17 @@ export function WorkdayPunchDialogs({
             <div className="att-dialog-alert">
               {isInstitution
                 ? 'Campus attendance is blocked outside the campus boundary. You need to be on campus to punch.'
-                : outOfRadiusAction === 'Warn'
-                  ? `You are outside ${locationLabel}. You can still punch there, or switch this login to work from home.`
-                  : 'Office attendance is blocked outside the radius. Be at the workplace, or request WFH approval for your manager.'}
+                : hasWfhAuthorization
+                  ? 'You already have a work-from-home request for today. You can punch in remotely without filing another one.'
+                  : outOfRadiusAction === 'Warn'
+                    ? `You are outside ${locationLabel}. You can still punch there, or switch this login to work from home.`
+                    : 'Office attendance is blocked outside the radius. Be at the workplace, or request WFH approval for your manager.'}
             </div>
             <div className="dash-clock-dialog-actions" style={{ justifyContent: 'stretch' }}>
               <button type="button" className="work-btn-secondary flex-1" onClick={() => setStep('map')}>
                 Back to map
               </button>
-              {outOfRadiusAction === 'Warn' && !isInstitution && (
+              {outOfRadiusAction === 'Warn' && !isInstitution && !hasWfhAuthorization && (
                 <button
                   type="button"
                   className="work-btn-secondary flex-1"
@@ -501,7 +516,7 @@ export function WorkdayPunchDialogs({
                   onClick={() => openSelfieOrFinish(true)}
                   disabled={saving}
                 >
-                  Request WFH approval
+                  {hasWfhAuthorization ? 'Continue as WFH' : 'Request WFH approval'}
                 </button>
               )}
             </div>

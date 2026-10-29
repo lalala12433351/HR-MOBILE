@@ -26,7 +26,7 @@ export function useWfhRejectionWatch(
       try {
         const res = await api.attendance.getRegularizations({ employeeId });
         if (!res.success || !Array.isArray(res.data) || cancelled || handled) return;
-        const status = latestWfhRegularizationStatus(res.data, date);
+        const status = latestWfhRegularizationStatus(res.data, date, employeeId);
         // The first read is a baseline. A rejection that already existed must not
         // close a punch-in the employee just started.
         if (seen === null) {

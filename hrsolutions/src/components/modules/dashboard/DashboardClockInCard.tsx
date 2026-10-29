@@ -19,7 +19,11 @@ import {
   sessionsFromRecord,
 } from '@/utils/attendancePunches';
 import { resolveEmployeeShiftTiming } from '@/utils/employeeShift';
-import { ensurePendingWfhRegularization, isWfhRegularization } from '@/utils/wfhRegularization';
+import {
+  ensurePendingWfhRegularization,
+  hasActiveWfhAuthorization,
+  isWfhRegularization,
+} from '@/utils/wfhRegularization';
 import { useWfhRejectionWatch } from '@/hooks/useWfhRejectionWatch';
 import type { AttendanceRegularization } from '@/types';
 
@@ -142,6 +146,12 @@ export const DashboardClockInCard: React.FC = () => {
   const requireSelfie = isCheckedIn
     ? attSettings?.requireSelfieCheckOut === true
     : attSettings?.requireSelfieCheckIn === true;
+  const wfhAuthorized = useMemo(
+    () =>
+      hasActiveWfhAuthorization(state.regularizations || [], todayStr, persona?.id) ||
+      sessionsFromRecord(todayRecord).some((session) => isRemotePlace(session.locationName)),
+    [persona?.id, state.regularizations, todayRecord, todayStr]
+  );
 
   const applyLocalRecord = (record: AttendanceRecord) => {
     updateState((prev) => ({
@@ -466,6 +476,7 @@ export const DashboardClockInCard: React.FC = () => {
         officeLng={Number(selectedOffice?.longitude ?? state.organization?.officeLocation?.longitude ?? 0)}
         radiusMeters={radius}
         isInstitution={isInstitution}
+        hasWfhAuthorization={wfhAuthorized}
         saving={saving}
         clockOutNotes={clockOutNotes}
         onClockOutNotesChange={setClockOutNotes}

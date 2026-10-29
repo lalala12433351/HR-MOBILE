@@ -73,20 +73,50 @@ function to24HourTime(value: string): string {
   return `${String(hours).padStart(2, '0')}:${mins}`;
 }
 
+type WfhStatusRow = {
+  date?: string;
+  status?: string;
+  reason?: string;
+  remarks?: string;
+  created_at?: string;
+  createdAt?: string;
+  employeeId?: string;
+  employee_id?: string;
+};
+
 /** Newest WFH regularization status for a calendar day, or null when none exists. */
 export function latestWfhRegularizationStatus(
-  rows: Array<{ date?: string; status?: string; reason?: string; created_at?: string; createdAt?: string }>,
-  date: string
+  rows: WfhStatusRow[],
+  date: string,
+  employeeId?: string
 ): string | null {
   const day = String(date || '').slice(0, 10);
   const matches = rows.filter((row) => {
+    const rowEmp = row.employeeId || row.employee_id;
+    if (employeeId && rowEmp && rowEmp !== employeeId) return false;
     const rowDate = String(row.date || '').slice(0, 10);
-    return rowDate === day && isWfhRegularizationText(row.reason);
+    return (
+      rowDate === day &&
+      (isWfhRegularization(row) || isWfhRegularizationText(row.reason) || isWfhRegularizationText(row.remarks))
+    );
   });
   matches.sort((a, b) =>
     String(b.created_at || b.createdAt || '').localeCompare(String(a.created_at || a.createdAt || ''))
   );
   return matches[0] ? String(matches[0].status || '').toLowerCase() : null;
+}
+
+/**
+ * True when the employee already has a pending or approved WFH request for the day.
+ * Used so punch flows do not ask them to request WFH again.
+ */
+export function hasActiveWfhAuthorization(
+  rows: WfhStatusRow[],
+  date: string,
+  employeeId?: string
+): boolean {
+  const status = latestWfhRegularizationStatus(rows, date, employeeId);
+  return status === 'pending' || status === 'approved';
 }
 
 /**
@@ -113,21 +143,15 @@ export async function ensurePendingWfhRegularization(input: {
   try {
     const listed = await api.attendance.getRegularizations({ employeeId: input.employeeId });
     if (listed.success && Array.isArray(listed.data)) {
-      status = latestWfhRegularizationStatus(listed.data, day);
+      status = latestWfhRegularizationStatus(listed.data, day, input.employeeId);
     }
   } catch {
     status = null;
   }
   if (!status) {
-    const mine = input.existing.filter(
-      (reg) =>
-        reg.employeeId === input.employeeId &&
-        String(reg.date).slice(0, 10) === day &&
-        isWfhRegularization(reg)
-    );
-    if (mine.some((reg) => reg.status === 'Pending')) status = 'pending';
-    else if (mine.some((reg) => reg.status === 'Approved')) status = 'approved';
+    status = latestWfhRegularizationStatus(input.existing, day, input.employeeId);
   }
+  // Re-use an existing pending/approved request — never file a second WFH for the same day.
   if (status === 'pending') return { kind: 'pending' };
   if (status === 'approved') return { kind: 'approved' };
 
