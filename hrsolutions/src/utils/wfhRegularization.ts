@@ -7,7 +7,7 @@ export function isWfhRegularizationText(value?: string | null): boolean {
 }
 
 export function isWfhRegularization(
-  reg: Pick<AttendanceRegularization, 'reason' | 'remarks'> | null | undefined
+  reg: { reason?: string | null; remarks?: string | null } | null | undefined
 ): boolean {
   if (!reg) return false;
   return isWfhRegularizationText(reg.reason) || isWfhRegularizationText(reg.remarks);
