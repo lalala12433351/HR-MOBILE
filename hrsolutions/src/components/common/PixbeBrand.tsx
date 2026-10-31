@@ -25,7 +25,7 @@ export const PixbePixelMark: React.FC<{ className?: string }> = ({ className = '
 export const PixbeWordmark: React.FC<PixbeWordmarkProps> = ({
   className = '',
   markClassName = 'h-5 w-5',
-  label = 'Pixbe',
+  label = 'Pixbe HR',
 }) => (
   <span className={`inline-flex items-center gap-2 text-current ${className}`}>
     <KiteLogoMark className={markClassName} />
@@ -33,9 +33,9 @@ export const PixbeWordmark: React.FC<PixbeWordmarkProps> = ({
   </span>
 );
 
-/** Exact 28px pixel mark and lowercase lockup used by the Figma onboarding screens. */
+/** Exact 28px pixel mark and product lockup used by the Figma onboarding screens. */
 export const PixbeDesignWordmark: React.FC<{ className?: string; markClassName?: string }> = ({ className = '' }) => (
-  <span className={`figma-wordmark ${className}`} aria-label="Pixbe"><PixbePixelMark/><span>pixbe</span></span>
+  <span className={`figma-wordmark ${className}`} aria-label="Pixbe HR"><PixbePixelMark/><span>Pixbe HR</span></span>
 );
 
 function isCustomOrgLogo(src?: string | null): src is string {

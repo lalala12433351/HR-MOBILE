@@ -6,7 +6,7 @@
 .figma-auth *,.figma-setup *,.figma-employee * { box-sizing:border-box; }
 .figma-auth :is(button,input,select,textarea),.figma-setup :is(button,input,select,textarea),.figma-employee :is(button,input,select,textarea) { font-family:inherit;letter-spacing:0; }
 .figma-auth :is(button,input,select):focus-visible,.figma-setup :is(button,input,select):focus-visible { outline:2px solid #d8e8f2;outline-offset:2px; }
-.figma-wordmark { display:inline-flex;align-items:center;gap:10px;flex-shrink:0;width:122px;height:40px;font-family:'Pixbe Jakarta','Plus Jakarta Sans',sans-serif;color:#172234;white-space:nowrap; }
+.figma-wordmark { display:inline-flex;align-items:center;gap:10px;flex-shrink:0;width:auto;min-width:122px;height:40px;font-family:'Pixbe Jakarta','Plus Jakarta Sans',sans-serif;color:#172234;white-space:nowrap; }
 .figma-wordmark>span:last-child { font-size:32px;font-weight:700;line-height:40px;letter-spacing:-1.2px; }
 .figma-wordmark .pixbe-pixel { display:flex;align-items:flex-start;gap:4px;width:28px;height:28px;flex-shrink:0;color:#17324e; }
 .figma-wordmark .pixbe-pixel__stem { width:8px;height:28px;border-radius:3px;background:#17324e; }

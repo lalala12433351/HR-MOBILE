@@ -50,7 +50,7 @@ export const AuthSplitLayout: React.FC<{ children: React.ReactNode; maxWidth?: s
   <div className={`figma-auth ${styles.shell}`} data-screen={contentKey}>
     <header className="m2-auth-header">
       {showBack && <button type="button" className={styles.back} aria-label="Back to sign in" onClick={() => router.push('/login')}><ArrowLeft size={20} strokeWidth={1.8} aria-hidden="true" /></button>}
-      {compactHeader ? <span className="m2-auth-wordmark">pixbe</span> : <PixbeDesignWordmark className={styles.brand} />}
+      {compactHeader ? <span className="m2-auth-wordmark">Pixbe HR</span> : <PixbeDesignWordmark className={styles.brand} />}
     </header>
     <PixbeDesignWordmark/>
     <main className="fa-panel">{children}</main>

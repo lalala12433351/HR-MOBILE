@@ -8,9 +8,9 @@ import './dark-theme.css';
 import { AppShell } from '@/components/layout/AppShell';
 
 export const metadata: Metadata = {
-  title: 'Pixbe | Modern Workforce & Human Resource Management',
+  title: 'Pixbe HR | Modern Workforce & Human Resource Management',
   description:
-    'Manage your HR tasks smarter, faster, and easier — all in one place with Pixbe.',
+    'Manage your HR tasks smarter, faster, and easier — all in one place with Pixbe HR.',
 };
 
 export const viewport: Viewport = {

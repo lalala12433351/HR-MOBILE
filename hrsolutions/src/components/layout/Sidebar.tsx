@@ -135,7 +135,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           title={isStudentRole ? 'Student attendance portal' : 'Workspace home'}
         >
           <PixbePixelMark />
-          <strong>pixbe</strong>
+          <strong>Pixbe HR</strong>
         </Link>
       </div>
 

@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>HR Solutions</string>
+        <string>Pixbe HR</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -67,21 +67,21 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>HR Solutions needs camera access for attendance selfies and profile photos.</string>
+	<string>Pixbe HR needs camera access for attendance selfies and profile photos.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>HR Solutions needs your location to verify you are within the office geofence when punching attendance and while your shift is open.</string>
+	<string>Pixbe HR needs your location to verify you are within the office geofence when punching attendance and while your shift is open.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>HR Solutions uses continuous location while you are clocked in so it can clock you out and notify you if you leave the office for 15 minutes.</string>
+	<string>Pixbe HR uses continuous location while you are clocked in so it can clock you out and notify you if you leave the office for 15 minutes.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>HR Solutions uses continuous location while you are clocked in so it can clock you out and notify you if you leave the office for 15 minutes.</string>
+	<string>Pixbe HR uses continuous location while you are clocked in so it can clock you out and notify you if you leave the office for 15 minutes.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
 		<string>remote-notification</string>
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>HR Solutions needs photo library access so you can upload profile photos and documents.</string>
+	<string>Pixbe HR needs photo library access so you can upload profile photos and documents.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>HR Solutions may save exported reports and documents to your photo library when you choose to share them.</string>
+	<string>Pixbe HR may save exported reports and documents to your photo library when you choose to share them.</string>
 </dict>
 </plist>

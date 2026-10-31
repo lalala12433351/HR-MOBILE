@@ -56,7 +56,7 @@ export default function HomePage() {
         {/* Title */}
         <div className="space-y-1">
           <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
-            HR Solutions
+            Pixbe HR
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
             Enterprise Workspace

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">HR Solutions</string>
-    <string name="title_activity_main">HR Solutions</string>
+    <string name="app_name">Pixbe HR</string>
+    <string name="title_activity_main">Pixbe HR</string>
     <string name="package_name">in.pixbe.hrsolutions</string>
     <string name="custom_url_scheme">in.pixbe.hrsolutions</string>
 </resources>

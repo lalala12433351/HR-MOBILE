@@ -28,7 +28,7 @@ export const AttendanceReportsModal: React.FC<AttendanceReportsModalProps> = ({
   const [includeSummaryKPIs, setIncludeSummaryKPIs] = useState<boolean>(true);
   const [includeSignatureBlock, setIncludeSignatureBlock] = useState<boolean>(true);
 
-  const orgName = state.organization?.name || 'HR Solutions Inc.';
+  const orgName = state.organization?.name || 'Pixbe HR';
   const orgAddress = state.organization?.officeLocation?.address || 'Bangalore, Karnataka, India';
   const employees = state.employees || [];
 

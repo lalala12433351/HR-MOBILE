@@ -9,7 +9,7 @@ if (frontendUrl && !['http:', 'https:'].includes(frontendUrl.protocol)) {
 
 const config: CapacitorConfig = {
   appId: 'in.pixbe.hrsolutions',
-  appName: 'HR Solutions',
+  appName: 'Pixbe HR',
   webDir: 'out',
   ...(serverUrl ? {
     server: {

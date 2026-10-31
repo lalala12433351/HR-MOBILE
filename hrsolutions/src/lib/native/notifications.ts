@@ -95,7 +95,7 @@ async function ensureNativeChannel(): Promise<void> {
   try {
     await LocalNotifications.createChannel({
       id: CHANNEL_ID,
-      name: 'HR Solutions alerts',
+      name: 'Pixbe HR alerts',
       description: 'Leave, attendance, tasks, chat, and system alerts',
       importance: 5,
       visibility: 1,
@@ -248,10 +248,10 @@ export async function showAppNotification(
 
   try {
     if (isNativePlatform()) {
-      await showNative({ ...payload, title: title || 'HR Solutions', body: body || title }, dedupeKey);
+      await showNative({ ...payload, title: title || 'Pixbe HR', body: body || title }, dedupeKey);
       return;
     }
-    await showWeb({ ...payload, title: title || 'HR Solutions', body: body || title }, options.force === true);
+    await showWeb({ ...payload, title: title || 'Pixbe HR', body: body || title }, options.force === true);
   } catch (err) {
     console.debug('[AppNotifications] failed to show', err);
   }
