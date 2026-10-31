@@ -61,15 +61,15 @@ export async function notifyEmployees(
   const priority = opts.priority || 'medium';
 
   for (const id of ids) {
-    await writeNotice(query, id, title, message, category, linkUrl, priority, opts.tenantKey);
+    const noticeId = await writeNotice(query, id, title, message, category, linkUrl, priority, opts.tenantKey);
+    await sendPushToEmployees(query, [id], {
+      title,
+      body: message.slice(0, 180),
+      url: linkUrl,
+      tag: opts.tag || `attendance-${id}-${title}`,
+      notificationId: noticeId || undefined,
+    });
   }
-
-  await sendPushToEmployees(query, ids, {
-    title,
-    body: message.slice(0, 180),
-    url: linkUrl,
-    tag: opts.tag || `attendance-${ids[0]}-${title}`,
-  });
 }
 
 export async function resolveLeaveApproverIds(query: TenantQuery, employeeId: string): Promise<string[]> {

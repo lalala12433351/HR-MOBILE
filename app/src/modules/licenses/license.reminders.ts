@@ -68,17 +68,27 @@ export async function maybeNotifyExpiry(input: {
         WHERE role = 'super_admin'
           AND COALESCE(employment_status, 'active') NOT IN ('terminated', 'exited')`
     );
-    const notified: string[] = [];
     for (const admin of admins.rows) {
+      let noticeId = '';
       try {
-        await query(
+        const inserted = await query(
           `INSERT INTO notifications (recipient_employee_id, title, message, category, priority, link_url, is_read)
-           VALUES ($1, $2, $3, 'System', $4, $5, false)`,
+           VALUES ($1, $2, $3, 'System', $4, $5, false)
+           RETURNING id`,
           [admin.id, title, message, expired ? 'high' : 'medium', SETTINGS_PATH]
         );
-        notified.push(String(admin.id));
+        noticeId = inserted.rows[0]?.id ? String(inserted.rows[0].id) : '';
       } catch (err) {
         log.warn('Could not write license expiry notification', err);
+      }
+      if (noticeId || admin.id) {
+        await sendPushToEmployees(query, [String(admin.id)], {
+          title,
+          body: message.slice(0, 180),
+          url: SETTINGS_PATH,
+          tag: `license-${input.tenantId}-${bucket}`,
+          notificationId: noticeId || undefined,
+        });
       }
       const email = String(admin.email || '').trim();
       if (!email) continue;
@@ -98,12 +108,6 @@ export async function maybeNotifyExpiry(input: {
         log.warn(`Could not email license expiry notice to ${email}`, err);
       }
     }
-    await sendPushToEmployees(query, notified, {
-      title,
-      body: message.slice(0, 180),
-      url: SETTINGS_PATH,
-      tag: `license-${input.tenantId}-${bucket}`,
-    });
   });
 
   await pool.query(

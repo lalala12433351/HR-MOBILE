@@ -6,7 +6,6 @@ import { useApp } from '@/context/AppContext';
 import { api, ApiClientError } from '@/services/apiClient';
 import { connectChatSocket, disconnectChatSocket, getChatSocket, refreshChatSocketAuth } from '@/services/chatSocket';
 import { showRealtimeToast } from '@/lib/sonnerToast';
-import { showAppNotification } from '@/lib/native';
 import type { NotificationItem } from '@/types';
 import type {
   ChatAttachment,
@@ -386,6 +385,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       const title = known ? conversationTitle(known, meRef.current?.employeeId) : 'New message';
       const toastTitle = known?.type === 'direct' ? title : `${message.senderName || 'Someone'} in ${title}`;
       const preview = previewOf(message).slice(0, 140);
+      // In-app toast only — OS tray comes from inbox bridge (foreground) or FCM/web-push (background).
       showRealtimeToast(
         {
           id: `chat-${message.id}`,
@@ -398,12 +398,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         },
         () => router.push(`/chat?c=${encodeURIComponent(id)}`)
       );
-      void showAppNotification({
-        id: `chat:${message.id}`,
-        title: toastTitle,
-        body: preview,
-        linkUrl: `/chat?c=${encodeURIComponent(id)}`,
-      });
     };
 
     const onMessageChanged = (message: ChatMessage) => {

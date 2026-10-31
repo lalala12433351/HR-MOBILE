@@ -102,6 +102,7 @@ async function writeInAppNotice(
     body: message.slice(0, 180),
     url: linkUrl,
     tag: tag || `task-${recipientId}-${title}`,
+    notificationId: noticeId || undefined,
   });
 }
 

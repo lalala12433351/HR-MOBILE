@@ -270,6 +270,17 @@ export function seedSeenNotificationIds(ids: string[]): void {
   persistSeenIds(seen);
 }
 
+/** Mark ids as already delivered (e.g. remote push showed the tray). */
+export function markNotificationIdsSeen(ids: Array<string | null | undefined>): void {
+  seedSeenNotificationIds(ids.filter((id): id is string => Boolean(id)));
+}
+
+/** True when the web page / Capacitor WebView is in the foreground. */
+export function isAppNotificationSurfaceActive(): boolean {
+  if (!canUseDom()) return false;
+  return document.visibilityState === 'visible';
+}
+
 /**
  * Bring app to foreground helpers — call once from native shell bootstrap.
  */

@@ -1049,6 +1049,8 @@ export interface RealtimeToast {
   taskId?: string;
   projectId?: string;
   unread?: boolean;
+  /** When true, skip the OS/browser tray (inbox bridge or remote push already covers it). */
+  suppressOsNotification?: boolean;
 }
 
 export interface FeaturePermissions {

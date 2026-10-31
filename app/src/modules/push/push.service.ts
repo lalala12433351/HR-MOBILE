@@ -9,6 +9,8 @@ export type PushPayload = {
   body: string;
   url: string;
   tag: string;
+  /** Inbox notification UUID — clients mark this seen so local bridge does not double-fire. */
+  notificationId?: string;
 };
 
 let webConfigured = false;
@@ -198,6 +200,7 @@ async function sendNativePush(q: Query, ids: string[], payload: PushPayload): Pr
               body: payload.body,
               url: payload.url || '/notifications',
               tag: payload.tag || 'pixbe-notice',
+              ...(payload.notificationId ? { notificationId: payload.notificationId } : {}),
             },
             android: {
               priority: 'high',

@@ -12,7 +12,6 @@ import {
   getCurrentPosition,
   isNativePlatform,
   requestAppNotificationPermission,
-  showAppNotification,
   watchPosition,
   type PositionWatchHandle,
 } from '@/lib/native';
@@ -82,19 +81,13 @@ export function AttendanceSessionGuard() {
       if (typeof window !== 'undefined' && window.sessionStorage.getItem(signOutKey(signOut.at))) return;
       window.sessionStorage.setItem(signOutKey(signOut.at), '1');
       applyCheckout(signOut.workDate, signOut.checkOutLabel);
+      // Server notify + inbox bridge / FCM own the OS tray — in-app toast only here.
       triggerToast({
         title: 'Punched out',
         message: 'You stayed outside the office location, so this shift was punched out.',
         type: 'info',
+        suppressOsNotification: true,
       });
-      void showAppNotification(
-        {
-          id: signOutKey(signOut.at),
-          title: 'Punched out',
-          body: 'You stayed outside the office location, so this shift was punched out.',
-        },
-        { force: true }
-      );
       void persistClockOutTaskSessions(
         tasksRef.current,
         sheetsRef.current,
@@ -116,20 +109,13 @@ export function AttendanceSessionGuard() {
             outsideToast.current = res.data.outsideSince;
             const warning =
               'You left the office geofence. You will be clocked out within 15 minutes.';
+            // Server notify + inbox bridge / FCM own the OS tray — in-app toast only here.
             triggerToast({
               title: 'Outside the office',
               message: warning,
               type: 'info',
+              suppressOsNotification: true,
             });
-            void showAppNotification(
-              {
-                id: `outside:${res.data.outsideSince}`,
-                title: 'Outside the office',
-                body: warning,
-                linkUrl: '/attendance',
-              },
-              { force: true }
-            );
             if (isNativePlatform() && res.data.signsOutAt) {
               const at = new Date(res.data.signsOutAt);
               if (!Number.isNaN(at.getTime()) && at.getTime() > Date.now() + 5000) {

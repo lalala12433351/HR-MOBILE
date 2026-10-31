@@ -6,6 +6,7 @@ import { api } from '@/services/apiClient';
 import { isNativePlatform } from './platform';
 import {
   getAppNotificationsEnabled,
+  markNotificationIdsSeen,
   requestAppNotificationPermission,
   setAppNotificationsEnabled,
 } from './notifications';
@@ -34,6 +35,18 @@ function readStoredToken(): string | null {
   } catch {
     return null;
   }
+}
+
+/** Whether this device already registered an FCM/APNs token with the backend. */
+export function hasNativePushToken(): boolean {
+  return Boolean(readStoredToken());
+}
+
+function markPushPayloadSeen(data: Record<string, unknown>): void {
+  markNotificationIdsSeen([
+    typeof data.notificationId === 'string' ? data.notificationId : null,
+    typeof data.tag === 'string' ? data.tag : null,
+  ]);
 }
 
 function storeToken(token: string, platform: 'android' | 'ios'): void {
@@ -100,12 +113,15 @@ async function ensureListeners(): Promise<void> {
 
   await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
     const data = (event.notification?.data || {}) as Record<string, unknown>;
+    markPushPayloadSeen(data);
     const url = (data.url || data.linkUrl || data.path) as string | undefined;
     openDeepLink(url);
   });
 
   await PushNotifications.addListener('pushNotificationReceived', () => {
-    // Foreground delivery is handled by the inbox bridge / local notifications.
+    // Foreground only: the OS does not show a tray item here. Inbox bridge
+    // schedules the single local alert. Background duplicates are avoided by
+    // skipping the bridge while remote push owns delivery.
   });
 }
 

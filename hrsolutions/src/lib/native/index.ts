@@ -29,7 +29,9 @@ export {
   requestAppNotificationPermission,
   showAppNotification,
   seedSeenNotificationIds,
+  markNotificationIdsSeen,
+  isAppNotificationSurfaceActive,
   initAppNotifications,
 } from './notifications';
 export type { AppNotificationPayload, AppNotificationPermission } from './notifications';
-export { initNativePush, registerNativePush, unregisterNativePush } from './push';
+export { initNativePush, registerNativePush, unregisterNativePush, hasNativePushToken } from './push';

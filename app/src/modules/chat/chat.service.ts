@@ -1198,8 +1198,9 @@ async function notify(
     [ids, title, message, category, priority, linkUrl]
   );
   for (const row of inserted.rows) {
+    const noticeId = String(row.id);
     emitUserNotification(ctx.tenantKey, String(row.recipient_employee_id), {
-      id: String(row.id),
+      id: noticeId,
       title: row.title,
       message: row.message,
       category: row.category || category,
@@ -1207,13 +1208,14 @@ async function notify(
       linkUrl: row.link_url || linkUrl,
       createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
     });
+    await sendPushToEmployees(ctx.q, [String(row.recipient_employee_id)], {
+      title,
+      body: message.slice(0, 180),
+      url: linkUrl,
+      tag: tag || `notice-${linkUrl}-${title}`,
+      notificationId: noticeId,
+    });
   }
-  await sendPushToEmployees(ctx.q, ids, {
-    title,
-    body: message.slice(0, 180),
-    url: linkUrl,
-    tag: tag || `notice-${linkUrl}-${title}`,
-  });
 }
 
 const STATUS_LABELS: Record<TicketStatus, string> = {

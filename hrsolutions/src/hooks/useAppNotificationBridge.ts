@@ -2,7 +2,14 @@
 
 import { useEffect, useRef } from 'react';
 import type { NotificationItem } from '@/types';
-import { seedSeenNotificationIds, showAppNotification } from '@/lib/native';
+import {
+  hasNativePushToken,
+  isAppNotificationSurfaceActive,
+  isNativePlatform,
+  seedSeenNotificationIds,
+  showAppNotification,
+} from '@/lib/native';
+import { pushPreferenceEnabled } from '@/services/desktopPush';
 
 function linkForNotification(item: NotificationItem): string {
   if (item.linkUrl && item.linkUrl.startsWith('/')) return item.linkUrl;
@@ -13,9 +20,16 @@ function linkForNotification(item: NotificationItem): string {
   return '/notifications';
 }
 
+/** Remote push already owns the OS tray while the app/tab is backgrounded. */
+function remotePushOwnsBackground(): boolean {
+  if (isNativePlatform()) return hasNativePushToken();
+  return pushPreferenceEnabled();
+}
+
 /**
  * Watches the inbox and fires OS / browser notifications for newly arrived unread items.
  * Seeds seen ids after the first backend hydrate so historical rows do not spam the tray.
+ * Skips local scheduling when backgrounded and FCM/web-push already delivered the alert.
  */
 export function useAppNotificationBridge(
   notifications: NotificationItem[] | undefined,
@@ -36,6 +50,14 @@ export function useAppNotificationBridge(
     if (!seededRef.current) {
       seedSeenNotificationIds(list.map((n) => n.id).filter(Boolean));
       seededRef.current = true;
+      return;
+    }
+
+    const unreadIds = list.filter((n) => n?.id && !n.read).map((n) => n.id);
+
+    // Background + remote push: mark seen without scheduling a second tray item.
+    if (!isAppNotificationSurfaceActive() && remotePushOwnsBackground()) {
+      seedSeenNotificationIds(unreadIds);
       return;
     }
 

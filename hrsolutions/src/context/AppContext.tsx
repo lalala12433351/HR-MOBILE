@@ -309,14 +309,17 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
 
   const triggerToast = useCallback(
     (toastPayload: Omit<RealtimeToast, 'id' | 'timestamp'>) => {
+      const { suppressOsNotification, ...rest } = toastPayload;
       const newToast: RealtimeToast = {
-        ...toastPayload,
+        ...rest,
         id: `toast_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
       setToasts((prev) => [newToast, ...prev.slice(0, 3)]);
       showRealtimeToast(newToast, (item) => navigateToToast(item));
+
+      if (suppressOsNotification) return;
 
       const linkModule = newToast.linkModule
         ? `/${newToast.linkModule.toLowerCase()}${newToast.linkTab ? `?tab=${encodeURIComponent(newToast.linkTab)}` : ''}`

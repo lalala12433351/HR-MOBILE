@@ -193,8 +193,20 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     void syncDesktopPush();
     if (!('serviceWorker' in navigator)) return;
     const onMessage = (event: MessageEvent) => {
-      const data = event.data as { type?: string; url?: string } | null;
-      if (!data || data.type !== 'pixbe-push-open' || typeof data.url !== 'string') return;
+      const data = event.data as {
+        type?: string;
+        url?: string;
+        notificationId?: string | null;
+        tag?: string | null;
+      } | null;
+      if (!data?.type) return;
+      if (data.type === 'pixbe-push-seen') {
+        void import('@/lib/native').then(({ markNotificationIdsSeen }) => {
+          markNotificationIdsSeen([data.notificationId, data.tag]);
+        });
+        return;
+      }
+      if (data.type !== 'pixbe-push-open' || typeof data.url !== 'string') return;
       try {
         const url = new URL(data.url, window.location.origin);
         if (url.origin !== window.location.origin) return;
