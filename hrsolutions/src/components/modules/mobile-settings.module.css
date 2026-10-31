@@ -30,7 +30,7 @@
 }
 @media(prefers-reduced-motion:reduce) { .appearance button > span { transition:none; } }
 
-.desktopTheme { min-height:36px; padding:8px 12px; border:1px solid var(--border-strong); border-radius:8px; background:var(--bg-surface); color:var(--text-primary); font-size:12px; cursor:pointer; }
+.desktopTheme { display:inline-flex; align-items:center; min-height:36px; padding:8px 12px; border:1px solid var(--border-strong); border-radius:8px; background:var(--bg-surface); color:var(--text-secondary); font-size:12px; }
 @media(max-width:767px) { .desktopTheme { display:none; } }
 
 @media(max-width:767px) {

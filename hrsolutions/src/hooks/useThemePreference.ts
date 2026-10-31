@@ -1,35 +1,59 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { applyNativeStatusBarTheme } from '@/lib/native/shell';
 
 type ThemeMode = 'light' | 'dark';
 const storageKey = 'pixbe-theme';
 
-/** Appearance belongs to this device, independently of workspace settings sync. */
-export function useThemePreference(legacyMode?: ThemeMode) {
+function systemTheme(): ThemeMode {
+  if (typeof window === 'undefined') return 'light';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function applyTheme(mode: ThemeMode) {
+  const root = document.documentElement;
+  root.dataset.theme = mode;
+  root.classList.toggle('dark', mode === 'dark');
+  root.classList.toggle('light', mode === 'light');
+  root.style.colorScheme = mode;
+  const color = mode === 'dark' ? '#141a22' : '#f3f5f7';
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+  void applyNativeStatusBarTheme(mode);
+}
+
+/** Appearance always follows the device system setting (no in-app override). */
+export function useThemePreference(_legacyMode?: ThemeMode) {
   const [preference, setPreference] = useState<ThemeMode | null>(null);
-  const mode = preference ?? legacyMode ?? 'light';
+  const mode = preference ?? 'light';
+
   useEffect(() => {
-    let saved: string | null = null;
-    try { saved = localStorage.getItem(storageKey); } catch { /* Storage can be unavailable. */ }
-    setPreference(saved === 'dark' || saved === 'light' ? saved : legacyMode ?? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-    const sync = (event: StorageEvent) => {
-      if (event.key === storageKey && (event.newValue === 'dark' || event.newValue === 'light')) setPreference(event.newValue);
-    };
-    window.addEventListener('storage', sync);
-    return () => window.removeEventListener('storage', sync);
-  }, [legacyMode]);
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {
+      /* Storage can be unavailable. */
+    }
+
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const sync = () => setPreference(systemTheme());
+    sync();
+
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', sync);
+      return () => media.removeEventListener('change', sync);
+    }
+    media.addListener(sync);
+    return () => media.removeListener(sync);
+  }, []);
+
   useEffect(() => {
     if (preference === null) return;
-    const root = document.documentElement;
-    root.dataset.theme = preference;
-    root.classList.toggle('dark', preference === 'dark');
-    root.classList.toggle('light', preference === 'light');
-    root.style.colorScheme = preference;
-    const color = preference === 'dark' ? '#141a22' : '#f3f5f7';
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
-    try { localStorage.setItem(storageKey, preference); } catch { /* Theme still works in memory. */ }
+    applyTheme(preference);
   }, [preference]);
-  const toggleThemeMode = useCallback(() => setPreference(current => (current ?? mode) === 'dark' ? 'light' : 'dark'), [mode]);
+
+  const toggleThemeMode = useCallback(() => {
+    /* Theme is locked to the system preference. */
+  }, []);
+
   return { themeMode: mode, toggleThemeMode };
 }

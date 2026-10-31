@@ -10,6 +10,20 @@ import { initNativePush } from './push';
 
 let initialized = false;
 
+type ThemeMode = 'light' | 'dark';
+
+/** Match status-bar chrome to the active app theme (follows system dark/light). */
+export async function applyNativeStatusBarTheme(mode: ThemeMode): Promise<void> {
+  if (!isNativePlatform()) return;
+  try {
+    // Style.Dark = dark icons (light bg); Style.Light = light icons (dark bg)
+    await StatusBar.setStyle({ style: mode === 'dark' ? Style.Light : Style.Dark });
+    await StatusBar.setBackgroundColor({ color: mode === 'dark' ? '#141a22' : '#f3f5f7' });
+  } catch {
+    // StatusBar unavailable on some platforms/simulators
+  }
+}
+
 /**
  * One-time native shell bootstrap: status bar, splash, hardware back button, notifications.
  */
@@ -21,12 +35,10 @@ export async function initNativeShell(): Promise<() => void> {
 
   const unsubscribers: Array<() => void> = [];
 
-  try {
-    await StatusBar.setStyle({ style: Style.Dark });
-    await StatusBar.setBackgroundColor({ color: '#f8fafc' });
-  } catch {
-    // StatusBar unavailable on some platforms/simulators
-  }
+  const systemDark =
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches;
+  await applyNativeStatusBarTheme(systemDark ? 'dark' : 'light');
 
   try {
     await SplashScreen.hide();

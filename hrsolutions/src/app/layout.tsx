@@ -14,11 +14,17 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#f3f5f7',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#f3f5f7' },
+    { media: '(prefers-color-scheme: dark)', color: '#141a22' },
+  ],
+  colorScheme: 'light dark',
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
 };
+
+const themeBootScript = `(function(){try{var m=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';var r=document.documentElement;r.dataset.theme=m;r.classList.add(m);r.classList.remove(m==='dark'?'light':'dark');r.style.colorScheme=m;}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -30,8 +36,10 @@ export default function RootLayout({
       lang="en-GB"
       className="font-sans"
       data-theme="light"
+      suppressHydrationWarning
     >
       <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link

@@ -21,7 +21,7 @@ export {
 } from './camera';
 export { openExternalUrl } from './browser';
 export { downloadBlob, downloadTextFile } from './download';
-export { initNativeShell } from './shell';
+export { initNativeShell, applyNativeStatusBarTheme } from './shell';
 export {
   getAppNotificationsEnabled,
   setAppNotificationsEnabled,
