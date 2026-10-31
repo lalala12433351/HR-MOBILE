@@ -32,3 +32,4 @@ export {
   initAppNotifications,
 } from './notifications';
 export type { AppNotificationPayload, AppNotificationPermission } from './notifications';
+export { initNativePush, registerNativePush, unregisterNativePush } from './push';

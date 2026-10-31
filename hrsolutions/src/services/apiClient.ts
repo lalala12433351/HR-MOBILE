@@ -1141,6 +1141,7 @@ class ApiClient {
         signsOutAt?: string | null;
         workDate?: string;
         checkOutLabel?: string;
+        firstOutside?: boolean;
       }>('/attendance/presence', { method: 'POST', body: JSON.stringify(payload) }),
 
     submitMissedCheckout: (payload: { workDate: string; time: string }) =>
@@ -1862,13 +1863,22 @@ class ApiClient {
 
   public push = {
     vapidPublicKey: () =>
-      this.request<{ publicKey: string | null; enabled: boolean }>('/push/vapid-public-key', { method: 'GET' }),
+      this.request<{ publicKey: string | null; enabled: boolean; nativeEnabled?: boolean }>(
+        '/push/vapid-public-key',
+        { method: 'GET' }
+      ),
 
     saveSubscription: (payload: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
       this.request('/push/subscription', { method: 'PUT', body: JSON.stringify(payload) }),
 
     deleteSubscription: (endpoint: string) =>
       this.request('/push/subscription', { method: 'DELETE', body: JSON.stringify({ endpoint }) }),
+
+    saveDevice: (payload: { token: string; platform: 'android' | 'ios' }) =>
+      this.request('/push/device', { method: 'PUT', body: JSON.stringify(payload) }),
+
+    deleteDevice: (token: string) =>
+      this.request('/push/device', { method: 'DELETE', body: JSON.stringify({ token }) }),
   };
 }
 

@@ -154,6 +154,13 @@
   --list-radius: 8px;
   --panel-radius: 8px;
   --card-radius: 12px;
+  --accent-indigo-foreground: #b7c0f0;
+  --accent-indigo-surface: #242a44;
+  --accent-indigo-border: #3a4266;
+  --accent-cyan-foreground: #8ec9d6;
+  --accent-cyan-surface: #1e3039;
+  --accent-cyan-border: #355564;
+  --accent-teal-border: #365c53;
   --accent-teal-foreground: #8fd4c8;
   --accent-teal-surface: #1c3330;
   --accent-amber-foreground: #e3c07a;
@@ -3858,10 +3865,10 @@ button, a, input, select, textarea {
   pointer-events: none;
 }
 
-.work-card.is-prio-urgent { box-shadow: inset 3px 0 0 var(--studio-error); }
-.work-card.is-prio-high { box-shadow: inset 3px 0 0 var(--prio-high); }
-.work-card.is-prio-medium { box-shadow: inset 3px 0 0 var(--studio-navy); }
-.work-card.is-prio-low { box-shadow: inset 3px 0 0 var(--studio-sage); }
+.work-card.is-prio-urgent { background: var(--studio-error-surface); border-color: color-mix(in srgb, var(--studio-error) 22%, var(--border-color)); box-shadow: none; }
+.work-card.is-prio-high { background: var(--prio-high-surface); border-color: color-mix(in srgb, var(--prio-high) 22%, var(--border-color)); box-shadow: none; }
+.work-card.is-prio-medium { background: var(--studio-selected); border-color: color-mix(in srgb, var(--studio-navy) 16%, var(--border-color)); box-shadow: none; }
+.work-card.is-prio-low { background: var(--studio-sage-surface); border-color: color-mix(in srgb, var(--studio-sage) 22%, var(--border-color)); box-shadow: none; }
 
 .work-table {
   width: 100%;
@@ -3894,6 +3901,7 @@ button, a, input, select, textarea {
 .work-chip {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   height: 20px;
   padding: 0 8px;
   border-radius: 6px;

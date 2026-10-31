@@ -9,7 +9,7 @@ export function getMobileMoreLinks(
  const featured = [
   { title: 'People', detail: 'Directory, teams and departments', href: '/hr' },
   { title: 'Payroll', detail: 'Payslips and salary', href: '/payroll' },
-  { title: 'Approvals', detail: 'Employee requests for your review', href: '/attendance?tab=regularization' },
+  { title: 'Approvals', detail: 'Employee requests for your review', href: '/attendance?tab=regularizations' },
   { title: 'Reports', detail: 'Workforce and project insights', href: '/reports' },
   { title: 'Settings', detail: 'Account and workspace', href: '/settings' },
   { title: 'Switch workspace', detail: organization?.name || 'Your workspace', href: '/more?panel=workspace' },

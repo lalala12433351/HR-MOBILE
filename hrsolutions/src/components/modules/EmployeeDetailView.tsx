@@ -1,5 +1,6 @@
 'use client';
 import './people-attendance.css';
+import peopleStyles from '../mobile/mobile-people.module.css';
 import {useMobileViewport} from '@/hooks/useMobileViewport';
 import {MobileEmployeeGeneral} from '@/components/mobile/MobileEmployeeGeneral';
 import {MobilePageTitle} from '@/components/mobile/MobilePageTitle';
@@ -256,6 +257,20 @@ function ExitChecklist({
     </div>
   );
 }
+
+const epSectionClass =
+  'employee-profile-section bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4';
+const epSectionHeadClass = 'employee-profile-section-head flex items-center justify-between gap-3 pb-3 border-b border-[#dde4e9]';
+const epFactRowClass =
+  'employee-profile-fact flex items-center justify-between gap-4 py-1.5 border-b border-[#f3f5f7]';
+const epFactLabelClass = 'text-[#687789] font-semibold shrink-0';
+const epFactValueClass = 'font-semibold text-[#172234] min-w-0 text-left';
+const epEditBtnClass =
+  'ep-btn ep-btn--ghost inline-flex items-center gap-1.5 rounded-[6px] px-2.5 py-1.5 text-[13px] font-semibold text-[#17324e] hover:bg-[#f8fbfe] transition-colors cursor-pointer';
+const epPrimaryBtnClass =
+  'ep-btn ep-btn--primary inline-flex items-center justify-center gap-1.5 min-h-10 rounded-[6px] bg-[#17324e] px-4 text-[13px] font-semibold text-white hover:bg-[#285275] transition-colors cursor-pointer disabled:opacity-60';
+const epSecondaryBtnClass =
+  'ep-btn ep-btn--secondary inline-flex items-center justify-center gap-1.5 min-h-10 rounded-[6px] border border-[#c5d0d8] bg-white px-4 text-[13px] font-semibold text-[#17324e] hover:bg-[#f8fbfe] transition-colors cursor-pointer disabled:opacity-60';
 
 interface EmployeeDetailViewProps {
   employee: Employee;
@@ -1643,44 +1658,43 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
   // (Previously short-circuited to EmployeeProfileCardModal.)
 
   return (
-    <div className="employee-profile-studio space-y-6" data-public-profile={activeTab === 'public_profile'}>
+    <div className={`employee-profile-studio ${peopleStyles.record}`} data-public-profile={activeTab === 'public_profile'}>
       {mobile&&<MobilePageTitle title={activeTab==='general'?'Edit details':activeTab==='job'?'Job & role':activeTab==='documents'?'Employee documents':activeTab==='setting'?'Employee settings':activeTab==='payroll'?'Salary structure':activeTab==='public_profile'?'Public profile':'Employee attendance'} onBack={()=>{setActiveTab('general');setIsEditingPersonalInfo(false);setIsEditingAddress(false);setIsEditingEmergency(false);setIsEditingBankDetails(false);}}/>}
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-6 right-6 z-50 bg-[#17324e] text-white px-4 py-2.5 rounded-[7px] shadow-xl text-[13px] font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+        <div className="fixed top-6 right-6 z-50 bg-[#17324e] text-white px-4 py-2.5 rounded-[6px] shadow-xl text-[13px] font-semibold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
           <CheckCircle className="w-4 h-4 text-[#d7ebe0]" />
           <span>{toastMessage}</span>
         </div>
       )}
 
       {/* Top Header & Breadcrumb Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-1.5 text-[13px] font-bold text-[#5e6c7b] hover:text-[#172234] transition-all cursor-pointer group bg-white border border-[#dde4e9] px-3 py-1.5 rounded-[7px]"
-          >
-            <ChevronLeft className="h-4 w-4 text-[#687789] group-hover:text-[#172234] transition-colors" />
-            <span>Back to Employees</span>
-          </button>
-        </div>
+      <div className="employee-profile-desktop-back flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="ep-back"
+        >
+          <ChevronLeft className="h-4 w-4 text-[#687789]" />
+          <span>Back to Employees</span>
+        </button>
       </div>
 
       {/* Main 2-Column Layout */}
-      <div className="employee-profile-grid grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="employee-profile-grid grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* ========================================================= */}
         {/* LEFT COLUMN: Employee Profile Card                        */}
         {/* ========================================================= */}
-        <div className="employee-profile-sidebar lg:col-span-4 xl:col-span-3 lg:sticky lg:top-4 w-full bg-white rounded-[12px] text-[#172234] border border-[#dde4e9]">
-          <div className="employee-profile-identity flex items-start gap-4 p-5">
+        <aside className="employee-profile-sidebar w-full">
+          <div className="employee-profile-identity">
             <div className="relative shrink-0">
-              <div className="h-[72px] w-[72px] overflow-hidden rounded-full border border-[#dde4e9] bg-[#e8eef2]">
+              <div className="h-16 w-16 overflow-hidden rounded-full border border-[#dde4e9] bg-[#e8eef2]">
                 <UserAvatar
                   src={displayAvatar}
                   name={employee.name}
                   alt={employee.name}
                   className="h-full w-full text-base"
-                  iconClassName="h-8 w-8"
+                  iconClassName="h-7 w-7"
                 />
               </div>
               {(canEdit || state.currentPersona?.id === employee.id || state.currentPersona?.name === employee.name) && (
@@ -1698,18 +1712,16 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     onClick={() => avatarInputRef.current?.click()}
                     disabled={isUploadingAvatar}
                     title={isUploadingAvatar ? 'Uploading…' : 'Change profile photo'}
-                    className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#17324e] text-white hover:bg-[#285275] disabled:cursor-wait disabled:opacity-60"
+                    className="absolute -bottom-0.5 -right-0.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#17324e] text-white hover:bg-[#285275] disabled:cursor-wait disabled:opacity-60"
                   >
                     <Camera className={`h-3.5 w-3.5 ${isUploadingAvatar ? 'animate-pulse' : ''}`} />
                   </button>
                 </>
               )}
             </div>
-            <div className="min-w-0 flex-1 pt-0.5">
-              <h2 className="truncate text-[20px] font-bold leading-tight tracking-[-0.02em] text-[#172234]">
-                {employee.name}
-              </h2>
-              <p className="mt-1 truncate text-[13px] font-medium text-[#5e6c7b]">
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate">{employee.name}</h2>
+              <p className="truncate">
                 {employee.designation || (isSuperAdmin ? 'Founder & CEO' : '—')}
               </p>
               <button
@@ -1717,7 +1729,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 disabled={!canEdit}
                 onClick={handleOpenStatusModal}
                 title={canEdit ? 'Change employment status' : undefined}
-                className={`mt-3 inline-flex h-7 items-center rounded-full border px-2.5 text-[12px] font-semibold ${
+                className={`mt-3 inline-flex h-7 items-center rounded-[4px] border px-2.5 text-[12px] font-semibold ${
                   canEdit ? 'cursor-pointer hover:brightness-[0.98]' : 'cursor-default'
                 } ${profileStatusTone}`}
               >
@@ -1726,12 +1738,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
             </div>
           </div>
 
-          <dl className="border-t border-[#dde4e9] px-5">
-            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
-              <dt className="text-[12px] font-semibold text-[#687789]">Email</dt>
-              <dd className="min-w-0 text-[13px] font-semibold text-[#172234]">
+          <dl>
+            <div>
+              <dt>Email</dt>
+              <dd>
                 {employee.email ? (
-                  <a href={`mailto:${employee.email}`} className="hover:text-[#285275] hover:underline">
+                  <a href={`mailto:${employee.email}`} className="text-[#17324e] hover:underline">
                     {employee.email}
                   </a>
                 ) : (
@@ -1741,20 +1753,20 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setChangeEmailOpen(true)}
-                    className="mt-1 block cursor-pointer text-[12px] font-semibold text-[#2d628e] hover:text-[#17324e]"
+                    className="mt-1.5 block cursor-pointer text-[12px] font-semibold text-[#2d628e] hover:text-[#17324e]"
                   >
                     Change login email
                   </button>
                 )}
               </dd>
             </div>
-            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
-              <dt className="text-[12px] font-semibold text-[#687789]">Phone</dt>
-              <dd className="min-w-0 truncate text-[13px] font-semibold text-[#172234]">{employee.phone || '—'}</dd>
+            <div>
+              <dt>Phone</dt>
+              <dd>{employee.phone || '—'}</dd>
             </div>
-            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
-              <dt className="text-[12px] font-semibold text-[#687789]">Department</dt>
-              <dd className="min-w-0 text-[13px] font-semibold text-[#172234]">
+            <div>
+              <dt>Department</dt>
+              <dd>
                 {profileDepartment && onOpenDepartment ? (
                   <button
                     type="button"
@@ -1768,9 +1780,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 )}
               </dd>
             </div>
-            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
-              <dt className="text-[12px] font-semibold text-[#687789]">Team</dt>
-              <dd className="min-w-0 text-[13px] font-semibold text-[#172234]">
+            <div>
+              <dt>Team</dt>
+              <dd>
                 {canEdit ? (
                   <button
                     type="button"
@@ -1787,19 +1799,17 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 )}
               </dd>
             </div>
-            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 border-b border-[#dde4e9] py-3">
-              <dt className="text-[12px] font-semibold text-[#687789]">Office</dt>
-              <dd className="min-w-0 text-[13px] font-semibold text-[#172234]">
+            <div>
+              <dt>Office</dt>
+              <dd>
                 {employee.offices && employee.offices.length > 1
                   ? employee.offices.map((o) => o.name).filter(Boolean).join(', ')
                   : employee.officeName || employee.location || '—'}
               </dd>
             </div>
-            <div className="grid grid-cols-[92px_minmax(0,1fr)] items-start gap-3 py-3">
-              <dt className="pt-0.5 text-[12px] font-semibold text-[#687789]">
-                {isInstitution ? 'Staff lead' : 'Manager'}
-              </dt>
-              <dd className="flex min-w-0 items-center gap-2 text-[13px] font-semibold text-[#172234]">
+            <div>
+              <dt>{isInstitution ? 'Staff lead' : 'Manager'}</dt>
+              <dd className="flex min-w-0 items-center gap-2">
                 <UserAvatar
                   src={managerDisplayAvatar && !managerDisplayAvatar.includes('dicebear') ? managerDisplayAvatar : undefined}
                   name={managerDisplayName || undefined}
@@ -1811,12 +1821,12 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           </dl>
 
           {canEdit && (
-            <div className="space-y-2 border-t border-[#dde4e9] p-5">
+            <div className="employee-profile-actions">
               {!isActivated ? (
                 <button
                   type="button"
                   onClick={handleActivateManually}
-                  className="h-9 w-full rounded-[7px] bg-[#17324e] text-[13px] font-semibold text-white hover:bg-[#285275]"
+                  className="ep-btn ep-btn--primary w-full bg-[#17324e] text-white"
                 >
                   Activate account
                 </button>
@@ -1827,7 +1837,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                     setIsEditingJobInfo(true);
                     setActiveTab('job');
                   }}
-                  className="h-9 w-full rounded-[7px] bg-[#17324e] text-[13px] font-semibold text-white hover:bg-[#285275]"
+                  className="ep-btn ep-btn--primary w-full bg-[#17324e] text-white"
                 >
                   Edit job and team
                 </button>
@@ -1836,7 +1846,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 <button
                   type="button"
                   onClick={handleResendInvite}
-                  className="h-9 w-full rounded-[7px] border border-[#c5d0d8] bg-white text-[13px] font-semibold text-[#17324e] hover:bg-[#f8fbfe]"
+                  className="ep-btn ep-btn--secondary w-full border border-[#c5d0d8]"
                 >
                   Resend invite
                 </button>
@@ -1844,7 +1854,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowIdCard(true)}
-                className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border border-[#c5d0d8] bg-white text-[13px] font-semibold text-[#17324e] hover:bg-[#f8fbfe]"
+                className="ep-btn ep-btn--secondary w-full border border-[#c5d0d8]"
               >
                 <CreditCard className="h-3.5 w-3.5 text-[#2d628e]" />
                 Print ID card
@@ -1853,7 +1863,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 <button
                   type="button"
                   onClick={handleCopyMagicLink}
-                  className="h-9 w-full rounded-[7px] text-[13px] font-semibold text-[#5e6c7b] hover:bg-[#f3f5f7] hover:text-[#172234]"
+                  className="ep-btn ep-btn--quiet w-full"
                 >
                   Copy sign-in link
                 </button>
@@ -1861,7 +1871,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowExitPanel(true)}
-                className="h-9 w-full rounded-[7px] text-[13px] font-semibold text-[#8b3133] hover:bg-[#faeeee]"
+                className="ep-btn ep-btn--danger w-full text-[#8b3133]"
               >
                 Deactivate record
               </button>
@@ -1887,20 +1897,20 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                 />
               )}
               {employee.buddyName && (
-                <p className="text-[12px] text-[#5e6c7b]">Buddy: {employee.buddyName}</p>
+                <p>Buddy: {employee.buddyName}</p>
               )}
               {employee.fnfDueDate && (
-                <p className="text-[12px] text-[#5e6c7b]">Full and final due {employee.fnfDueDate}</p>
+                <p>Full and final due {employee.fnfDueDate}</p>
               )}
             </div>
           )}
-        </div>
+        </aside>
 
         {/* RIGHT COLUMN: Tabbed Detail Area                          */}
         {/* ========================================================= */}
-        <div className="employee-profile-content lg:col-span-8 xl:col-span-9 space-y-6">
+        <div className="employee-profile-content min-w-0">
           {/* Top Tab Bar */}
-          <div role="tablist" aria-label="Employee details" className="employee-profile-tabs flex items-center gap-6 overflow-x-auto rounded-[12px] border border-[#dde4e9] bg-white px-5 pt-2 scrollbar-none sm:gap-8 sm:px-6">
+          <div role="tablist" aria-label="Employee details" className="employee-profile-tabs">
             {(
               [
                 { id: 'general' as const, label: 'General' },
@@ -1916,14 +1926,10 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               return (
                 <button
                   key={tab.id}
+                  type="button"
                   role="tab"
                   aria-selected={isActive}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`-mb-px border-b-2 px-1 pb-3 text-[13px] font-bold tracking-[-0.01em] whitespace-nowrap cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2] ${
-                    isActive
-                      ? 'border-[#17324e] text-[#17324e]'
-                      : 'border-transparent text-[#687789] hover:text-[#172234]'
-                  }`}
                 >
                   {tab.label}
                 </button>
@@ -1951,7 +1957,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         type="button"
                         disabled={savingBio || bioDraft === (employee.bio || '')}
                         onClick={() => setBioDraft(employee.bio || '')}
-                        className="h-9 rounded-[7px] border border-[#c5d0d8] bg-white px-3.5 text-[13px] font-semibold text-[#17324e] transition-colors hover:bg-[#f8fbfe] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                        className={`${epSecondaryBtnClass} border border-[#c5d0d8] disabled:cursor-not-allowed disabled:opacity-40`}
                       >
                         Reset
                       </button>
@@ -1969,7 +1975,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             setSavingBio(false);
                           }
                         }}
-                        className="h-9 rounded-[7px] bg-[#17324e] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#285275] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                        className={`${epPrimaryBtnClass} bg-[#17324e] disabled:cursor-not-allowed disabled:opacity-40`}
                       >
                         {savingBio ? 'Saving…' : 'Save bio'}
                       </button>
@@ -1989,38 +1995,38 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {/* TAB 1: GENERAL (Personal Info, Address, Emergency)    */}
           {/* ===================================================== */}
           {activeTab === 'general' && (
-            <div className="space-y-6">
+            <div className="space-y-4">
               {/* Account Not Activated Alert Banner */}
               {!isActivated && (
-                <div className="bg-[#fbf6ea] border border-[#ead9a8] rounded-[12px] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[13px] text-[#172234] animate-in fade-in">
-                  <div className="flex items-start sm:items-center gap-3">
-                    <div className="h-9 w-9 rounded-[7px] bg-[#e8eef2] border border-[#d8e8f2] flex items-center justify-center text-[#17324e] shrink-0">
-                      <AlertTriangle className="h-4.5 w-4.5" />
+                <div className="employee-profile-alert text-[13px] text-[#172234] animate-in fade-in">
+                  <div className="flex items-start sm:items-center gap-3 min-w-0">
+                    <div className="h-10 w-10 rounded-[6px] bg-[#e8eef2] border border-[#d8e8f2] flex items-center justify-center text-[#17324e] shrink-0">
+                      <AlertTriangle className="h-4 w-4" />
                     </div>
-                    <div>
-                      <h4 className="font-bold text-[#172234] text-sm">Account Is Not Activated</h4>
-                      <p className="text-[#17324e]/90 text-[13px] mt-0.5">
+                    <div className="min-w-0">
+                      <h4 className="font-semibold text-[#172234] text-[14px]">Account is not activated</h4>
+                      <p className="text-[#5e6c7b] text-[13px] mt-0.5">
                         This employee has not yet logged in or activated their workspace credentials.
                       </p>
                     </div>
                   </div>
                   {canEdit && (
-                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
                         onClick={handleCopyMagicLink}
-                        className="px-3 py-1.5 rounded-[7px] border border-[#c5d0d8] bg-white hover:bg-[#e8eef2] text-[#172234] font-bold transition-all cursor-pointer flex items-center gap-1.5 text-[13px]"
+                        className={`${epSecondaryBtnClass} border border-[#c5d0d8]`}
                       >
                         <Globe className="w-3.5 h-3.5 text-[#17324e]" />
-                        <span>Copy Link</span>
+                        <span>Copy link</span>
                       </button>
                       <button
                         type="button"
                         onClick={handleActivateManually}
-                        className="px-3.5 py-1.5 rounded-[7px] bg-[#53886b] hover:bg-[#46725a] text-white font-bold transition-all cursor-pointer flex items-center gap-1.5 text-[13px]"
+                        className={`${epPrimaryBtnClass} bg-[#53886b] hover:bg-[#46725a]`}
                       >
                         <CheckCircle className="w-3.5 h-3.5" />
-                        <span>Activate Now</span>
+                        <span>Activate now</span>
                       </button>
                     </div>
                   )}
@@ -2028,33 +2034,34 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               )}
 
               {/* Section 1: Personal Info Card */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#f3f5f7]">
-                  <h3 className="text-[15px] font-bold text-[#172234] tracking-tight">Personal Information</h3>
+              <div className={epSectionClass}>
+                <div className={epSectionHeadClass}>
+                  <h3>Personal Information</h3>
                   {canEdit && (
                     <button
+                      type="button"
                       onClick={() => setIsEditingPersonalInfo(!isEditingPersonalInfo)}
-                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
-                      title={isEditingPersonalInfo ? 'Cancel' : 'Edit Personal Info'}
+                      className={epEditBtnClass}
+                      title={isEditingPersonalInfo ? 'Cancel' : 'Edit personal info'}
                     >
-                      <Edit2 className="w-4 h-4" strokeWidth={1.75} />
+                      <Edit2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      {isEditingPersonalInfo ? 'Cancel' : 'Edit'}
                     </button>
                   )}
                 </div>
 
                 {!isEditingPersonalInfo ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 pt-1 text-[13px]">
-                    {/* Left Column */}
-                    <div className="space-y-3.5">
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Full Name</span>
-                        <span className="font-bold text-[#172234] truncate">
+                  <div className="employee-profile-facts text-[13px]">
+                    <div className="space-y-0">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Full name</span>
+                        <span className={epFactValueClass}>
                           {employee.fullName || employee.name || '—'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Date of Birth</span>
-                        <span className="font-bold text-[#172234] truncate">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Date of birth</span>
+                        <span className={epFactValueClass}>
                           {employee.dateOfBirth
                             ? !isNaN(Date.parse(employee.dateOfBirth))
                               ? new Date(employee.dateOfBirth).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -2062,55 +2069,54 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                             : '—'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Nationality</span>
-                        <span className="font-bold text-[#172234] truncate">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Nationality</span>
+                        <span className={epFactValueClass}>
                           {employee.nationality || '—'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Email Address</span>
-                        <span className="font-bold text-[#172234] truncate">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Email address</span>
+                        <span className={epFactValueClass}>
                           {employee.email || '—'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Health Insurance</span>
-                        <span className="font-bold text-[#172234] truncate">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Health insurance</span>
+                        <span className={epFactValueClass}>
                           {employee.healthInsurance || '—'}
                         </span>
                       </div>
                     </div>
 
-                    {/* Right Column */}
-                    <div className="space-y-3.5">
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Gender</span>
-                        <span className="font-bold text-[#172234]">
+                    <div className="space-y-0">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Gender</span>
+                        <span className={epFactValueClass}>
                           {employee.gender && employee.gender !== '—' ? employee.gender : 'None'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Marital Status</span>
-                        <span className="font-bold text-[#172234]">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Marital status</span>
+                        <span className={epFactValueClass}>
                           {employee.maritalStatus || '—'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Phone</span>
-                        <span className="font-bold text-[#172234] font-mono">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Phone</span>
+                        <span className={`${epFactValueClass} font-mono`}>
                           {employee.phone || '—'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Personal Tax ID</span>
-                        <span className="font-bold text-[#172234] font-mono">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Personal tax ID</span>
+                        <span className={`${epFactValueClass} font-mono`}>
                           {employee.personalTaxId || '—'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Social Insurance / PF</span>
-                        <span className="font-bold text-[#172234] font-mono">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Social insurance / PF</span>
+                        <span className={`${epFactValueClass} font-mono`}>
                           {employee.socialInsurance || '—'}
                         </span>
                       </div>
@@ -2260,21 +2266,21 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#dde4e9]">
+                    <div className="employee-profile-form-actions">
                       <button
                         type="button"
                         onClick={() => setIsEditingPersonalInfo(false)}
                         disabled={savingPersonalInfo}
-                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] bg-white text-[#172234] hover:bg-[#f8fbfe] font-bold cursor-pointer transition-colors text-[13px] disabled:opacity-60"
+                        className={`${epSecondaryBtnClass} border border-[#c5d0d8]`}
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
                         disabled={savingPersonalInfo}
-                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold cursor-pointer transition-all text-[13px] disabled:opacity-60"
+                        className={`${epPrimaryBtnClass} bg-[#17324e]`}
                       >
-                        {savingPersonalInfo ? 'Saving…' : 'Save Changes'}
+                        {savingPersonalInfo ? 'Saving…' : 'Save changes'}
                       </button>
                     </div>
                   </form>
@@ -2282,50 +2288,51 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 1b: Bank Details */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#f3f5f7]">
-                  <h3 className="text-[15px] font-bold text-[#172234] tracking-tight">Bank Details</h3>
+              <div className={epSectionClass}>
+                <div className={epSectionHeadClass}>
+                  <h3>Bank Details</h3>
                   {canEditBank && (
                     <button
                       type="button"
                       onClick={handleStartBankEdit}
-                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f3f5f7] transition-colors cursor-pointer"
+                      className={epEditBtnClass}
                       title={isEditingBankDetails ? 'Cancel' : 'Edit bank details'}
                     >
-                      <Edit2 className="w-4 h-4" strokeWidth={1.75} />
+                      <Edit2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      {isEditingBankDetails ? 'Cancel' : 'Edit'}
                     </button>
                   )}
                 </div>
 
                 {!isEditingBankDetails ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 pt-1 text-[13px]">
-                    <div className="space-y-3.5">
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Account holder</span>
-                        <span className="font-bold text-[#172234] truncate">
+                  <div className="employee-profile-facts text-[13px]">
+                    <div className="space-y-0">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Account holder</span>
+                        <span className={epFactValueClass}>
                           {blankBankValue(employee.bankDetails?.accountHolderName) || employee.fullName || employee.name || '—'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Bank name</span>
-                        <span className="font-bold text-[#172234] truncate">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Bank name</span>
+                        <span className={epFactValueClass}>
                           {blankBankValue(employee.bankDetails?.bankName) || '—'}
                         </span>
                       </div>
                     </div>
-                    <div className="space-y-3.5">
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">Account number</span>
-                        <span className="font-bold text-[#172234] font-mono">
+                    <div className="space-y-0">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>Account number</span>
+                        <span className={`${epFactValueClass} font-mono`}>
                           {(() => {
                             const accountNumber = blankBankValue(employee.bankDetails?.accountNumber);
                             return accountNumber ? `•••• ${accountNumber.slice(-4)}` : '—';
                           })()}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                        <span className="text-[#687789] font-semibold">IFSC / routing</span>
-                        <span className="font-bold text-[#172234] font-mono">
+                      <div className={epFactRowClass}>
+                        <span className={epFactLabelClass}>IFSC / routing</span>
+                        <span className={`${epFactValueClass} font-mono`}>
                           {blankBankValue(employee.bankDetails?.ifscCode) || '—'}
                         </span>
                       </div>
@@ -2407,19 +2414,19 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                         />
                       </div>
                     </div>
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#f3f5f7]">
+                    <div className="employee-profile-form-actions">
                       <button
                         type="button"
                         disabled={savingBankDetails}
                         onClick={() => setIsEditingBankDetails(false)}
-                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] font-bold text-[#17324e] hover:bg-[#f3f5f7] cursor-pointer text-[13px] disabled:opacity-50"
+                        className={`${epSecondaryBtnClass} border border-[#c5d0d8]`}
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
                         disabled={savingBankDetails}
-                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold cursor-pointer text-[13px] disabled:opacity-50"
+                        className={`${epPrimaryBtnClass} bg-[#17324e]`}
                       >
                         {savingBankDetails ? 'Saving…' : 'Save bank details'}
                       </button>
@@ -2429,41 +2436,43 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 2: Address Card */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
-                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Residential Address</h3>
+              <div className={epSectionClass}>
+                <div className={epSectionHeadClass}>
+                  <h3>Residential Address</h3>
                   {canEditAddress && (
                     <button
+                      type="button"
                       onClick={() => setIsEditingAddress(!isEditingAddress)}
-                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
-                      title={isEditingAddress ? 'Cancel' : 'Edit Address'}
+                      className={epEditBtnClass}
+                      title={isEditingAddress ? 'Cancel' : 'Edit address'}
                     >
-                      <Edit2 className="w-4 h-4" strokeWidth={1.75} />
+                      <Edit2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      {isEditingAddress ? 'Cancel' : 'Edit'}
                     </button>
                   )}
                 </div>
 
                 {!isEditingAddress ? (
-                  <div className="space-y-3 pt-1 text-[13px]">
-                    <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-[#687789] font-semibold">Primary Address</span>
-                      <span className="font-bold text-[#172234]">
+                  <div className="space-y-0 text-[13px]">
+                    <div className={epFactRowClass}>
+                      <span className={epFactLabelClass}>Primary address</span>
+                      <span className={epFactValueClass}>
                         {employee.primaryAddress || '—'}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-[#687789] font-semibold">City & State</span>
-                      <span className="font-bold text-[#172234]">
+                    <div className={epFactRowClass}>
+                      <span className={epFactLabelClass}>City & state</span>
+                      <span className={epFactValueClass}>
                         {employee.city || employee.stateProvince
                           ? `${employee.city || ''}${employee.city && employee.stateProvince ? ', ' : ''}${employee.stateProvince || ''}`
                           : '—'}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-[#687789] font-semibold">Country & Postal Code</span>
-                      <span className="font-bold text-[#172234]">
+                    <div className={epFactRowClass}>
+                      <span className={epFactLabelClass}>Country & postal code</span>
+                      <span className={epFactValueClass}>
                         {employee.country || employee.postalCode
                           ? `${employee.country || ''}${employee.country && employee.postalCode ? ' — ' : ''}${employee.postalCode || ''}`
                           : '—'}
@@ -2528,19 +2537,19 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#dde4e9]">
+                    <div className="employee-profile-form-actions">
                       <button
                         type="button"
                         onClick={() => setIsEditingAddress(false)}
-                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] bg-white text-[#172234] hover:bg-[#f8fbfe] font-bold text-[13px]"
+                        className={`${epSecondaryBtnClass} border border-[#c5d0d8]`}
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px]"
+                        className={`${epPrimaryBtnClass} bg-[#17324e]`}
                       >
-                        Save Address
+                        Save address
                       </button>
                     </div>
                   </form>
@@ -2548,39 +2557,41 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 3: Emergency Contact Card */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
-                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Emergency Contact</h3>
+              <div className={epSectionClass}>
+                <div className={epSectionHeadClass}>
+                  <h3>Emergency Contact</h3>
                   {canEdit && (
                     <button
+                      type="button"
                       onClick={() => setIsEditingEmergency(!isEditingEmergency)}
-                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
-                      title={isEditingEmergency ? 'Cancel' : 'Edit Emergency Contact'}
+                      className={epEditBtnClass}
+                      title={isEditingEmergency ? 'Cancel' : 'Edit emergency contact'}
                     >
-                      <Edit2 className="w-4 h-4" strokeWidth={1.75} />
+                      <Edit2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      {isEditingEmergency ? 'Cancel' : 'Edit'}
                     </button>
                   )}
                 </div>
 
                 {!isEditingEmergency ? (
-                  <div className="space-y-3 pt-1 text-[13px]">
-                    <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-[#687789] font-semibold">Contact Name</span>
-                      <span className="font-bold text-[#172234]">
+                  <div className="space-y-0 text-[13px]">
+                    <div className={epFactRowClass}>
+                      <span className={epFactLabelClass}>Contact name</span>
+                      <span className={epFactValueClass}>
                         {(!isDummyEmergency && employee.emergencyContact?.name) || '—'}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-[#687789] font-semibold">Relationship</span>
-                      <span className="font-bold text-[#172234]">
+                    <div className={epFactRowClass}>
+                      <span className={epFactLabelClass}>Relationship</span>
+                      <span className={epFactValueClass}>
                         {(!isDummyEmergency && employee.emergencyContact?.relation) || '—'}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between py-1.5 border-b border-slate-50">
-                      <span className="text-[#687789] font-semibold">Emergency Phone</span>
-                      <span className="font-bold text-[#172234]">
+                    <div className={epFactRowClass}>
+                      <span className={epFactLabelClass}>Emergency phone</span>
+                      <span className={epFactValueClass}>
                         {(!isDummyEmergency && employee.emergencyContact?.phone) || '—'}
                       </span>
                     </div>
@@ -2619,19 +2630,19 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#dde4e9]">
+                    <div className="employee-profile-form-actions">
                       <button
                         type="button"
                         onClick={() => setIsEditingEmergency(false)}
-                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] bg-white text-[#172234] hover:bg-[#f8fbfe] font-bold text-[13px]"
+                        className={`${epSecondaryBtnClass} border border-[#c5d0d8]`}
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px]"
+                        className={`${epPrimaryBtnClass} bg-[#17324e]`}
                       >
-                        Save Contact
+                        Save contact
                       </button>
                     </div>
                   </form>
@@ -2644,94 +2655,96 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {/* TAB 2: JOB & ROLE                                     */}
           {/* ===================================================== */}
           {activeTab === 'job' && (
-            <div className="employee-detail-section employee-detail-job space-y-6">
+            <div className="employee-detail-section employee-detail-job space-y-4">
               {/* Section 1: Employment Information */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
-                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Employment & Role Details</h3>
+              <div className={epSectionClass}>
+                <div className={epSectionHeadClass}>
+                  <h3>Employment & Role Details</h3>
                   {canEdit && (
                     <button
+                      type="button"
                       onClick={() => setIsEditingJobInfo(!isEditingJobInfo)}
-                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
-                      title="Edit Job Information"
+                      className={epEditBtnClass}
+                      title={isEditingJobInfo ? 'Cancel' : 'Edit job information'}
                     >
-                      <Edit2 className="w-4 h-4" strokeWidth={1.75} />
+                      <Edit2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      {isEditingJobInfo ? 'Cancel' : 'Edit'}
                     </button>
                   )}
                 </div>
 
                 {!isEditingJobInfo ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-1 text-[13px]">
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                  <div className="employee-profile-metric-grid text-[13px]">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
                       <span className="text-[12px] text-[#687789] font-semibold block">Employee ID</span>
-                      <span className="font-bold text-[#172234] mt-1 block font-mono text-sm">
+                      <span className="font-semibold text-[#172234] mt-1 block font-mono text-sm">
                         {employee.employeeId || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
-                      <span className="text-[12px] text-[#687789] font-semibold block">Job Role</span>
-                      <span className="font-bold text-[#172234] mt-1 block truncate">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Job role</span>
+                      <span className="font-semibold text-[#172234] mt-1 block truncate">
                         {employee.designation || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
                       <span className="text-[12px] text-[#687789] font-semibold block">Department</span>
-                      <span className="font-bold text-[#17324e] mt-1 block">
+                      <span className="font-semibold text-[#17324e] mt-1 block">
                         {profileDepartment || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
                       <span className="text-[12px] text-[#687789] font-semibold block">Team</span>
-                      <span className="font-bold text-[#172234] mt-1 block">
+                      <span className="font-semibold text-[#172234] mt-1 block">
                         {employee.team || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
-                      <span className="text-[12px] text-[#687789] font-semibold block">Office Location</span>
-                      <span className="font-bold text-[#172234] mt-1 block">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Office location</span>
+                      <span className="font-semibold text-[#172234] mt-1 block">
                         {employee.offices && employee.offices.length > 1
                           ? employee.offices.map((o) => o.name).filter(Boolean).join(', ')
                           : employee.officeName || employee.location || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
                       <span className="text-[12px] text-[#687789] font-semibold block">
-                        {isInstitution ? 'Staff Lead / Department Head' : 'Reporting Manager'}
+                        {isInstitution ? 'Staff lead / department head' : 'Reporting manager'}
                       </span>
-                      <span className="font-bold text-[#53886b] mt-1 block truncate">
+                      <span className="font-semibold text-[#53886b] mt-1 block truncate">
                         {managerDisplayName || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
-                      <span className="text-[12px] text-[#687789] font-semibold block">Service Duration</span>
-                      <span className="font-bold text-[#172234] mt-1 block">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Service duration</span>
+                      <span className="font-semibold text-[#172234] mt-1 block">
                         {employee.serviceYear || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
-                      <span className="text-[12px] text-[#687789] font-semibold block">Joining Date</span>
-                      <span className="font-bold text-[#172234] mt-1 block">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Joining date</span>
+                      <span className="font-semibold text-[#172234] mt-1 block">
                         {employee.joinDate || employee.joiningDate || '—'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
-                      <span className="text-[12px] text-[#687789] font-semibold block">Employment Status</span>
-                      <span className="font-bold text-[#172234] mt-1 block">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Employment status</span>
+                      <span className="font-semibold text-[#172234] mt-1 block">
                         {employee.status || 'Active'}
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
-                      <span className="text-[12px] text-[#687789] font-semibold block">Account Status</span>
-                      <span className={`font-bold text-[13px] mt-1 inline-flex items-center ${
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Account status</span>
+                      <span className={`font-semibold text-[13px] mt-1 inline-flex items-center ${
                         (employee.accountStatus === 'Active' || employee.accountStatus === 'In Probation')
                           ? 'text-[#3f6a52]'
                           : employee.accountStatus === 'On Leave'
@@ -2744,9 +2757,9 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </span>
                     </div>
 
-                    <div className="p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
-                      <span className="text-[12px] text-[#687789] font-semibold block">Probation Status</span>
-                      <span className="font-bold text-[#172234] mt-1 block">
+                    <div className="employee-profile-metric p-3.5 rounded-[7px] bg-[#f8fbfe] border border-[#dde4e9]">
+                      <span className="text-[12px] text-[#687789] font-semibold block">Probation status</span>
+                      <span className="font-semibold text-[#172234] mt-1 block">
                         {!effectiveQuotas.inProbation
                           ? 'Confirmed Permanent'
                           : employee.probationStatus === 'extended'
@@ -3030,7 +3043,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-2.5 pt-3 border-t border-[#dde4e9]">
+                    <div className="employee-profile-form-actions">
                       <button
                         type="button"
                         onClick={() => {
@@ -3044,15 +3057,15 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
                           setFormTeam(employee.team || '');
                           setIsCustomTeam(false);
                         }}
-                        className="px-4 py-2 rounded-[7px] border border-[#dde4e9] bg-white text-[#172234] hover:bg-[#f8fbfe] font-bold text-[13px]"
+                        className={`${epSecondaryBtnClass} border border-[#c5d0d8]`}
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-5 py-2 rounded-[7px] bg-[#17324e] hover:bg-[#285275] text-white font-bold text-[13px]"
+                        className={`${epPrimaryBtnClass} bg-[#17324e]`}
                       >
-                        Save Organization Details
+                        Save organization details
                       </button>
                     </div>
                   </form>
@@ -3060,7 +3073,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 2: Job Timeline */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+              <div className={epSectionClass}>
                 <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
                   <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Job Progression Timeline</h3>
                   {canEdit && (
@@ -3109,7 +3122,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 3: Contract Timeline */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+              <div className={epSectionClass}>
                 <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
                   <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Contract Records</h3>
                   {canEdit && (
@@ -4761,7 +4774,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {activeTab === 'documents' && (
             <div className="employee-detail-section employee-detail-documents space-y-6">
               {/* Section 1: Upload Dropzone (HR/Admin) or Document list */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+              <div className={epSectionClass}>
                 <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
                   <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Personal & Verified Documents</h3>
                   {canEdit && (
@@ -4858,7 +4871,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 2: Payslips Table */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+              <div className={epSectionClass}>
                 <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
                   <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Issued Payslips</h3>
                   {canEdit && (
@@ -4923,7 +4936,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Section 3: Assigned Assets */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+              <div className={epSectionClass}>
                 <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
                   <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Assigned Hardware & Assets</h3>
                 </div>
@@ -4970,23 +4983,25 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
           {activeTab === 'setting' && (
             <div className="employee-detail-section employee-detail-setting space-y-6">
               {/* Account Settings */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
-                  <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Account Preferences</h3>
+              <div className={epSectionClass}>
+                <div className={epSectionHeadClass}>
+                  <h3>Account Preferences</h3>
                   {canEdit && (
                     <button
+                      type="button"
                       onClick={() => setIsEditingAccountSettings(!isEditingAccountSettings)}
-                      className="p-2 rounded-[7px] text-[#687789] hover:text-[#172234] hover:bg-[#f8fbfe] transition-colors cursor-pointer"
+                      className={epEditBtnClass}
                     >
-                      <Edit2 className="w-4 h-4" strokeWidth={1.75} />
+                      <Edit2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                      {isEditingAccountSettings ? 'Cancel' : 'Edit'}
                     </button>
                   )}
                 </div>
 
                 {!isEditingAccountSettings ? (
-                  <div className="flex items-center justify-between text-[13px] py-2">
-                    <span className="text-[#687789] font-semibold">Configured Timezone</span>
-                    <span className="font-bold text-[#172234]">{formTimezone || '—'}</span>
+                  <div className={epFactRowClass}>
+                    <span className={epFactLabelClass}>Configured timezone</span>
+                    <span className={epFactValueClass}>{formTimezone || '—'}</span>
                   </div>
                 ) : (
                   <div className="space-y-3 text-[13px] pt-1">
@@ -5029,7 +5044,7 @@ export const EmployeeDetailView: React.FC<EmployeeDetailViewProps> = ({
               </div>
 
               {/* Privacy */}
-              <div className="bg-white border border-[#dde4e9] rounded-[12px] p-6 sm:p-7 text-[#172234] space-y-4">
+              <div className={epSectionClass}>
                 <div className="flex items-center justify-between pb-3 border-b border-[#dde4e9]">
                   <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Calendar & Privacy</h3>
                 </div>

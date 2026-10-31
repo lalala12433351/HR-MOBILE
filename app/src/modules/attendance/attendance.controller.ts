@@ -48,6 +48,11 @@ import {
   selfieLooksPresent,
   verifyOfficeQrToken,
 } from './attendancePolicy.js';
+import {
+  employeeDisplayName,
+  notifyEmployees,
+  resolveLeaveApproverIds,
+} from './attendanceNotifications.js';
 
 // Haversine formula to determine distance in meters between user punch coordinates and office coordinates
 function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -827,6 +832,27 @@ export async function requestLeave(req: Request, res: Response): Promise<void> {
         return insertRes.rows[0];
       });
       res.status(201).json({ success: true, data: result });
+      void (async () => {
+        try {
+          const name = await employeeDisplayName(req.tenantQuery!, String(validEmpId));
+          const recipients = await resolveLeaveApproverIds(req.tenantQuery!, String(validEmpId));
+          await notifyEmployees(
+            req.tenantQuery!,
+            recipients,
+            'New Leave Request Submitted',
+            `${name} submitted a ${validLeaveType} request for ${daysCountNum} day(s) (${validStart}).`,
+            {
+              category: 'Approvals',
+              linkUrl: '/attendance?tab=leaves',
+              priority: 'high',
+              tag: `leave-submit-${result.id}`,
+              tenantKey: req.dbSchema,
+            }
+          );
+        } catch (err) {
+          console.warn('Leave submit notification skipped:', err);
+        }
+      })();
     } catch (balErr: any) {
       if (
         balErr?.code === 'COMP_OFF_DISABLED' ||
@@ -968,6 +994,42 @@ export async function decideLeave(req: Request, res: Response): Promise<void> {
       });
 
       res.json({ success: true, data: updated });
+      void (async () => {
+        try {
+          if (!updated?.employee_id) return;
+          const decision = String(updated.status || status || '').toLowerCase();
+          if (decision !== 'approved' && decision !== 'rejected') return;
+          const unpaid =
+            forceUnpaid || String(updated.leave_type || '').toLowerCase() === 'unpaid';
+          const title =
+            decision === 'approved'
+              ? unpaid
+                ? 'Leave Request Approved (Unpaid)'
+                : 'Leave Request Approved'
+              : 'Leave Request Rejected';
+          const message =
+            decision === 'approved'
+              ? unpaid
+                ? `Your leave request for ${updated.start_date} was approved as Loss of Pay.`
+                : `Your ${updated.leave_type || 'leave'} request for ${updated.start_date} was approved.`
+              : `Your ${updated.leave_type || 'leave'} request for ${updated.start_date} was rejected.`;
+          await notifyEmployees(
+            req.tenantQuery!,
+            [String(updated.employee_id)],
+            title,
+            message,
+            {
+              category: 'Approvals',
+              linkUrl: '/attendance?tab=leaves',
+              priority: 'high',
+              tag: `leave-decide-${updated.id}-${decision}`,
+              tenantKey: req.dbSchema,
+            }
+          );
+        } catch (err) {
+          console.warn('Leave decision notification skipped:', err);
+        }
+      })();
     } catch (inner: any) {
       if (inner?.code === 'NOT_FOUND') {
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: inner.message } });
@@ -1750,6 +1812,32 @@ export async function requestRegularization(req: Request, res: Response): Promis
     }
 
     res.status(201).json({ success: true, data: result.rows[0] });
+    if (status === 'pending') {
+      void (async () => {
+        try {
+          const name = await employeeDisplayName(req.tenantQuery!, String(validEmpId));
+          const recipients = await resolveLeaveApproverIds(req.tenantQuery!, String(validEmpId));
+          const isWfh = isWfhReasonText(reasonText);
+          await notifyEmployees(
+            req.tenantQuery!,
+            recipients,
+            isWfh ? 'WFH Request Submitted' : 'Regularization Request Submitted',
+            isWfh
+              ? `${name} requested work from home for ${dateStr}. Awaiting approval.`
+              : `${name} submitted an attendance adjustment for ${dateStr}.`,
+            {
+              category: 'Approvals',
+              linkUrl: '/attendance?tab=leaves',
+              priority: 'high',
+              tag: `reg-submit-${result.rows[0]?.id || dateStr}`,
+              tenantKey: req.dbSchema,
+            }
+          );
+        } catch (err) {
+          console.warn('Regularization submit notification skipped:', err);
+        }
+      })();
+    }
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
@@ -1891,6 +1979,27 @@ export async function updateRegularizationStatus(req: Request, res: Response): P
     }
 
     res.json({ success: true, data: result.rows[0] });
+    void notifyEmployees(
+      req.tenantQuery!,
+      [ownerId],
+      mapped === 'approved'
+        ? wfh
+          ? 'WFH Request Approved'
+          : 'Regularization Approved'
+        : wfh
+          ? 'WFH Request Rejected'
+          : 'Regularization Rejected',
+      mapped === 'approved'
+        ? `Your ${wfh ? 'WFH' : 'regularization'} request for ${dateStr} was approved.`
+        : `Your ${wfh ? 'WFH' : 'regularization'} request for ${dateStr} was rejected.`,
+      {
+        category: 'Approvals',
+        linkUrl: '/attendance?tab=leaves',
+        priority: 'high',
+        tag: `reg-decide-${id}-${mapped}`,
+        tenantKey: req.dbSchema,
+      }
+    ).catch((err) => console.warn('Regularization decision notification skipped:', err));
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }
@@ -2105,6 +2214,36 @@ export async function postPresence(req: Request, res: Response): Promise<void> {
       clientIp(req) || '127.0.0.1'
     );
     res.json({ success: true, data });
+
+    if (data.status === 'outside' && data.firstOutside) {
+      void notifyEmployees(
+        req.tenantQuery!,
+        [me.id],
+        'Outside the office',
+        'You left the office geofence. You will be clocked out within 15 minutes.',
+        {
+          category: 'Attendance',
+          linkUrl: '/attendance',
+          priority: 'high',
+          tag: `geofence-outside:${me.id}:${data.outsideSince || ''}`,
+          tenantKey: req.dbSchema,
+        }
+      ).catch((err) => console.warn('Geofence outside push skipped:', err));
+    } else if (data.status === 'signed_out') {
+      void notifyEmployees(
+        req.tenantQuery!,
+        [me.id],
+        'Punched out',
+        'You stayed outside the office location, so this shift was punched out.',
+        {
+          category: 'Attendance',
+          linkUrl: '/attendance',
+          priority: 'high',
+          tag: `geofence-signout:${me.id}:${data.outsideSince || data.checkOutLabel || ''}`,
+          tenantKey: req.dbSchema,
+        }
+      ).catch((err) => console.warn('Geofence sign-out push skipped:', err));
+    }
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'DB_ERROR', message: err.message } });
   }

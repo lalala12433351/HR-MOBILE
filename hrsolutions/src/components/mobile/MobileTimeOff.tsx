@@ -5,19 +5,20 @@ import { MyLeaveBalance } from '@/components/modules/attendance/MyLeavesView';
 import { MobileHeaderAction } from './MobileHeaderAction';
 import { MobileRow, MobileSection } from './MobilePrimitives';
 import { toLocalDateKey } from '@/utils/attendancePunches';
+import styles from './mobile-attendance-pages.module.css';
 
 const dateLabel=(date:string)=>new Date(date.slice(0,10)+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
-export function MobileTimeOff({balances,requests,holidays,onApply,onCancel,saving,onApprovals,canCancelManagerApproved=false}: {
- balances:MyLeaveBalance[];requests:LeaveRequest[];holidays:Holiday[];onApply:()=>void;onCancel:(id:string)=>unknown;saving:boolean;onApprovals?:()=>void;canCancelManagerApproved?:boolean;
+export function MobileTimeOff({balances,requests,holidays,onApply,onCancel,saving,onApprovals,canCancelManagerApproved=false,initialTab='Balances'}: {
+ balances:MyLeaveBalance[];requests:LeaveRequest[];holidays:Holiday[];onApply:()=>void;onCancel:(id:string)=>unknown;saving:boolean;onApprovals?:()=>void;canCancelManagerApproved?:boolean;initialTab?:'Balances'|'Requests';
 }) {
- const [tab,setTab]=useState('Balances');const [selected,setSelected]=useState<string|null>(null);
+ const [tab,setTab]=useState<string>(initialTab);const [selected,setSelected]=useState<string|null>(null);
  const today=toLocalDateKey();
  const published=holidays.filter(h=>h.isApproved !== false).sort((a,b)=>a.date.localeCompare(b.date));
  const upcoming=requests.filter(r=>['Approved','Pending','Manager approved'].includes(r.status)&&r.endDate.slice(0,10)>=today).sort((a,b)=>a.startDate.localeCompare(b.startDate))[0];
  const paid=balances.filter(b=>!b.onRequest);const available=paid.reduce((sum,b)=>sum+(b.restricted?0:b.remaining),0);
  const nextHoliday=published.find(h=>h.date>=today);
  const selectedRequest=requests.find(r=>r.id===selected);
- return <div className="m2-page m2-time-off">
+ return <div className={`m2-page m2-time-off ${styles.page}`}>
   <MobileHeaderAction><button type="button" className="m2-header-text-action" onClick={onApply}>Apply</button></MobileHeaderAction>
   <div className="m2-text-tabs" role="tablist" aria-label="Time off views">{['Balances','Requests','Holidays'].map(label=><button key={label} type="button" role="tab" aria-selected={tab===label} onClick={()=>{setTab(label);setSelected(null);}}>{label}</button>)}</div>
   {tab==='Balances' ? <>

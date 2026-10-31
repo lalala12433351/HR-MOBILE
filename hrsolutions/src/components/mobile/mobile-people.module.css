@@ -1,0 +1,43 @@
+.directory .person { display:flex; align-items:center; gap:12px; width:100%; padding:14px; border:1px solid var(--border-color,#dde4e9); border-radius:10px; background:var(--bg-surface,#fff); text-align:left; color:var(--text-primary,#172234); cursor:pointer; }
+.directory .person :global(.m2-person-avatar) { width:40px; height:40px; min-width:40px; }
+.personCopy { display:flex; flex:1; min-width:0; flex-direction:column; gap:4px; }
+.personCopy strong { font-size:13px; line-height:20px; font-weight:650; overflow-wrap:anywhere; }
+.personCopy > span, .personCopy small { font-size:12px; line-height:18px; color:var(--text-secondary,#5e6c7b); overflow-wrap:anywhere; }
+.personStatus { padding:3px 6px; border:1px solid var(--border-color,#dde4e9); border-radius:5px; font-size:11px; line-height:16px; background:var(--bg-app,#f3f5f7); }
+.personStatus[data-status="Active"] { color:var(--studio-sage,#3f6a52); background:var(--studio-sage-surface,#eaf1ee); border-color:#d8e5de; }
+.list { display:flex; flex-direction:column; gap:10px; }
+.actions { display:flex; flex-wrap:wrap; gap:8px; }
+.directory .actions > button { width:auto; min-height:40px; padding:0 14px; font-size:12px; }
+.directory :global(.m2-text-tabs) { display:flex; flex-wrap:wrap; gap:8px; border:0; padding:0; }
+.directory :global(.m2-text-tabs) button { min-height:36px; padding:8px 12px; border:1px solid var(--border-color,#dde4e9); border-radius:8px; background:var(--bg-surface,#fff); font-size:12px; }
+.directory :global(.m2-text-tabs) button[aria-selected="true"] { color:#fff; border-color:#17324e; background:#17324e; }
+.directory :global(.m2-search-field) { min-height:44px; border:1px solid var(--border-color,#dde4e9); border-radius:8px; background:var(--bg-surface,#fff); font-size:13px; }
+.directory :global(.m2-row) { border:1px solid var(--border-color,#dde4e9); border-radius:10px; padding:14px; margin-bottom:8px; }
+.directory :global(.m2-row-title) { font-size:13px; }
+.directory :global(.m2-row-detail) { font-size:12px; }
+.person:focus-visible { outline:2px solid #2d628e; outline-offset:3px; }
+@media(max-width:767px) {
+ .detail[class] { gap:16px; }
+ .detail :global(.m2-employee-identity) { padding:16px; border:1px solid var(--border-color,#dde4e9); border-radius:10px; background:var(--bg-surface,#fff); }
+ .detail :global(.m2-employee-identity) h2 { font-size:18px; line-height:26px; }
+ .detail :global(.m2-employee-identity) p { font-size:13px; }
+ .detail > :global(.m2-secondary) { align-self:flex-start; width:auto; min-height:40px; padding-inline:14px; font-size:12px; }
+ .detail > :global(.m2-section) { padding:16px; margin:0; border:1px solid var(--border-color,#dde4e9); border-radius:10px; background:var(--bg-surface,#fff); }
+ .detail :global(.m2-section-heading) { margin-bottom:12px; }
+ .detail :global(.m2-section-heading) h2 { font-size:14px; font-weight:700; }
+ .detail :global(.m2-profile-information) > div { display:grid; grid-template-columns:minmax(80px,.7fr) minmax(0,1.3fr); gap:14px; min-height:0; padding:12px 0; }
+ .detail :global(.m2-profile-information) dd { font-size:13px; }
+ .detail :global(.m2-record-menu) > button { min-height:44px; font-size:13px; }
+ .record[class] :global(.employee-profile-tabs) { gap:8px; padding:0 0 12px; }
+ .record[class] :global(.employee-profile-tabs) button { min-height:36px; padding:8px 12px; font-size:12px; border:1px solid var(--border-color,#dde4e9); border-radius:8px; background:var(--bg-surface,#fff); }
+ .record[class] :global(.employee-profile-tabs) button[aria-selected="true"] { background:#17324e; color:white; border-color:#17324e; }
+ .record[class] :global(.employee-profile-section) { border:1px solid var(--border-color,#dde4e9); border-radius:10px; padding:16px; background:var(--bg-surface,#fff); }
+ .record[class] :global(.employee-profile-section) h3 { font-size:14px; }
+}
+
+@media(max-width:767px) {
+ .detail.detail > :global(.m2-secondary) { width:auto; align-self:flex-start; }
+ .detail.detail :global(.m2-section-body) { padding-top:0; margin-top:0; }
+ .detail.detail :global(.m2-section-heading) { padding:0; margin:0 0 8px; }
+ .record[class] > :global(.employee-profile-desktop-back) { display:none; }
+}

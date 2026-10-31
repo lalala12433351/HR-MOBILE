@@ -6,6 +6,7 @@ import { SplashScreen } from '@capacitor/splash-screen';
 import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
 import { isNativePlatform } from './platform';
 import { initAppNotifications } from './notifications';
+import { initNativePush } from './push';
 
 let initialized = false;
 
@@ -44,6 +45,13 @@ export async function initNativeShell(): Promise<() => void> {
     unsubscribers.push(disposeNotifications);
   } catch {
     // Local notifications plugin may be unavailable until cap sync
+  }
+
+  try {
+    const disposePush = await initNativePush();
+    unsubscribers.push(disposePush);
+  } catch {
+    // Push plugin may be unavailable until cap sync + google-services.json
   }
 
   const backListener = await CapApp.addListener('backButton', ({ canGoBack }) => {

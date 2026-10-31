@@ -1,0 +1,13 @@
+/* Compatibility for legacy light utility classes while modules move to tokens.
+   Keep primary navy fills and white button labels intact. */
+[data-theme="dark"] { color-scheme:dark; }
+[data-theme="dark"] .pixbe-app :is(.bg-white,[class~="bg-[#ffffff]"],[class~="bg-[#fff]"]) { background-color:var(--bg-surface)!important; }
+[data-theme="dark"] .pixbe-app :is([class~="bg-[#f3f5f7]"],[class~="bg-[#f8fbfe]"],[class~="bg-slate-50"],[class~="bg-gray-50"]) { background-color:var(--bg-app)!important; }
+[data-theme="dark"] .pixbe-app :is([class~="bg-[#e8eef2]"],[class~="bg-slate-100"]) { background-color:var(--bg-surface-subtle)!important; }
+[data-theme="dark"] .pixbe-app :is([class~="text-[#172234]"],[class~="text-[#17324e]"],[class~="text-[#0f172a]"],[class~="text-slate-900"],[class~="text-gray-900"]) { color:var(--text-primary)!important; }
+[data-theme="dark"] .pixbe-app :is([class~="text-[#5e6c7b]"],[class~="text-[#687789]"],[class~="text-slate-500"],[class~="text-slate-600"],[class~="text-gray-500"]) { color:var(--text-secondary)!important; }
+[data-theme="dark"] .pixbe-app :is([class~="border-[#dde4e9]"],[class~="border-[#c5d0d8]"],[class~="border-gray-200"],[class~="border-slate-200"]) { border-color:var(--border-color)!important; }
+[data-theme="dark"] .pixbe-app :is(input,select,textarea) { color-scheme:dark; }
+[data-theme="dark"] .pixbe-app img[src^="/mobile-v2/"] { filter:brightness(1.8) saturate(.65); }
+
+[data-theme="dark"] .m2-header img[src^="/mobile-v2/"] { filter:brightness(0) invert(.85); }

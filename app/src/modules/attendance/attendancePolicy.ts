@@ -287,7 +287,7 @@ export async function ensurePunchPhotoColumn(req: Request): Promise<boolean> {
 
 type TenantSql = (text: string, params?: unknown[]) => Promise<{ rows: any[] }>;
 
-export const OUTSIDE_DWELL_MS = 10 * 60 * 1000;
+export const OUTSIDE_DWELL_MS = 15 * 60 * 1000;
 const GEOFENCE_DEVICE = 'Left office geofence';
 const MISSED_TIME_DEVICE = 'Missed punch-out time';
 
@@ -724,6 +724,8 @@ export type PresencePingResult = {
   signsOutAt?: string | null;
   workDate?: string;
   checkOutLabel?: string;
+  /** True when this ping first marked the employee outside after being inside. */
+  firstOutside?: boolean;
 };
 
 export async function recordPresencePing(
@@ -782,7 +784,9 @@ export async function recordPresencePing(
     return { status: 'ignored', reason: 'never_inside' };
   }
 
-  let outsideSince = prior?.outside_since ? new Date(prior.outside_since) : null;
+  const priorOutside = prior?.outside_since ? new Date(prior.outside_since) : null;
+  const firstOutside = !priorOutside || priorOutside.getTime() <= punchedAt.getTime();
+  let outsideSince = priorOutside;
   if (!outsideSince || outsideSince.getTime() <= punchedAt.getTime()) outsideSince = new Date();
   await query(
     `INSERT INTO attendance_presence (
@@ -830,12 +834,14 @@ export async function recordPresencePing(
       outsideSince: since.toISOString(),
       workDate: dateKeyInZone(punchedAt, zone),
       checkOutLabel: clockLabelInZone(since, zone),
+      firstOutside,
     };
   }
   return {
     status: 'outside',
     outsideSince: since.toISOString(),
     signsOutAt: new Date(since.getTime() + OUTSIDE_DWELL_MS).toISOString(),
+    firstOutside,
   };
 }
 

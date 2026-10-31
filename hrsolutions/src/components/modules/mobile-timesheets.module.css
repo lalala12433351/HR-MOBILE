@@ -1,0 +1,75 @@
+.viewRow { display:contents; }
+@media(max-width:767px) {
+ .page:global(.timesheets-page)[data-mobile-filters][class] { gap:16px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-time-toolbar) { display:flex;flex-direction:column;align-items:stretch;gap:12px;width:100%;padding:0;border:0;background:transparent; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-time-controls) { display:flex;flex-direction:column;align-items:stretch;order:0;gap:12px;width:100%; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] .viewRow { display:flex;align-items:center;justify-content:space-between;gap:8px;order:-1;min-width:0;width:100%; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-time-views) { display:flex;flex-wrap:wrap;gap:6px;width:auto;height:auto;min-width:0;padding:0;border:0;background:transparent; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-time-views button),.filterButton { display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-height:36px;height:auto;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-surface);color:var(--text-secondary);font-size:12px;line-height:18px;font-weight:550;text-transform:capitalize; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-time-views button.is-on) { border-color:var(--studio-navy);background:#17324e;color:#fff; }
+ .filterButton[aria-expanded="true"] { border-color:var(--studio-navy);color:var(--studio-navy);background:var(--studio-selected); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-time-navigation) { display:flex;align-items:center;justify-content:space-between;order:1;gap:12px;min-width:0;width:100%;padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-date-step) { display:flex;gap:4px;flex-shrink:0; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-date-step button) { display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:36px;width:auto;height:auto;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-surface);font-size:12px;line-height:18px;color:var(--studio-navy); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-period-title) { min-width:0;margin:0;font-size:13px;line-height:20px;font-weight:600;text-align:right;white-space:normal;overflow-wrap:anywhere; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-time-controls > .mobile-filter-disclosure) { display:none; }
+ .page:global(.timesheets-page)[data-mobile-filters="true"][class] :global(.work-time-controls > .mobile-filter-disclosure) { display:block;width:100%;margin:0; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.mobile-filter-disclosure > summary) { display:none; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.mobile-filter-content) { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-log-search) { display:flex;align-items:center;grid-column:1/-1;gap:8px;width:100%;min-height:44px;height:auto;padding:10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-surface); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-log-search input.work-field) { width:100%;min-width:0;min-height:0;padding:0;border:0;background:transparent;font-size:13px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(select.work-field) { display:block;min-width:0;width:100%;max-width:100%;min-height:44px;height:auto;padding:10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-surface);font-size:12px;color:var(--text-primary); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-time-people) { display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-time-people h3) { margin:0;font-size:12px;line-height:18px;font-weight:600; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-period-review) { gap:8px;margin:0; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-period-review button) { min-height:36px;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;font-size:12px;line-height:18px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-review-note) { font-size:12px;line-height:19px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-timesheets) { gap:16px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.m2-metric) { gap:8px;padding:16px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.m2-metric > strong) { font-size:24px;line-height:32px;letter-spacing:0; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.m2-metric > small) { font-size:12px;line-height:18px;color:var(--text-secondary); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-totals) { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:0;border:0;background:transparent; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-totals > div) { display:flex;flex-direction:column;gap:8px;min-width:0;padding:14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-totals span) { font-size:12px;line-height:18px;color:var(--text-secondary); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-totals strong) { margin-top:0;font-size:22px;line-height:28px;font-weight:650;letter-spacing:-.01em;color:var(--studio-navy);overflow-wrap:anywhere; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.m2-section-heading h2) { font-size:14px;line-height:21px;font-weight:600; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-agenda) { gap:10px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-agenda > h2) { margin:0;padding:4px 0;font-size:12px;line-height:18px;font-weight:600;color:var(--text-secondary); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-entry) { min-height:0;gap:8px;padding:14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface);box-shadow:none; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] .entryHeading { display:flex;align-items:flex-start;justify-content:space-between;gap:12px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-entry strong) { font-size:13px;line-height:20px;font-weight:600;overflow-wrap:anywhere;color:var(--text-primary); }
+ .entryHeading small { flex-shrink:0;font-size:11px;line-height:18px;color:var(--text-secondary); }
+ .entryHeading small[data-status="Approved"] { color:var(--accent-teal-foreground); }
+ .entryHeading small[data-status="Rejected"] { color:var(--accent-rose-foreground); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-entry > span:nth-of-type(2)) { display:block;font-size:12px;line-height:19px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] .entryHours { padding-top:10px;border-top:1px solid var(--border-color);font-size:12px;line-height:18px;font-weight:550;color:var(--studio-navy); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-week) { display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;padding:8px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-week button) { min-width:0;min-height:64px;padding:6px 2px;border:1px solid transparent;border-radius:6px;font-size:10px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-week button strong) { font-size:13px;line-height:20px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-week button small) { font-size:10px;line-height:14px;overflow-wrap:anywhere; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-week button[aria-pressed="true"]) { background:#17324e;color:#fff; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-month) { gap:4px;padding:10px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-month button) { min-width:0;min-height:48px;padding:4px 2px;border-radius:6px;font-size:12px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-month button small) { font-size:10px;line-height:14px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-month button[aria-pressed="true"]) { background:#17324e;color:#fff; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-empty) { margin:0;padding:20px 14px;border:1px dashed var(--border-color);border-radius:10px;font-size:12px;line-height:20px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-list-actions) { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface);font-size:12px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.m2-timesheet-actions) { display:flex;flex-direction:row;flex-wrap:wrap;gap:8px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.m2-timesheet-actions > button),.page:global(.timesheets-page)[data-mobile-filters][class] :global(.work-mobile-list-actions button) { flex:0 1 auto;width:auto;min-height:40px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;font-size:12px;line-height:20px; }
+ .page:global(.timesheets-page)[data-mobile-filters][class] :global(.m2-timesheet-actions > .m2-primary) { border-color:var(--studio-navy); }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-modal-head) { display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border-color);background:var(--bg-surface); }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-modal-head h2) { margin:0;font-size:16px;line-height:24px;font-weight:650; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-modal-head p) { margin-top:5px;font-size:12px;line-height:18px; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-modal-head button) { min-width:36px;height:36px;padding:8px;border:1px solid var(--border-color);border-radius:8px; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-modal-tabs) { gap:8px;padding:12px 20px;border-bottom:1px solid var(--border-color); }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-modal-tabs button) { min-height:36px;padding:8px 12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-surface);font-size:12px;line-height:18px; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-modal-tabs button[aria-selected="true"]) { background:#17324e;border-color:var(--studio-navy);color:#fff; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-form-body) { gap:16px; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-modal-footer) { flex-shrink:0;gap:8px;padding:12px 20px max(12px,env(safe-area-inset-bottom));border-top:1px solid var(--border-color); }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-modal-footer button) { flex:0 1 auto;min-height:40px;padding:8px 12px;border-radius:8px;font-size:12px;line-height:20px; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-billable) { padding:12px;border:1px solid var(--border-color);border-radius:10px; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-meeting-people) { padding:14px;border:1px solid var(--border-color);border-radius:10px; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-meeting-people h3) { margin:0 0 10px;font-size:13px;line-height:20px;font-weight:600; }
+ .form[role="dialog"][data-drawer-kind][class] :global(.work-time-meeting-people > div > span) { max-width:100%;overflow-wrap:anywhere;border:1px solid var(--border-color);border-radius:6px;font-size:12px; }
+ .page :is(button,input,select,summary):focus-visible { outline:2px solid var(--studio-navy);outline-offset:3px; }
+}

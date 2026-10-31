@@ -170,13 +170,13 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
 
   const departmentLine = [employee.department, employee.team].filter(Boolean).join(' · ') || null;
   const officeLine = employee.officeName || employee.location || null;
-  const metaLine = [departmentLine, officeLine].filter(Boolean).join('  ·  ').toUpperCase();
+  const metaLine = [departmentLine, officeLine].filter(Boolean).join(' · ');
   const email = employee.email?.trim();
   const phone = employee.phone?.trim();
   const timezone = employee.timezone?.trim();
   const skills = Array.isArray(employee.skills) ? employee.skills.filter(Boolean) : [];
   const showAbout = bioEditable || !!bioText;
-  const status = statusTone(employee.accountStatus);
+  const status = statusTone(employee.isDeactivated ? 'Deactivated' : employee.accountStatus || employee.status);
 
   const avatarSize = isPeek ? 'h-[88px] w-[88px]' : 'h-[104px] w-[104px]';
 
@@ -203,13 +203,6 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
           iconClassName={isPeek ? 'h-10 w-10' : 'h-12 w-12'}
         />
       </div>
-      {status && (
-        <span
-          className={`public-profile-identity-status absolute -bottom-1 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] ${status.className}`}
-        >
-          {status.label}
-        </span>
-      )}
       {showAvatarEdit && (
         <span className="absolute -right-0.5 top-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#17324e] text-white shadow-sm">
           <Camera className={`h-3.5 w-3.5 ${isUploadingAvatar ? 'animate-pulse' : ''}`} />
@@ -220,7 +213,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
 
   const tabs: Array<{ id: ProfileTab; label: string }> = [
     { id: 'summary', label: 'Summary' },
-    { id: 'personal', label: 'Personal' },
+    { id: 'personal', label: 'Contact & work' },
   ];
 
   const summaryContent = (
@@ -232,6 +225,7 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
             <textarea
               value={bioDraft ?? ''}
               onChange={(e) => onBioDraftChange?.(e.target.value)}
+              aria-label="Public bio"
               rows={4}
               maxLength={500}
               placeholder="Write a short bio coworkers will see…"
@@ -260,6 +254,11 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
         )}
       </section>
 
+      <section className="public-profile-workplace">
+        <h3>Workplace</h3>
+        <dl>{[['Department', employee.department], ['Team', employee.team], ['Office', officeLine], ['Timezone', timezone]].filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+        {!departmentLine && !officeLine && !timezone && <p>No workplace details added yet.</p>}
+      </section>
       <section className="public-profile-team">
         <h3 className="text-[15px] font-bold tracking-[-0.02em] text-[#172234]">Team</h3>
         <div className="mt-4 max-w-md">
@@ -408,54 +407,20 @@ export const EmployeePublicProfilePanel: React.FC<EmployeePublicProfilePanelProp
         />
       )}
 
-      {/* Identity hero — light Clean Sheet, no muddy navy/gray slab */}
-      <header
-        className={`public-profile-hero relative border-b border-[#d8e8f2] bg-[#f8fbfe] ${
-          isPeek ? 'px-6 pb-7 pt-9 sm:px-8' : 'px-6 pb-8 pt-9 sm:px-10'
-        }`}
-      >
-        <div className="flex flex-col items-center text-center">
-          <div className={status ? 'mb-5' : 'mb-3'}>{avatarBlock}</div>
-          <h2 className="mt-1 max-w-[28ch] text-[22px] font-bold leading-tight tracking-[-0.028em] text-[#172234] sm:text-[26px]">
-            {displayName}
-          </h2>
-          <p className="mt-1.5 text-[14px] font-medium text-[#5e6c7b]">{designation}</p>
-          {metaLine ? (
-            <p className="mt-2 max-w-[40ch] text-[11px] font-semibold tracking-[0.08em] text-[#2d628e]">
-              {metaLine}
-            </p>
-          ) : null}
-
-          <div className="public-profile-contact-actions mt-5 flex items-center justify-center gap-2.5">
-            {email ? (
-              <a
-                href={`mailto:${email}`}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#c5d0d8] bg-white text-[#17324e] transition-colors hover:border-[#17324e] hover:bg-[#e8eef2] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
-                aria-label={`Email ${displayName}`}
-                title={email}
-              >
-                <Mail size={18} className="h-[18px] w-[18px]" strokeWidth={2} />
-              </a>
-            ) : null}
-            {phone ? (
-              <a
-                href={`tel:${phone}`}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-[7px] bg-[#17324e] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#285275] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
-                aria-label={`Call ${displayName}`}
-              >
-                Call
-              </a>
-            ) : email ? (
-              <a
-                href={`mailto:${email}`}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-[7px] bg-[#17324e] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#285275] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#d8e8f2]"
-              >
-                <Mail className="h-3.5 w-3.5" strokeWidth={2} />
-                Message
-              </a>
-            ) : null}
+      <header className="public-profile-hero">
+        <div className="public-profile-identity-row">
+          {avatarBlock}
+          <div className="public-profile-identity-copy">
+            <h2>{displayName}</h2>
+            <p>{designation}</p>
+            {status && <span className={`public-profile-identity-status ${status.className}`}>{status.label}</span>}
           </div>
         </div>
+        {metaLine && <p className="public-profile-meta">{metaLine}</p>}
+        {(email || phone) && <div className="public-profile-contact-actions">
+          {email && <a href={`mailto:${email}`} aria-label={`Email ${displayName}`}><Mail size={15} aria-hidden="true"/>Email</a>}
+          {phone && <a href={`tel:${phone}`} aria-label={`Call ${displayName}`}><Phone size={15} aria-hidden="true"/>Call</a>}
+        </div>}
       </header>
 
       {/* Tabs */}

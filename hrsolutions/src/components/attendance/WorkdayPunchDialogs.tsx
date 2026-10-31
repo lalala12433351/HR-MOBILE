@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import styles from './mobile-punch-location.module.css';
 import { X } from 'lucide-react';
 import { useMobileViewport } from '@/hooks/useMobileViewport';
 import { PunchLocationLeafletMap } from '@/components/common/PunchLocationLeafletMap';
@@ -455,7 +456,7 @@ export function WorkdayPunchDialogs({
   return (
     <div className="att-overlay" role="presentation" onClick={saving ? undefined : onClose}>
       <div
-        className={'att-dialog' + (step === 'map' ? ' att-dialog--location' : '')}
+        className={'att-dialog' + (step === 'map' ? ` att-dialog--location ${styles.location}` : '')}
         role="dialog"
         aria-modal="true"
         aria-labelledby="att-punch-title"
@@ -523,12 +524,12 @@ export function WorkdayPunchDialogs({
           </div>
         )}
 
-        {mobile && step === 'map' && <div className="m2-punch-details">
-          <h3>{isLocating ? 'Finding punch location' : gpsStatus === 'denied' ? 'Location permission required' : !hasDeviceGps ? 'Location not verified' : geofenceOptional ? 'Location detected' : insideRadius ? 'You’re within the office zone' : 'You’re outside the office zone'}</h3>
-          <div><small>Punch location</small><p role="status">{punchAddress}</p></div>
-          <div className="m2-punch-time"><div><strong suppressHydrationWarning>{timeLabel}</strong><small>{dateLabel}</small></div><div><p>{locationLabel}</p><small>{gpsAccuracy != null ? 'GPS accuracy · ' + Math.round(gpsAccuracy) + ' m' : 'Waiting for GPS'}</small></div></div>
-          {gpsStatus === 'denied' && <button type="button" className="work-btn-secondary" onClick={fetchLocation}>Retry GPS</button>}
-          <small>Your location is used only to verify this attendance punch.</small>
+        {mobile && step === 'map' && <div className={styles.details}>
+          <h3 aria-live="polite">{isLocating ? 'Finding your location' : gpsStatus === 'denied' ? 'Allow location to continue' : !hasDeviceGps ? 'Location not verified' : geofenceOptional ? 'Location detected' : insideRadius ? 'Within office zone' : 'Outside office zone'}</h3>
+          <p className={styles.office}>{locationLabel}</p>
+          <p className={styles.address}>{punchAddress}</p>
+          {gpsAccuracy != null && <small className={styles.accuracy}>GPS accuracy: {Math.round(gpsAccuracy)} m</small>}
+          {gpsStatus === 'denied' && <button type="button" className="work-btn-secondary" onClick={fetchLocation}>Retry location</button>}
         </div>}
         {step === 'map' && (
           <div className="shrink-0">
@@ -597,9 +598,9 @@ export function WorkdayPunchDialogs({
                 }
                 className={`work-btn-primary ${isPunchDisabled ? 'opacity-55 cursor-not-allowed' : ''}`}
               >
-                Confirm location
+                {mobile ? 'Continue' : 'Confirm location'}
               </button>
-              {mobile && requireSelfie && <small>Next · Take your attendance photo</small>}
+
             </div>
           </div>
         )}

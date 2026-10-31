@@ -11,3 +11,12 @@ export const pushSubscriptionSchema = z.object({
 export const pushUnsubscribeSchema = z.object({
   endpoint: z.string().url().max(4096),
 });
+
+export const pushDeviceSchema = z.object({
+  token: z.string().trim().min(8).max(4096),
+  platform: z.enum(['android', 'ios']),
+});
+
+export const pushDeviceDeleteSchema = z.object({
+  token: z.string().trim().min(8).max(4096),
+});

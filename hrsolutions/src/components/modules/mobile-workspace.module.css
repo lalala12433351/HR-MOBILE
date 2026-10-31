@@ -1,0 +1,40 @@
+.filterField { display:contents; }
+.filterField > span { display:none; }
+@media(max-width:767px) {
+ .page:global(.projects-page)[data-mobile-work-view] { gap:20px; }
+ .page:global(.projects-page)[data-mobile-work-view] > :global(.work-tabs) { display:flex;align-items:center;justify-content:flex-start;gap:6px;order:-2;width:100%;margin:0;padding:0;border:0;background:transparent; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-tabs > .work-tab) { display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:auto;min-height:32px;padding:5px 12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-surface);color:var(--text-secondary);font-size:12px;line-height:18px;font-weight:550;transition:background-color .16s,color .16s,border-color .16s; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-tabs > .work-tab[aria-selected="true"]) { border-color:var(--studio-navy);background:#17324e;color:#fff;font-weight:600; }
+ .page:global(.projects-page)[data-mobile-work-view] > :global(.work-toolbar) { order:-1;display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-toolbar .mobile-filter-disclosure:not([open])),
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-toolbar .mobile-filter-disclosure[open]) { display:block; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-toolbar .mobile-filter-disclosure > summary) { display:flex;align-items:center;min-height:32px;width:fit-content;padding:5px 12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-surface);font-size:12px;font-weight:600;color:var(--studio-navy); }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.mobile-filter-content) { display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;padding:var(--mobile-card-padding,16px);border:1px solid var(--border-color);border-radius:var(--mobile-card-radius,10px);background:var(--bg-surface); }
+ .page:global(.projects-page)[data-mobile-work-view] .filterField { display:flex;flex:1 1 140px;flex-direction:column;gap:8px;min-width:0; }
+ .page:global(.projects-page)[data-mobile-work-view] .filterField > span { display:block;font-size:12px;line-height:18px;font-weight:550;color:var(--text-secondary); }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.mobile-filter-content select.work-field) { display:block;width:100%;min-width:0;min-height:var(--mobile-field-height,48px);padding:10px 32px 10px 12px;border:1px solid var(--border-strong);border-radius:var(--mobile-control-radius,8px);background:var(--bg-surface);color:var(--text-primary);font-size:14px; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-toolbar input.work-field) { border:1px solid var(--border-color);border-radius:8px;font-size:14px; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.m2-task-list) { gap:12px; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.m2-section-heading h2) { font-size:15px;font-weight:650; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.m2-task-row) { gap:8px;min-height:0;padding:16px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page:global(.projects-page)[data-mobile-work-view] .taskHeading { display:flex;align-items:flex-start;justify-content:space-between;gap:12px; }
+ .page:global(.projects-page)[data-mobile-work-view] .taskHeading strong { font-size:14px;line-height:21px;font-weight:600;overflow-wrap:anywhere; }
+ .page:global(.projects-page)[data-mobile-work-view] .taskHeading small { flex-shrink:0;max-width:90px;font-size:11px;line-height:20px;font-weight:500; }
+ .page:global(.projects-page)[data-mobile-work-view] .taskFooter { display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:10px;margin-top:2px;border-top:1px solid var(--border-color);font-size:12px;line-height:18px; }
+ .taskFooter [data-overdue="true"] { color:var(--accent-rose-foreground); }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-board-status) { display:flex;flex-wrap:wrap;gap:6px;padding-bottom:4px; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-board-status button) { display:flex;flex-direction:row;align-items:center;gap:6px;min-height:32px;padding:5px 10px;border:1px solid var(--border-color);border-radius:6px;font-size:12px;background:var(--bg-surface);color:var(--text-secondary); }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-board-status button strong) { display:inline;font-size:12px;font-weight:600;color:inherit; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-board-status button[aria-pressed="true"]) { border-color:var(--accent-indigo-foreground);background:var(--accent-indigo-surface);color:var(--accent-indigo-foreground); }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-col-body) { gap:12px; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-card.work-task-card) { gap:6px;min-height:0;padding:14px 16px;border:1px solid var(--border-color);border-radius:10px; }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-card.work-task-card.is-prio-urgent) { background:var(--studio-error-surface);border-color:color-mix(in srgb,var(--studio-error) 22%,var(--border-color)); }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-card.work-task-card.is-prio-high) { background:var(--prio-high-surface);border-color:color-mix(in srgb,var(--prio-high) 22%,var(--border-color)); }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-card.work-task-card.is-prio-medium) { background:var(--studio-selected);border-color:color-mix(in srgb,var(--studio-navy) 16%,var(--border-color)); }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.work-card.work-task-card.is-prio-low) { background:var(--studio-sage-surface);border-color:color-mix(in srgb,var(--studio-sage) 22%,var(--border-color)); }
+ .page:global(.projects-page)[data-mobile-work-view] :global(.m2-project-overview) { padding:0;gap:16px; }
+ .page button:focus-visible { outline:2px solid var(--studio-navy);outline-offset:3px; }
+}
+@media(prefers-reduced-motion:reduce) {
+ .page :global(.work-tab) { transition:none; }
+}

@@ -4,6 +4,7 @@ import './globals.css';
 import './mobile.css';
 import './mobile-v2.css';
 import './mobile-figma.css';
+import './dark-theme.css';
 import { AppShell } from '@/components/layout/AppShell';
 
 export const metadata: Metadata = {

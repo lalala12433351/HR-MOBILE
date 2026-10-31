@@ -1,0 +1,56 @@
+/* Shared mobile layout for work and attendance drawers. Desktop layouts stay scoped to their modules. */
+@media(max-width:767px) {
+ .overlay[class] { position:fixed;inset:0;padding:0;align-items:stretch; }
+ .panel[role="dialog"][data-drawer-kind][class] { display:flex;flex-direction:column;width:100%;max-width:100%;height:100dvh;max-height:100dvh;min-height:0;overflow:hidden;border:0;border-radius:0;background:var(--bg-surface);color:var(--text-primary);box-shadow:none; }
+ .panel[role="dialog"][data-drawer-kind][class] > div:first-child,
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-header) { display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0;gap:12px;min-height:64px;margin:0;padding:calc(14px + env(safe-area-inset-top)) 20px 14px;border-bottom:1px solid var(--border-color);background:var(--bg-surface); }
+ .panel[role="dialog"][data-drawer-kind][class] :is(:global(.task-panel-header),:global(.work-drawer) > div:first-child) { width:100%; }
+ .panel[role="dialog"][data-drawer-kind][class] > div:first-child :is(h2,h3),
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-header h2) { margin:0;font-size:16px;line-height:24px;letter-spacing:-.3px;font-weight:650;white-space:normal;overflow-wrap:anywhere; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-header p) { display:block;margin:5px 0 0;font-size:12px;line-height:18px;color:var(--text-secondary); }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-back) { display:none; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-desktop-log) { display:none; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-close),
+ .panel[role="dialog"][data-drawer-kind][class] button[aria-label="Close project details"],
+ .panel[role="dialog"][data-drawer-kind][class] > div:first-child > button { display:flex;align-items:center;justify-content:center;flex-shrink:0;min-width:36px;width:36px;min-height:36px;height:36px;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface);color:var(--text-secondary); }
+ .panel[role="dialog"][data-drawer-kind][class] > form,
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-form) { display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-body),
+ .panel[role="dialog"][data-drawer-kind][class] > form > div:first-child,
+ .panel[role="dialog"][data-drawer-kind="detail"][class]:global(.work-drawer) > div:nth-child(2) { flex:1;min-height:0;padding:16px 20px;overflow-y:auto;overscroll-behavior:contain;font-size:13px;line-height:20px; }
+ .panel[role="dialog"][data-drawer-kind="form"][class] :global(.task-panel-body),
+ .panel[role="dialog"][data-drawer-kind="form"][class] > form > div:first-child { background:var(--bg-surface); }
+ .panel[role="dialog"][data-drawer-kind="detail"][class] :global(.task-detail-body) { display:flex;flex-direction:column;gap:14px;background:var(--bg-app); }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-body) > * { flex-shrink:0;min-width:0; }
+ .panel[role="dialog"][data-drawer-kind][class] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]),select,textarea),
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-people > summary) { min-width:0;width:100%;max-width:100%;min-height:44px;height:auto;padding:10px 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-surface);font-family:inherit;font-size:13px;line-height:20px;color:var(--text-primary);text-align:left; }
+ .panel[role="dialog"][data-drawer-kind][class] :is(input,select,textarea):disabled { opacity:.65; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-field),
+ .panel[role="dialog"][data-drawer-kind][class] label { gap:6px;font-size:12px;line-height:18px;font-weight:500; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-people > summary) { justify-content:space-between; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-people > summary > span) { white-space:normal;overflow-wrap:anywhere; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-metadata .task-field) { grid-template-columns:minmax(0,1fr);gap:8px;align-items:start;padding:12px 0; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-metadata select) { field-sizing:fixed; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-due-field .task-due-line),
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-due-field .task-overdue) { grid-column:1;justify-self:stretch; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-due-line) { display:flex;flex-wrap:wrap;justify-content:flex-start;gap:8px; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-due-line .pixbe-date-input) { flex:1;min-width:0;border:1px solid var(--border-strong);border-radius:8px; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-due-line .pixbe-date-input__display) { padding:10px 12px;text-align:left; }
+ .panel[role="dialog"][data-drawer-kind][class] :is(:global(.task-workflow),:global(.task-overview),:global(.task-subtasks),:global(.task-attachments)) { padding:14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-detail-body h3) { margin:0;font-size:14px;line-height:21px;font-weight:600; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-mobile-workflow) { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-mobile-workflow summary) { min-height:36px;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-surface);font-size:12px;line-height:18px; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-mobile-workflow details > div) { padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface); }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-add-subtask) { display:flex;align-items:center;gap:8px; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-add-subtask input) { flex:1; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-attachments-heading > div) { display:flex;flex-wrap:wrap;gap:8px; }
+ .panel[role="dialog"][data-drawer-kind][class] button { min-height:36px;padding:8px 10px;border-radius:8px;font-size:12px;line-height:18px;box-shadow:none; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-footer),
+ .panel[role="dialog"][data-drawer-kind][class] > form > div:last-child,
+ .panel[role="dialog"][data-drawer-kind="detail"][class]:global(.work-drawer) > div:last-child { display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;flex-wrap:wrap;gap:8px;margin:0;padding:12px 20px max(12px,env(safe-area-inset-bottom));border-top:1px solid var(--border-color);background:var(--bg-surface); }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-panel-footer) > button,
+ .panel[role="dialog"][data-drawer-kind][class] > form > div:last-child > button,
+ .panel[role="dialog"][data-drawer-kind="detail"][class]:global(.work-drawer) > div:last-child > button { flex:0 1 auto;min-width:0;width:auto;min-height:40px;padding:8px 12px;border-radius:8px;font-size:12px;line-height:20px;white-space:nowrap;box-shadow:none; }
+ .panel[role="dialog"][data-drawer-kind][class] :global(.task-danger) { margin-right:auto; }
+ .panel[role="dialog"][data-drawer-kind][class] :is(button,input,select,textarea,summary,a):focus-visible { outline:2px solid var(--studio-navy);outline-offset:2px; }
+}

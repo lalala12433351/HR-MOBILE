@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { getGoogleMapsApiKey, loadGoogleMaps } from '@/lib/googleMaps';
+import { loadGoogleMaps } from '@/lib/googleMaps';
 
 interface PunchLocationLeafletMapProps {
   latitude: number;
@@ -68,11 +68,7 @@ export const PunchLocationLeafletMap: React.FC<PunchLocationLeafletMapProps> = (
         });
       } catch {
         if (!isCancelled) {
-          setMapError(
-            getGoogleMapsApiKey()
-              ? 'Google Maps could not load.'
-              : 'Add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to hrsolutions/.env and restart the app.',
-          );
+          setMapError('Map unavailable. Your GPS location is shown below.');
         }
       }
     };

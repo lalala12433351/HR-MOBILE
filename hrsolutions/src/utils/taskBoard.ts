@@ -13,9 +13,10 @@ const PRIORITY_RANK: Record<string, number> = {
 export type PriorityTone = 'urgent' | 'high' | 'medium' | 'low';
 
 export function priorityTone(priority?: string | null): PriorityTone {
-  if (priority === 'Urgent') return 'urgent';
-  if (priority === 'High') return 'high';
-  if (priority === 'Low') return 'low';
+  const tone = String(priority || '').trim().toLowerCase();
+  if (tone === 'urgent' || tone === 'critical') return 'urgent';
+  if (tone === 'high') return 'high';
+  if (tone === 'low') return 'low';
   return 'medium';
 }
 

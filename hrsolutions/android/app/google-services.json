@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1054373434431",
+    "project_id": "hr-solutions-51cc2",
+    "storage_bucket": "hr-solutions-51cc2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1054373434431:android:c63f745903ecc80a31d48a",
+        "android_client_info": {
+          "package_name": "in.pixbe.hrsolutions"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgVYlsckWTun3m50nNdyooZzs4CA9DaPU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

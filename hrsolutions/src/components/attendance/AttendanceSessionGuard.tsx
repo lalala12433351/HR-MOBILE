@@ -1,18 +1,23 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/services/apiClient';
 import { persistClockOutTaskSessions } from '@/utils/taskBoard';
 import { applyRemoteCheckout } from '@/utils/attendancePunches';
 import { publishAttendanceCheckout } from '@/utils/attendanceSessionEvents';
 import {
+  ensureLocationPermission,
   getCurrentPosition,
+  isNativePlatform,
   requestAppNotificationPermission,
   showAppNotification,
   watchPosition,
   type PositionWatchHandle,
 } from '@/lib/native';
+
+const GEOFENCE_WARN_NOTIF_ID = 915001;
 
 type MissedCheckout = {
   workDate: string;
@@ -109,22 +114,49 @@ export function AttendanceSessionGuard() {
           if (stopped || !res.success || !res.data) return;
           if (res.data.status === 'outside' && res.data.outsideSince && outsideToast.current !== res.data.outsideSince) {
             outsideToast.current = res.data.outsideSince;
+            const warning =
+              'You left the office geofence. You will be clocked out within 15 minutes.';
             triggerToast({
               title: 'Outside the office',
-              message: 'You are outside the office location. You will be punched out in 10 minutes.',
+              message: warning,
               type: 'info',
             });
             void showAppNotification(
               {
                 id: `outside:${res.data.outsideSince}`,
                 title: 'Outside the office',
-                body: 'You are outside the office location. You will be punched out in 10 minutes.',
+                body: warning,
+                linkUrl: '/attendance',
               },
               { force: true }
             );
+            if (isNativePlatform() && res.data.signsOutAt) {
+              const at = new Date(res.data.signsOutAt);
+              if (!Number.isNaN(at.getTime()) && at.getTime() > Date.now() + 5000) {
+                void LocalNotifications.schedule({
+                  notifications: [
+                    {
+                      id: GEOFENCE_WARN_NOTIF_ID,
+                      title: 'Clock-out soon',
+                      body: 'You are still outside the office. This shift will punch out now.',
+                      schedule: { at },
+                      extra: { linkUrl: '/attendance' },
+                    },
+                  ],
+                }).catch(() => {});
+              }
+            }
           }
-          if (res.data.status === 'inside') outsideToast.current = '';
+          if (res.data.status === 'inside') {
+            outsideToast.current = '';
+            if (isNativePlatform()) {
+              void LocalNotifications.cancel({ notifications: [{ id: GEOFENCE_WARN_NOTIF_ID }] }).catch(() => {});
+            }
+          }
           if (res.data.status === 'signed_out' && res.data.workDate && res.data.checkOutLabel) {
+            if (isNativePlatform()) {
+              void LocalNotifications.cancel({ notifications: [{ id: GEOFENCE_WARN_NOTIF_ID }] }).catch(() => {});
+            }
             const at = res.data.outsideSince || new Date().toISOString();
             noteSignOut({ workDate: res.data.workDate, checkOutLabel: res.data.checkOutLabel, at });
             stopWatch();
@@ -147,6 +179,7 @@ export function AttendanceSessionGuard() {
       if (tracking.current) return;
       tracking.current = true;
       void requestAppNotificationPermission();
+      void ensureLocationPermission({ always: true });
       const onCoords = (coords: { latitude: number; longitude: number; accuracy?: number }) => {
         sendFix(coords.latitude, coords.longitude, coords.accuracy);
       };

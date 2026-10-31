@@ -1,3 +1,4 @@
+import { WorkdayPunchDialogs } from '../src/components/attendance/WorkdayPunchDialogs';
 import { PayslipsPage } from '../src/components/modules/payroll/PayslipsPage';
 // Local-only visual fixture. API calls are replaced by inert responses by mobile-preview.cjs.
 import React from 'react';
@@ -45,6 +46,8 @@ const initial:any={...getDefaultState(),isAuthenticated:true,onboardingStatus:ne
 class Boundary extends React.Component<{children:React.ReactNode},{error:string}>{state={error:''};static getDerivedStateFromError(error:Error){return{error:error.stack||error.message}};render(){return this.state.error?<pre id="fixture-error">{this.state.error}</pre>:this.props.children}}
 function Preview(){const {state,updateState,mobileSidebarOpen,setMobileSidebarOpen}=useApp();const path=usePathname();const params=useSearchParams();const screen=params.get('screen')||path.slice(1)||'dashboard';const props={state,onUpdateState:updateState};let content:React.ReactNode;
  switch(screen){
+ case'punch-preview':content=<WorkdayPunchDialogs open now={new Date()} isCheckedIn={false} selectedLocation="office" locationLabel="Kite Aviation" requireSelfie requireGps geofenceOptional={false} outOfRadiusAction="Block" officeLat={12.97} officeLng={77.59} radiusMeters={100} isInstitution={false} saving={false} clockOutNotes="" onClockOutNotesChange={()=>{}} onClose={()=>{}} onConfirm={()=>{}}/>;break;
+
  case'dashboard':content=<DashboardModule/>;break;
  case'projects':content=<ProjectsModule {...props}/>;break;
  case'timesheets':content=<TimesheetsModule {...props}/>;break;

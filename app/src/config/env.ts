@@ -46,6 +46,12 @@ const envSchema = z.object({
   VAPID_PUBLIC_KEY: z.string().optional().default(''),
   VAPID_PRIVATE_KEY: z.string().optional().default(''),
   VAPID_SUBJECT: z.string().optional().default('mailto:support@pixbe.in'),
+
+  // Firebase Cloud Messaging (native Android/iOS). Empty keys disable native push.
+  FCM_PROJECT_ID: z.string().optional().default(''),
+  FCM_CLIENT_EMAIL: z.string().optional().default(''),
+  // Private key may include literal \n when stored in env files.
+  FCM_PRIVATE_KEY: z.string().optional().default(''),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

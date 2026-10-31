@@ -2,6 +2,7 @@
 
 import React, { useEffect, useId, useRef } from 'react';
 import { ChevronDown, X } from 'lucide-react';
+import mobileDrawerStyles from '@/components/common/mobile-drawers.module.css';
 
 /** Layouts from Projects / Add task (71:2787, 280:9553) and Task details (71:2554, 280:9492). */
 export function TaskPanel({ title, description, onClose, children, details = false, centered = false }: {
@@ -29,8 +30,8 @@ export function TaskPanel({ title, description, onClose, children, details = fal
     document.addEventListener('keydown', onKey);
     return () => { document.body.style.overflow = overflow; document.removeEventListener('keydown', onKey); if (previous?.isConnected) previous.focus(); };
   }, []);
-  return <div className={`task-panel-overlay${centered ? ' task-panel-overlay--centered' : ''}`} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-    <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={details ? 'Task details' : title} className={`task-panel${details ? ' task-panel--details' : ''}`}>
+  return <div className={`task-panel-overlay ${mobileDrawerStyles.overlay}${centered ? ' task-panel-overlay--centered' : ''}`} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" data-drawer-kind={details ? 'detail' : 'form'} aria-label={details ? 'Task details' : title} className={`task-panel ${mobileDrawerStyles.panel}${details ? ' task-panel--details' : ''}`}>
       {details && <button type="button" className="task-panel-back" onClick={onClose}>Back to projects</button>}
       <header className="task-panel-header">
         <div><h2>{title}</h2><p>{description}</p></div>

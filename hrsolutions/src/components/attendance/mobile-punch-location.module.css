@@ -1,0 +1,19 @@
+/* One location decision, with the next action always in reach. */
+@media(max-width:767px) {
+ .location[class][role="dialog"] { width:100%; height:100dvh; max-height:100dvh; max-width:100%; border:0; border-radius:0; box-shadow:none; overflow-y:auto; }
+ .location[class] > :global(.att-dialog-head) { min-height:64px; padding:calc(12px + env(safe-area-inset-top)) 20px 12px; border-bottom:1px solid var(--border-color); }
+ .location[class] > :global(.att-dialog-head) h2 { font-size:16px; line-height:24px; letter-spacing:-.25px; }
+ .location[class] > :global(.att-dialog-body) { flex:0 0 auto; height:30dvh; min-height:160px; max-height:240px; margin:16px 20px 0; border:1px solid var(--border-color); border-radius:10px; }
+ .details { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:20px; }
+ .details h3 { margin:0 0 6px; font-size:15px; line-height:22px; font-weight:650; color:var(--text-primary); }
+ .office { margin:0; font-size:13px; line-height:20px; font-weight:600; color:var(--text-primary); }
+ .address { margin:0; font-size:13px; line-height:21px; overflow-wrap:anywhere; color:var(--text-secondary); }
+ .accuracy { margin-top:4px; font-size:12px; line-height:18px; color:var(--text-muted); }
+ .details > button { min-height:36px; margin-top:4px; font-size:12px; }
+ .location[class] > :global(.shrink-0) { flex:0 0 auto; margin-top:auto; }
+ .location[class] :global(.att-dialog-foot) { flex:none; gap:0; margin:0; padding:16px 20px max(20px,env(safe-area-inset-bottom)); border-top:1px solid var(--border-color); background:var(--bg-surface); }
+ .location[class] :global(.att-dialog-foot) > button { min-height:44px; height:44px; font-size:13px; background:#17324e; color:white; }
+ .location[class] :global(.att-dialog-notice) { margin:0 20px 12px; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:12px; line-height:18px; }
+ .location[class] :global(.att-map-zoom) { top:10px; right:10px; }
+ .location[class] :global(.att-map-locate) { right:10px; bottom:24px; }
+}

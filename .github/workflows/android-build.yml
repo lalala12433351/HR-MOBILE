@@ -76,11 +76,22 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Require Google Maps API key
+        env:
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.MOBILE_GOOGLE_MAPS_API_KEY }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY" ]; then
+            echo "::error::Add repository secret MOBILE_GOOGLE_MAPS_API_KEY so CI-built APKs can load maps."
+            exit 1
+          fi
+
       - name: Build bundled mobile UI
         run: npm run build:mobile
         env:
           NEXT_PUBLIC_BACKEND_URL: ${{ vars.MOBILE_BACKEND_URL || 'https://api.pixbe.in' }}
           NEXT_PUBLIC_SERVER_API_ORIGIN: ${{ vars.MOBILE_SERVER_API_ORIGIN }}
+          # Baked into the static client bundle at build time (required for workplace/attendance maps).
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.MOBILE_GOOGLE_MAPS_API_KEY }}
 
       - name: Sync Capacitor Android
         run: npm run cap:sync:android

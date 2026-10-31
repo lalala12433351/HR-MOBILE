@@ -10,6 +10,11 @@ import { MobileProjectOverview } from '@/components/mobile/MobileProjectOverview
 import { MobilePageTitle } from '@/components/mobile/MobilePageTitle';
 import { MobileHeaderAction } from '@/components/mobile/MobileHeaderAction';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import mobileStyles from './mobile-workspace.module.css';
+import detailStyles from './mobile-project-details.module.css';
+import drawerStyles from '@/components/common/mobile-drawers.module.css';
+import { useDrawerFocus } from '@/hooks/useDrawerFocus';
 import {
   CheckCircle2,
   Clock,
@@ -124,6 +129,16 @@ const projectFieldClass =
   'w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-slate-400';
 
 export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateState }) => {
+  const requestedTaskId = useSearchParams().get('task');
+  const openedTaskLink = useRef<string | null>(null);
+  useEffect(() => {
+    if (!requestedTaskId) { openedTaskLink.current = null; return; }
+    if (openedTaskLink.current === requestedTaskId) return;
+    const task = state.tasks.find(item => item.id === requestedTaskId);
+    if (!task || !canManageTask(state.currentPersona, task, state.employees || [])) return;
+    setSelectedTask(task);
+    openedTaskLink.current = requestedTaskId;
+  }, [requestedTaskId, state.tasks, state.currentPersona, state.employees]);
   const todayStr = useMemo(() => localDateKey(), []);
   const openTaskAssignment =
     state.customOptions?.profileSelfServiceSettings?.anyoneCanAssignTasks === true;
@@ -141,6 +156,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   const [permissionNotice, setPermissionNotice] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedProjectForDetails, setSelectedProjectForDetails] = useState<Project | null>(null);
+  const projectDetailsRef = useDrawerFocus(Boolean(selectedProjectForDetails), () => setSelectedProjectForDetails(null));
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
   const [showCreateProjectModal, setShowCreateProjectModal] = useState(false);
   const [pendingTransitionTask, setPendingTransitionTask] = useState<{
@@ -1031,10 +1047,11 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
   const getPriorityBadge = (priority: Task['priority']) => {
     const Icon = priority === 'Urgent' || priority === 'High' ? ChevronsUp : priority === 'Low' ? ChevronDown : ChevronUp;
-    const tone = `work-prio work-prio-${priorityTone(priority)}`;
+    const tone = priorityTone(priority);
     return (
-      <span className={tone} title={`${priority} priority`} aria-label={`${priority} priority`}>
-        <Icon className="h-4 w-4" strokeWidth={2.6} />
+      <span className={`work-chip work-chip-${tone} gap-1`} title={`${priority} priority`} aria-label={`${priority} priority`}>
+        <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2.6} aria-hidden="true" />
+        {priority}
       </span>
     );
   };
@@ -2948,7 +2965,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
   };
 
   return (
-    <div className="work-page projects-page" data-mobile-work-view={activeTab}>
+    <div className={`work-page projects-page ${mobileStyles.page}`} data-mobile-work-view={activeTab}>
       {mobileViewport && <MobileHeaderAction><button type="button" className="m2-icon-button m2-add" aria-label="Add task" onClick={() => handleOpenCreateTaskModal()}>＋</button></MobileHeaderAction>}
       <div className="work-head">
         <h1 className="work-title"><span className="work-desktop-label">Plan project work</span><span className="work-mobile-label">Projects</span></h1>
@@ -2988,6 +3005,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           />
         </div>
         <ResponsiveFilters active={selectedProjectId !== 'All' || selectedEmployeeId !== 'All'}>
+        <label className={mobileStyles.filterField}><span>Project</span>
         <select
           value={selectedProjectId}
           onChange={(e) => setSelectedProjectId(e.target.value)}
@@ -3000,7 +3018,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
             <option key={p.id} value={p.id}>{p.code} — {p.name}</option>
           ))}
         </select>
+        </label>
         {canFilterByPerson && (
+          <label className={mobileStyles.filterField}><span>Person</span>
           <select
             value={selectedEmployeeId}
             onChange={(e) => setSelectedEmployeeId(e.target.value)}
@@ -3012,6 +3032,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
               <option key={emp.id} value={emp.id}>{emp.name}</option>
             ))}
           </select>
+          </label>
         )}
         </ResponsiveFilters>
         <span className="work-filter-count text-[12px] text-[var(--text-muted)]">
@@ -3135,7 +3156,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                             }
                             setSelectedTask(task);
                           }}
-                          className={`work-card work-task-card group space-y-3 is-prio-${priorityTone(task.priority)} ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
+                          className={`work-card work-task-card group is-prio-${priorityTone(task.priority)} ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
                             isDragged ? 'is-dragging' : ''
                           } ${showDropBefore ? 'is-drop-before' : ''} ${
                             overdue ? 'is-overdue' : isBeingTracked ? 'is-tracking' : isFeatured ? 'is-selected' : ''
@@ -3199,14 +3220,16 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         <div className="space-y-4">
           {/* Mobile Tasks Cards */}
           <div className="m2-task-list md:hidden">
-  <div className="m2-section-heading"><h2>Today</h2><span>{filteredTasks.length} tasks</span></div>
+  <div className="m2-section-heading"><h2>Tasks</h2><span>{filteredTasks.length} {filteredTasks.length === 1 ? 'task' : 'tasks'}</span></div>
   {filteredTasks.length === 0 ? <div className="m2-empty">No tasks match these filters. Add a task to start the list.</div> : filteredTasks.map(task => {
     const status = normalizeTaskStatus(task.status);
     const overdue = isTaskOverdue(task);
     const tone = overdue ? 'is-overdue' : status === 'Completed' ? 'is-complete' : status === 'In Progress' ? 'is-active' : 'is-todo';
     return (
     <button type="button" key={task.id} className="m2-task-row" onClick={() => setSelectedTask(task)}>
-      <strong>{task.title}</strong><span>{[task.projectName,task.dueDate ? task.dueDate.slice(0,10)===new Date().toLocaleDateString('en-CA')?'Due today':'Due '+new Date(task.dueDate.slice(0,10)+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'}):null].filter(Boolean).join(' · ')}</span><small className={tone}>{overdue?'Overdue':status}</small>
+      <span className={mobileStyles.taskHeading}><strong>{task.title}</strong><small className={tone}>{status}</small></span>
+      <span>{task.projectName || 'Personal task'}</span>
+      <span className={mobileStyles.taskFooter}><span data-overdue={overdue}>{task.dueDate ? (overdue ? 'Overdue · ' : task.dueDate.slice(0,10) === todayStr ? '' : 'Due ') + (task.dueDate.slice(0,10) === todayStr ? 'Due today' : new Date(task.dueDate.slice(0,10)+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'})) : 'No due date'}</span><span className={`work-chip work-chip-${priorityTone(task.priority)}`}>{task.priority} priority</span></span>
     </button>
     );
   })}
@@ -3389,13 +3412,13 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
         const openTimeLog = () => { setTaskLogHours('1.0'); setTaskLogDate(new Date().toISOString().split('T')[0]); setTaskLogDescription(''); setShowTaskLogTimeModal(true); };
         return <TaskPanel details title={selectedTask.title} description={selectedTask.projectName || 'General'} onClose={() => setSelectedTask(null)}>
           <div className="task-panel-body task-detail-body">
-            <section className="task-workflow" aria-label="Workflow"><div className="task-mobile-workflow"><span className="task-current-status">{normalizeTaskStatus(selectedTask.status)}</span><details><summary>Change status</summary><div>{(['To Do','In Progress','Review','Completed'] as const).map(status => <button key={status} type="button" aria-pressed={normalizeTaskStatus(selectedTask.status) === status} disabled={!canEditSelectedTask || (status === 'Completed' && normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin)} onClick={event => { handleUpdateTaskStatus(selectedTask.id,status); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{status === 'Completed' ? 'Done' : status}</button>)}</div></details></div><span className="task-section-label">Workflow</span><div className="task-status-options">
+            <section className="task-workflow" aria-label="Workflow"><div className="task-mobile-workflow"><span className="task-current-status" data-status={normalizeTaskStatus(selectedTask.status)}>{normalizeTaskStatus(selectedTask.status)}</span><details><summary>Change status</summary><div>{(['To Do','In Progress','Review','Completed'] as const).map(status => <button key={status} type="button" aria-pressed={normalizeTaskStatus(selectedTask.status) === status} disabled={!canEditSelectedTask || (status === 'Completed' && normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin)} onClick={event => { handleUpdateTaskStatus(selectedTask.id,status); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{status === 'Completed' ? 'Done' : status}</button>)}</div></details></div><span className="task-section-label">Workflow</span><div className="task-status-options">
               {(['To Do','In Progress','Review','Completed'] as const).map(status => <button key={status} type="button" aria-pressed={normalizeTaskStatus(selectedTask.status) === status} disabled={!canEditSelectedTask || (status === 'Completed' && normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin)} onClick={() => handleUpdateTaskStatus(selectedTask.id,status)}>{status === 'Completed' ? 'Done' : status}</button>)}
             </div>{normalizeTaskStatus(selectedTask.status) === 'Review' && !isSuperAdmin && <p className="task-hint">Super Admin approval is required to complete this task.</p>}</section>
             <section className="task-overview">
               <div className="task-description"><h3>Description</h3>{canEditSelectedTask ? <textarea aria-label="Description" value={selectedTask.description || ''} placeholder="Add a description" rows={3} onChange={e => setSelectedTask(prev => prev ? { ...prev, description: e.target.value } : prev)} onBlur={e => saveTaskDescription(selectedTask, e.target.value)} /> : <p>{selectedTask.description || 'No description provided.'}</p>}</div>
               <div className="task-metadata">
-                <div className="task-field"><label htmlFor="task-priority">Priority</label><select id="task-priority" value={selectedTask.priority} disabled={!canEditSelectedTask} onChange={e => saveTaskPriority(selectedTask,e.target.value as Task['priority'])}>{priorityOptions.map(priority => <option key={priority}>{priority}</option>)}</select></div>
+                <div className="task-field"><label htmlFor="task-priority">Priority</label><select id="task-priority" className="task-priority-select" data-priority={priorityTone(selectedTask.priority)} value={selectedTask.priority} disabled={!canEditSelectedTask} onChange={e => saveTaskPriority(selectedTask,e.target.value as Task['priority'])}>{priorityOptions.map(priority => <option key={priority}>{priority}</option>)}</select></div>
                 <TaskPeopleField value={taskAssigneeIds(selectedTask)} people={state.employees} disabled={!canAssignSelectedTask} onChange={ids => saveTaskAssignees(selectedTask,ids)} />
                 <div className="task-field task-due-field"><label htmlFor="task-due-date">Due date</label><div className="task-due-line"><DateInput id="task-due-date" value={selectedTask.dueDate?.slice(0,10) || ''} disabled={!canEditSelectedTask} onChange={e => e.target.value && saveTaskDueDate(selectedTask,e.target.value)} />{canEditSelectedTask && selectedTask.dueDate && <button type="button" className="task-text-button" onClick={() => saveTaskDueDate(selectedTask,'')}>Clear date</button>}</div>{isTaskOverdue(selectedTask) && <p className="task-overdue">Overdue</p>}</div>
                 {selectedTask.recurrenceSeriesId && <fieldset className="task-recurrence"><legend>{recurrenceLabel(selectedTask.recurrenceRule) || 'Repeats'}</legend><label><input type="radio" name="due-scope" checked={editDueScope === 'occurrence'} onChange={() => setEditDueScope('occurrence')} />This occurrence</label><label><input type="radio" name="due-scope" checked={editDueScope === 'future'} onChange={() => setEditDueScope('future')} />This and future</label></fieldset>}
@@ -3691,7 +3714,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
               </div>
               {canPickAssignees ? <TaskPeopleField value={newTaskAssignees} people={assignableEmployees} onChange={ids => { setNewTaskAssignees(ids); setNewTaskAssignee(ids[0] || ''); }} /> : <div className="task-field"><span>Assignees</span><div className="task-readonly">{state.currentPersona?.name || 'You'}</div></div>}
               <div className="task-priority-date">
-                <div className="task-field"><label htmlFor="new-task-priority">Priority</label><select id="new-task-priority" value={newTaskPriority} onChange={e => setNewTaskPriority(e.target.value as Task['priority'])}>{priorityOptions.map(priority => <option key={priority}>{priority}</option>)}</select>
+                <div className="task-field"><label htmlFor="new-task-priority">Priority</label><select id="new-task-priority" className="task-priority-select" data-priority={priorityTone(newTaskPriority)} value={newTaskPriority} onChange={e => setNewTaskPriority(e.target.value as Task['priority'])}>{priorityOptions.map(priority => <option key={priority}>{priority}</option>)}</select>
                 </div>
                 <div className="task-field"><label htmlFor="new-task-due">Due date</label><DateInput id="new-task-due" value={newTaskDueDate} onChange={e => setNewTaskDueDate(e.target.value)} />
                 </div>
@@ -3734,7 +3757,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
           <div className="task-field project-budget"><label htmlFor="new-project-budget">Budget hours</label><input id="new-project-budget" type="number" min="1" value={newProjTotalHours} onChange={e => setNewProjTotalHours(e.target.value)} placeholder="e.g. 250" /></div>
           <div className="task-project-dates"><div className="task-field"><label htmlFor="new-proj-start">Start date</label><DateInput id="new-proj-start" value={newProjStartDate} onChange={e => setNewProjStartDate(e.target.value)} /></div><div className="task-field"><label htmlFor="new-proj-end">End date</label><DateInput id="new-proj-end" value={newProjEndDate} onChange={e => setNewProjEndDate(e.target.value)} /></div></div>
           <div className="task-field project-overview"><label htmlFor="new-project-overview">Overview</label><textarea id="new-project-overview" rows={3} value={newProjDescription} onChange={e => setNewProjDescription(e.target.value)} placeholder="Describe the project goals." /></div>
-          <div className="task-field project-priority"><label htmlFor="new-project-priority">Priority</label><select id="new-project-priority" value={newProjPriority} onChange={e => setNewProjPriority(e.target.value as typeof newProjPriority)}>{priorityOptions.map(priority => <option key={priority}>{priority}</option>)}</select></div>
+          <div className="task-field project-priority"><label htmlFor="new-project-priority">Priority</label><select id="new-project-priority" className="task-priority-select" data-priority={priorityTone(newProjPriority)} value={newProjPriority} onChange={e => setNewProjPriority(e.target.value as typeof newProjPriority)}>{priorityOptions.map(priority => <option key={priority}>{priority}</option>)}</select></div>
         </div><footer className="task-panel-footer"><button type="button" onClick={() => setShowCreateProjectModal(false)}>Cancel</button><button type="submit" className="task-primary" disabled={isSaving}>{isSaving ? 'Creating…' : 'Create project'}</button></footer></form>
       </TaskPanel>}
 
@@ -3762,9 +3785,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
         return (
           <div className="work-drawer-overlay fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-            <div role="dialog" aria-modal="true" aria-label="Project details" className="work-drawer relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900">
+            <div ref={projectDetailsRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Project details" data-drawer-kind="detail" className={`${detailStyles.detail} ${drawerStyles.panel} work-drawer relative w-full max-w-full sm:max-w-lg md:max-w-xl h-full bg-white border-l border-slate-100 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 text-slate-900`}>
               {/* Drawer Header */}
-              <div className="p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-start justify-between bg-white shrink-0 gap-2">
+              <div className={`${detailStyles.header} p-4 sm:p-6 sm:px-8 border-b border-slate-100 flex items-start justify-between bg-white shrink-0 gap-2`}>
                 <div className="min-w-0 flex-1 pr-2">
                   {projectEditDraft ? (
                     <div className="space-y-2">
@@ -3785,7 +3808,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                             <option key={status} value={status}>{status}</option>
                           ))}
                         </select>
-                        <span className="work-chip work-chip-muted">{projectEditDraft.priority}</span>
+                        <span className={`work-chip work-chip-${priorityTone(projectEditDraft.priority)}`}>{projectEditDraft.priority}</span>
                       </div>
                       <input
                         value={projectEditDraft.name}
@@ -3801,7 +3824,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                           {p.code}
                         </span>
                         <span className={projectStatusChip(p.status)}>{p.status || 'In Progress'}</span>
-                        <span className="work-chip work-chip-muted">{p.priority || 'Medium'}</span>
+                        <span className={`work-chip work-chip-${priorityTone(p.priority || 'Medium')}`}>{p.priority || 'Medium'}</span>
                       </div>
                       <h3 className="text-lg sm:text-xl font-bold text-slate-900 truncate">{p.name}</h3>
                     </>
@@ -3818,6 +3841,8 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                     </button>
                   )}
                   <button
+                    type="button"
+                    aria-label="Close project details"
                     onClick={() => setSelectedProjectForDetails(null)}
                     className="text-slate-400 hover:text-slate-700 p-2 cursor-pointer rounded-xl hover:bg-slate-100 transition-colors shrink-0"
                   >
@@ -3827,14 +3852,14 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
               </div>
 
               {/* Drawer Body */}
-              <div className="p-4 sm:p-6 sm:px-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto custom-scrollbar bg-white text-xs">
+              <div className={`${detailStyles.body} p-4 sm:p-6 sm:px-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto custom-scrollbar bg-white text-xs`}>
                 {/* Work Hours Budgeting by Admin/HR */}
-                <div className="p-4 sm:p-5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                <div className={`${detailStyles.hours} p-4 sm:p-5 border border-slate-200 bg-slate-50/50 space-y-3`}>
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div>
                       <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                         <Clock className="h-3.5 w-3.5 text-[var(--studio-navy)]" />
-                        Project Work Hours Allocation
+                        {mobileViewport ? 'Work hours' : 'Project Work Hours Allocation'}
                       </span>
                     </div>
 
@@ -3875,9 +3900,9 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                       </button>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-between pt-1">
+                    <div className={`${detailStyles.hoursSummary} flex items-center justify-between pt-1`}>
                       <div>
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Work Hours Set</span>
+                        <span className={`${detailStyles.statLabel} text-[10px] uppercase font-bold text-slate-400 block`}>{mobileViewport ? 'Allocated' : 'Total Work Hours Set'}</span>
                         {projectEditDraft ? (
                           <input
                             type="number"
@@ -3890,33 +3915,34 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                             className="mt-1 w-28 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono font-bold text-slate-900 text-xs outline-none focus:border-slate-400"
                           />
                         ) : (
-                          <span className="text-base font-mono font-bold text-[var(--studio-navy)]">
+                          <span className={`${detailStyles.statValue} text-base ${mobileViewport ? '' : 'font-mono'} font-bold text-[var(--studio-navy)]`}>
                             {totalBudgetHours > 0 ? `${totalBudgetHours} hrs` : 'Not set'}
                           </span>
                         )}
                       </div>
                       <div className="text-right">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Hours Consumed</span>
-                        <span className="text-base font-mono font-bold text-slate-800">
-                          {approvedHours.toFixed(1)} hrs ({hoursPercent}%)
+                        <span className={`${detailStyles.statLabel} text-[10px] uppercase font-bold text-slate-400 block`}>{mobileViewport ? 'Logged' : 'Hours Consumed'}</span>
+                        <span className={`${detailStyles.statValue} text-base ${mobileViewport ? '' : 'font-mono'} font-bold text-slate-800`}>
+                          {approvedHours.toFixed(1)} {mobileViewport ? 'h' : `hrs (${hoursPercent}%)`}
                         </span>
                       </div>
                     </div>
                   )}
 
                   {/* Progress Bar */}
-                  <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+                  <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden" role="progressbar" aria-label="Allocated project hours used" aria-valuemin={0} aria-valuemax={100} aria-valuenow={hoursPercent} aria-valuetext={shownBudget > 0 ? `${approvedHours.toFixed(1)} of ${shownBudget} hours used` : 'No work-hour budget set'}>
                     <div
                       className={`h-full transition-all duration-300 ${hoursPercent >= 100 ? 'bg-rose-500' : hoursPercent >= 80 ? 'bg-amber-500' : 'bg-[var(--studio-navy)]'
                         }`}
                       style={{ width: `${hoursPercent}%` }}
                     />
                   </div>
+                  {mobileViewport && <p className={detailStyles.hoursNote}>{shownBudget > 0 ? `${hoursPercent}% of allocated hours used` : 'No work-hour budget set'}</p>}
                 </div>
 
                 {/* Project Description */}
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Description</span>
+                <div className={detailStyles.description}>
+                  <span className={`${detailStyles.sectionTitle} text-[10px] uppercase font-bold text-slate-400 block mb-1`}>Description</span>
                   {projectEditDraft ? (
                     <textarea
                       value={projectEditDraft.description}
@@ -3926,7 +3952,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                       className="w-full rounded-xl border border-slate-200 bg-white p-3.5 text-xs sm:text-sm text-slate-800 outline-none focus:border-slate-400 resize-none"
                     />
                   ) : (
-                    <p className="text-slate-700 bg-slate-50 p-3.5 sm:p-4 rounded-xl border border-slate-200 leading-relaxed text-xs sm:text-sm">
+                    <p className="text-slate-700 bg-slate-50 p-3.5 sm:p-4 border border-slate-200 leading-relaxed text-xs sm:text-sm">
                       {p.description || 'No description'}
                     </p>
                   )}
@@ -3934,7 +3960,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
 
                 {/* Project Metadata Grid */}
                 {projectEditDraft ? (
-                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                  <div className={`${detailStyles.editFields} grid grid-cols-2 gap-2.5 sm:gap-3`}>
                     <label className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0">
                       <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Client</span>
                       <select
@@ -4013,16 +4039,17 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                     </label>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                  <div className={`${detailStyles.metadata} grid grid-cols-2 gap-2.5 sm:gap-3`}>
+                    {mobileViewport && <h4 className={detailStyles.sectionTitle}>Project information</h4>}
                     {[
                       ['Client', p.clientName || 'Internal'],
                       ['Category', p.category || 'General'],
                       ['Lead', p.managerName || '—'],
                       ['Priority', p.priority || 'Medium'],
-                      ['Start', p.startDate ? String(p.startDate).slice(0, 10) : '—'],
-                      ['End', p.endDate ? String(p.endDate).slice(0, 10) : '—'],
+                      ['Start', p.startDate ? mobileViewport ? new Date(String(p.startDate).slice(0,10)+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : String(p.startDate).slice(0, 10) : '-'],
+                      ['End', p.endDate ? mobileViewport ? new Date(String(p.endDate).slice(0,10)+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : String(p.endDate).slice(0, 10) : '-'],
                     ].map(([label, value]) => (
-                      <div key={label} className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white min-w-0 overflow-hidden">
+                      <div key={label} className={`${detailStyles.metadataItem} p-3 sm:p-3.5 border border-slate-200 bg-white min-w-0 overflow-hidden`}>
                         <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">{label}</span>
                         <span className="text-xs font-bold text-slate-800 block truncate">{value}</span>
                       </div>
@@ -4031,7 +4058,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 )}
 
                 {canEditProject && (
-                <div className="p-4 sm:p-5 rounded-xl border border-slate-200 bg-white space-y-3">
+                <div className={`${detailStyles.billing} p-4 sm:p-5 border border-slate-200 bg-white space-y-3`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-bold text-slate-800">Bill client</span>
                     <Link href="/payroll/billable?tab=unbilled" className="text-[11px] font-semibold text-[var(--studio-navy)]">
@@ -4074,7 +4101,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   ) : (
                     <div className="space-y-2">
                       {billLines.map((line, index) => (
-                        <div key={line.key} className="grid grid-cols-[auto_1fr_4.5rem_5rem_auto] gap-2 items-center">
+                        <div key={line.key} className={`${detailStyles.billLine} grid grid-cols-[auto_1fr_4.5rem_5rem_auto] gap-2 items-center`}>
                           <input
                             type="checkbox"
                             checked={line.included}
@@ -4149,11 +4176,11 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                 )}
 
                 {/* Project Tasks List in this Workspace */}
-                <div className="space-y-3">
+                <div className={`${detailStyles.deliverables} space-y-3`}>
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                       <Layers className="h-3.5 w-3.5 text-[var(--studio-navy)]" />
-                      <span>Workspace Deliverables ({projectTasks.length})</span>
+                      <span>{mobileViewport ? 'Project tasks' : 'Workspace Deliverables'} ({projectTasks.length})</span>
                     </label>
                   </div>
 
@@ -4164,13 +4191,14 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                   ) : (
                     <div className="space-y-2">
                       {projectTasks.map((t) => (
-                        <div
+                        <button
+                          type="button"
                           key={t.id}
                           onClick={() => {
                             setSelectedProjectForDetails(null);
                             setSelectedTask(t);
                           }}
-                          className="p-3 sm:p-3.5 rounded-xl border border-slate-200 bg-white hover:border-blue-400 transition-all flex items-center justify-between cursor-pointer shadow-2xs gap-2 min-w-0"
+                          className={`${detailStyles.deliverableRow} w-full text-left p-3 sm:p-3.5 border border-slate-200 bg-white hover:border-blue-400 transition-all flex items-center justify-between cursor-pointer shadow-2xs gap-2 min-w-0`}
                         >
                           <div className="min-w-0 flex-1">
                             <span className="font-bold text-slate-800 block truncate">{t.title}</span>
@@ -4183,7 +4211,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
                               {formatHM(getTaskTotalSeconds(t))}
                             </span>
                           </div>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -4191,7 +4219,7 @@ export const ProjectsModule: React.FC<ProjectsModuleProps> = ({ state, onUpdateS
               </div>
 
               {/* Drawer Footer */}
-              <div className="p-4 sm:p-5 sm:px-8 border-t border-slate-100 bg-white flex items-center justify-between gap-3 shrink-0 pb-7 sm:pb-5">
+              <div className={`${detailStyles.footer} p-4 sm:p-5 sm:px-8 border-t border-slate-100 bg-white flex items-center justify-between gap-3 shrink-0 pb-7 sm:pb-5`}>
                 {projectEditDraft ? (
                   <>
                     <button

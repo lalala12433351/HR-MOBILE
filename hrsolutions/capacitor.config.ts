@@ -36,6 +36,9 @@ const config: CapacitorConfig = {
       iconColor: '#2563eb',
       sound: 'default',
     },
+    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
   },
   android: {
     allowMixedContent: Boolean(serverUrl?.startsWith('http://')),

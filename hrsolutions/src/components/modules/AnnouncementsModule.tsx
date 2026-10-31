@@ -24,6 +24,7 @@ import {
 import { AppState } from '../../services/store';
 import { Announcement } from '../../types';
 import { api } from '../../services/apiClient';
+import styles from './mobile-announcements.module.css';
 
 interface AnnouncementsModuleProps {
   state: AppState;
@@ -132,7 +133,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
       }
 
       return true;
-    });
+    }).sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
   }, [announcementsList, activeTab, selectedCategory, selectedPriority, searchQuery, currentPersona.id]);
 
   const pinnedBroadcasts = useMemo(() => {
@@ -424,7 +425,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
   };
 
   return (
-    <div className="people-studio announcements-page">
+    <div className={`people-studio announcements-page ${styles.page}`}>
       <div className="people-studio__head">
         <h1 className="people-studio__title">
           Announcements
@@ -444,46 +445,6 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
         )}
       </div>
 
-      {pinnedBroadcasts.length > 0 && activeTab !== 'unread' && (
-        <article className="people-studio__sheet people-studio__post is-pinned">
-          <div className="people-studio__post-head">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="people-studio__status people-studio__status--invite">Pinned</span>
-              <span className={getCategoryBadgeColor(pinnedBroadcasts[0].category)}>{pinnedBroadcasts[0].category}</span>
-            </div>
-            <span className="people-studio__post-meta">{formatToDDMMYYYY(pinnedBroadcasts[0].date)}</span>
-          </div>
-          <h2 className="people-studio__post-title">{pinnedBroadcasts[0].title}</h2>
-          <p className="people-studio__post-body">{pinnedBroadcasts[0].content}</p>
-          <div className="people-studio__post-head">
-            <p className="people-studio__post-meta">
-              {pinnedBroadcasts[0].authorName}
-              {pinnedBroadcasts[0].authorRole ? ` · ${pinnedBroadcasts[0].authorRole}` : ''}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {AVAILABLE_REACTION_KEYS.slice(0, 4).map((emojiKey) => {
-                const rx = pinnedBroadcasts[0].reactions.find((r) => r.emoji === emojiKey);
-                const hasReacted = rx?.users.includes(currentPersona.id);
-                const config = REACTION_CONFIG[emojiKey] || { label: 'Like', icon: ThumbsUp };
-                const IconComponent = config.icon;
-                return (
-                  <button
-                    key={emojiKey}
-                    type="button"
-                    onClick={() => handleToggleReaction(pinnedBroadcasts[0].id, emojiKey)}
-                    title={config.label}
-                    className={`people-studio__react${hasReacted ? ' is-on' : ''}`}
-                  >
-                    <IconComponent className="h-3.5 w-3.5" />
-                    {rx ? rx.count : 0}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </article>
-      )}
-
       <section className="people-studio__sheet people-studio__sheet--pad">
         <div className="people-studio__filters">
           <div className="people-studio__search">
@@ -498,13 +459,13 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
           </div>
           <div className="people-studio__controls">
             <div className="people-studio__seg" role="tablist" aria-label="Announcement filters">
-              <button type="button" className={activeTab === 'all' ? 'is-on' : ''} onClick={() => setActiveTab('all')}>
+              <button type="button" role="tab" aria-selected={activeTab === 'all'} className={activeTab === 'all' ? 'is-on' : ''} onClick={() => setActiveTab('all')}>
                 All {announcementsList.length}
               </button>
-              <button type="button" className={activeTab === 'pinned' ? 'is-on' : ''} onClick={() => setActiveTab('pinned')}>
+              <button type="button" role="tab" aria-selected={activeTab === 'pinned'} className={activeTab === 'pinned' ? 'is-on' : ''} onClick={() => setActiveTab('pinned')}>
                 Pinned {pinnedBroadcasts.length}
               </button>
-              <button type="button" className={activeTab === 'unread' ? 'is-on' : ''} onClick={() => setActiveTab('unread')}>
+              <button type="button" role="tab" aria-selected={activeTab === 'unread'} className={activeTab === 'unread' ? 'is-on' : ''} onClick={() => setActiveTab('unread')}>
                 Unread {unreadCount}
               </button>
             </div>
@@ -554,7 +515,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                 className={`people-studio__sheet people-studio__post${!isRead ? ' is-unread' : ''}${ann.pinned ? ' is-pinned' : ''}`}
               >
                 {/* Card Top Row: Author Identity + Badges + Actions */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${styles.postHeader}`}>
                   <div className="flex items-center gap-3">
                     {ann.authorAvatar ? (
                       <img
@@ -572,13 +533,13 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                         <h4 className="text-sm font-bold text-slate-900">
                           {ann.authorName}
                         </h4>
-                        <span className="text-slate-300 text-xs">•</span>
+                        {ann.authorRole && <span className="text-slate-300 text-xs">•</span>}
                         <span className="text-xs font-semibold text-slate-500">
                           {ann.authorRole}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
-                        <Calendar className="h-3 w-3" />
+                        {ann.date && <Calendar className="h-3 w-3" />}
                         <span className="font-mono">{formatToDDMMYYYY(ann.date)}</span>
                         {ann.department && (
                           <>
@@ -669,7 +630,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                 )}
 
                 {/* Footer Controls: Reactions + Discussion Trigger */}
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                <div className={`flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 ${styles.postFooter}`}>
                   {/* Reaction Button Chips (Lucide Icons, No Emojis) */}
                   <div className="flex flex-wrap items-center gap-1.5">
                     {AVAILABLE_REACTION_KEYS.map((emojiKey) => {
@@ -800,12 +761,14 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                             }
                           }}
                           placeholder="Write a thought or congratulations..."
+                          aria-label="Write a comment"
                           className="w-full h-9 pl-3 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 outline-none focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all font-medium"
                         />
                         <button
                           type="button"
                           onClick={() => handleAddComment(ann.id)}
                           disabled={!currentCommentText.trim()}
+                          aria-label="Send comment"
                           className="people-studio__search-clear"
                         >
                           <Send className="h-3.5 w-3.5" />
@@ -822,7 +785,7 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
 
       {showCreateDrawer && (
         <div className="people-studio__drawer">
-          <div className="people-studio__drawer-panel">
+          <div role="dialog" aria-modal="true" aria-label="New announcement" className="people-studio__drawer-panel">
             <div className="people-studio__drawer-head">
               <h3 className="people-studio__post-title">New announcement</h3>
               <button
@@ -1022,8 +985,8 @@ export const AnnouncementsModule: React.FC<AnnouncementsModuleProps> = ({
                 >
                   Cancel
                 </button>
-                <button type="submit" className="people-studio__btn people-studio__btn--primary">
-                  Publish
+                <button type="submit" disabled={isSaving} className="people-studio__btn people-studio__btn--primary">
+                  {isSaving ? 'Publishing…' : 'Publish'}
                 </button>
               </div>
             </form>

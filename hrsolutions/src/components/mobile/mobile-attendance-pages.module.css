@@ -1,0 +1,56 @@
+@media(max-width:767px) {
+ .workspace[class][data-mobile-subtab] :global(.leave-workspace) { font-size:13px; }
+ .workspace[class][data-mobile-subtab] :global(.leave-subnav) { display:flex;flex-wrap:wrap;gap:8px; }
+ .workspace[class][data-mobile-subtab] :global(.leave-subnav > button) { min-height:40px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;font-size:12px; }
+ .workspace[class][data-mobile-subtab] :global(.leave-subnav > button[aria-selected="true"]) { background:#17324e;border-color:var(--studio-navy);color:#fff; }
+ .workspace[class][data-mobile-subtab] :global(.leave-policy-panel) { padding:16px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface);font-size:13px; }
+ .workspace[class][data-mobile-subtab] :global(.leave-policy-panel h2) { font-size:14px;line-height:21px; }
+ .workspace[class][data-mobile-subtab] :global(.leave-workspace .request-review-actions button) { min-height:40px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;font-size:12px; }
+ .page[class] { gap:16px;padding-top:12px; }
+ .page[class] :global(.m2-text-tabs) { display:flex;flex-wrap:wrap;gap:8px;overflow:visible; }
+ .page[class] :global(.m2-text-tabs > button) { display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface);font-size:12px;line-height:18px;color:var(--text-secondary); }
+ .page[class] :global(.m2-text-tabs > button[aria-selected="true"]) { background:#17324e;border-color:var(--studio-navy);color:#fff;font-weight:600; }
+ .page[class] :global(.m2-section) { gap:10px; }
+ .page[class] :global(.m2-section-heading h2),.page[class] :global(.m2-detail-section h2) { font-size:14px;line-height:21px;font-weight:600; }
+ .page[class] :global(.m2-section-body),.records { overflow:hidden;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page[class] :global(.m2-row) { min-height:68px;padding:12px 14px;gap:10px; }
+ .page[class] :global(.m2-row:last-child) { border-bottom:0; }
+ .page[class] :global(.m2-row-title) { font-size:13px;line-height:20px;font-weight:550; }
+ .page[class] :global(.m2-row-detail) { font-size:12px;line-height:18px; }
+ .page[class] :global(.m2-metric) { gap:8px;padding:16px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface); }
+ .page[class] :global(.m2-metric > strong) { font-size:24px;line-height:32px; }
+ .page[class] :global(.m2-empty) { margin:0;padding:18px 14px;font-size:12px;line-height:20px; }
+ .page[class] :global(.m2-leave-upcoming) { padding:14px;gap:8px; }
+ .page[class] :global(.m2-leave-upcoming > strong) { font-size:14px;line-height:21px; }
+ .page[class] :global(.m2-detail-section) { margin:0;padding:14px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface);font-size:13px;line-height:20px; }
+ .page[class] :global(.m2-detail-section p) { margin:0;overflow-wrap:anywhere; }
+ .records :global(.m2-detail-section) { border-width:0 0 1px;border-radius:0;background:var(--bg-app); }
+ .page[class] :is(:global(.m2-primary),:global(.m2-secondary)),.page[class] :global(.request-review-actions button) { display:inline-flex;align-items:center;justify-content:center;align-self:flex-start;width:auto;min-height:40px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;font-size:12px;line-height:18px;font-weight:550;box-shadow:none; }
+ .page[class] :global(.m2-primary) { border-color:var(--studio-navy);background:#17324e;color:#fff; }
+ .page[class] :global(.m2-secondary) { background:var(--bg-surface);color:var(--studio-navy); }
+ .page[class] :global(.m2-search-field),.page[class] :global(.m2-form-field > select),.page[class] :global(.m2-form-field > input) { min-height:44px;height:44px;padding:10px 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-surface);font-size:13px; }
+ .page[class] :global(.m2-form-field) { font-size:12px;gap:6px; }
+ .page[class] :global(.m2-section-body > .m2-caption) { display:block;padding:0 14px 14px; }
+ .page[class] :global(.request-review-actions) { display:flex;flex-wrap:wrap;gap:8px; }
+ .page[class] :is(button,input,select,a):focus-visible { outline:2px solid var(--studio-navy);outline-offset:3px; }
+ .form[role="dialog"] { width:100%;max-width:100%;height:100dvh;max-height:100dvh;overflow:hidden; }
+ .form[role="dialog"] > div:first-child { gap:12px;padding:14px 20px;border-bottom:1px solid var(--border-color); }
+ .form[role="dialog"] :is(h2,h3) { font-size:17px;line-height:24px;font-weight:600;letter-spacing:-.3px; }
+ .form[role="dialog"] > div:first-child p { display:none; }
+ .form[role="dialog"] form { min-height:0; }
+ .form[role="dialog"] form > div:first-child { padding:16px 20px;font-size:13px; }
+ .form[role="dialog"] label { font-size:12px;line-height:18px;font-weight:550; }
+ .form[role="dialog"] :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea) { min-width:0;min-height:44px;padding:10px 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-surface);font-size:13px;line-height:20px; }
+ .form[role="dialog"] button { min-height:40px;padding:8px 12px;font-size:12px;line-height:18px;box-shadow:none; }
+ .form[role="dialog"] form > div:last-child { gap:10px;padding:12px 20px max(12px,env(safe-area-inset-bottom));border-top:1px solid var(--border-color); }
+ .form[role="dialog"] :is(button,input,select,textarea):focus-visible { outline:2px solid var(--studio-navy);outline-offset:3px; }
+ .holidayAdmin[class] h2 { font-size:14px;line-height:21px; }
+ .holidayAdmin[class] button { min-height:36px;font-size:12px;box-shadow:none; }
+ .holidayAdmin[class] > div:nth-child(2) > div:first-child { flex-wrap:wrap; }
+ .report:global(.att-dialog) { padding:0; }
+ .report:global(.att-dialog) :global(.att-dialog-head h2) { font-size:17px;line-height:24px; }
+ .report:global(.att-dialog) :global(.att-stat) { padding:12px;border:1px solid var(--border-color);border-radius:8px;min-height:72px; }
+ .report:global(.att-dialog) :global(.att-stat.is-active) { border-color:var(--studio-navy);background:var(--studio-selected); }
+ .report:global(.att-dialog) :is(input:not([type="checkbox"]),select) { min-height:44px;padding:10px;border:1px solid var(--border-strong);font-size:13px; }
+ .report:global(.att-dialog) > div:last-child button { min-height:40px;padding:8px 12px;font-size:12px;white-space:nowrap; }
+}

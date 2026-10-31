@@ -14,8 +14,10 @@ import {
   getAppNotificationPermission,
   getAppNotificationsEnabled,
   isNativePlatform,
+  registerNativePush,
   requestAppNotificationPermission,
   setAppNotificationsEnabled,
+  unregisterNativePush,
 } from '@/lib/native';
 
 interface NotificationsModuleProps {
@@ -67,12 +69,21 @@ export const NotificationsModule: React.FC<NotificationsModuleProps> = ({
     if (isNativePlatform()) {
       if (checked) {
         const granted = await requestAppNotificationPermission();
-        setPushEnabled(granted);
         if (!granted) {
+          setPushEnabled(false);
           setPushStatus('Notification permission was denied. You can enable it in your device settings.');
+          setPushBusy(false);
+          return;
+        }
+        const registered = await registerNativePush();
+        setPushEnabled(registered || granted);
+        if (!registered) {
+          setPushStatus(
+            'Device alerts are on for this session. Background push needs Firebase configured on the server.'
+          );
         }
       } else {
-        setAppNotificationsEnabled(false);
+        await unregisterNativePush();
         setPushEnabled(false);
       }
       setPushBusy(false);

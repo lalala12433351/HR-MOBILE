@@ -1,5 +1,6 @@
 'use client';
 
+import styles from './mobile-settings.module.css';
 import React, { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMobileViewport } from '@/hooks/useMobileViewport';
@@ -104,11 +105,11 @@ export function SettingsWorkspace({ state, onUpdateState }: { state: AppState; o
 
   if (mobile && !searchParams.has('section')) {
     const profile = '/hr?emp=' + encodeURIComponent(state.currentPersona?.id || '');
-    return <div className="m2-page">
+    return <div className={`m2-page ${styles.home}`}>
       <MobileSection title="Personal">
         <MobileRow title="Account & security" detail="Password and signed-in devices" href={profile + '&empTab=setting'} />
         <MobileRow title="Notifications" detail="Choose what reaches you" href="/notifications" />
-        <MobileRow title="Appearance" detail={themeMode === 'dark' ? 'Dark' : 'Light · System preference'} onClick={toggleThemeMode} />
+        <div className={styles.appearance}><span><strong>Dark theme</strong><small>{themeMode === 'dark' ? 'Dark appearance is on' : 'Light appearance is on'}</small></span><button type="button" role="switch" aria-checked={themeMode === 'dark'} aria-label="Dark theme" onClick={toggleThemeMode}><span /></button></div>
       </MobileSection>
       {canManageSettings && <MobileSection title="Workspace administration">
         <MobileRow title="Organisation" detail="Identity, departments and people" href="/settings?section=people&tab=general" />
@@ -126,10 +127,11 @@ export function SettingsWorkspace({ state, onUpdateState }: { state: AppState; o
   if (!canManageSettings) return null;
 
   return (
-    <div className="settings-studio">
+    <div className={`settings-studio ${styles.workspace}`}>
       {mobile && <Link href="/settings" className="m2-row m2-settings-back">All settings</Link>}
       <header className="settings-studio__page-head">
         <h1 className="settings-studio__title">Settings</h1>
+        <button type="button" className={styles.desktopTheme} role="switch" aria-checked={themeMode === 'dark'} aria-label="Dark theme" onClick={toggleThemeMode}>Dark theme: {themeMode === 'dark' ? 'On' : 'Off'}</button>
         <div className="settings-studio__workspace"><Building2 size={15} aria-hidden="true" /><span>{state.organization?.name || 'Your workspace'}</span><span className="settings-studio__workspace-type">{isInstitution ? 'Institute' : 'Company'}</span></div>
       </header>
       <nav className="settings-studio__area-strip" aria-label="Settings areas">

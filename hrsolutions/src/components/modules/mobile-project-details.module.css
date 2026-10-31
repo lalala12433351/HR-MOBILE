@@ -1,0 +1,40 @@
+.hours,.metadataItem,.billing,.deliverableRow,.description > p { border-radius:12px; }
+@media(max-width:767px) {
+ .detail:global(.work-drawer)[role="dialog"] { width:100%;max-width:100%;height:100dvh;overflow:hidden;background:var(--bg-surface);color:var(--text-primary); }
+ .detail:global(.work-drawer)[role="dialog"] .header { align-items:flex-start;gap:12px;padding:16px var(--mobile-page-gutter,20px);border-bottom:1px solid var(--border-color);background:var(--bg-surface); }
+ .detail:global(.work-drawer)[role="dialog"] .header h3 { margin-top:6px;font-size:18px;line-height:26px;font-weight:650;letter-spacing:-.4px;white-space:normal;overflow-wrap:anywhere; }
+ .detail:global(.work-drawer)[role="dialog"] .header :global(.work-chip) { padding:0;border:0;background:transparent;font-size:12px; }
+ .detail:global(.work-drawer)[role="dialog"] .header button { display:flex;align-items:center;justify-content:center;min-width:40px;min-height:40px;box-shadow:none; }
+ .detail:global(.work-drawer)[role="dialog"] .body { display:flex;flex-direction:column;gap:var(--mobile-section-gap,20px);min-height:0;padding:20px var(--mobile-page-gutter,20px);background:var(--bg-app);overscroll-behavior:contain; }
+ .detail:global(.work-drawer)[role="dialog"] .body > * { flex-shrink:0;margin-block:0; }
+ .detail:global(.work-drawer)[role="dialog"] :is(.hours,.description,.metadata,.billing,.deliverables) { padding:var(--mobile-card-padding,16px);border:1px solid var(--border-color);border-radius:var(--mobile-card-radius,10px);background:var(--bg-surface); }
+ .detail:global(.work-drawer)[role="dialog"] :is(.sectionTitle,.hours > div:first-child > div > span,.billing > div:first-child > span,.deliverables > div:first-child > label) { display:block;margin:0;color:var(--text-primary);font-size:14px;font-weight:600;line-height:21px;text-transform:none;letter-spacing:0; }
+ .detail:global(.work-drawer)[role="dialog"] .hours > div:first-child > div > span { display:flex; }
+ .detail:global(.work-drawer)[role="dialog"] .hoursSummary { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding-top:8px; }
+ .detail:global(.work-drawer)[role="dialog"] .hoursSummary > div { text-align:left;min-width:0; }
+ .detail:global(.work-drawer)[role="dialog"] .hoursSummary > div + div { padding-left:16px;border-left:1px solid var(--border-color); }
+ .detail:global(.work-drawer)[role="dialog"] .statLabel { margin-bottom:4px;font-size:12px;font-weight:400;line-height:18px;text-transform:none;color:var(--text-secondary); }
+ .detail:global(.work-drawer)[role="dialog"] .statValue { font-family:var(--font-sans);font-size:22px;line-height:30px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--studio-navy); }
+ .detail:global(.work-drawer)[role="dialog"] .hoursNote { margin-bottom:0;font-size:12px;line-height:18px;color:var(--text-secondary); }
+ .detail:global(.work-drawer)[role="dialog"] .description > p { margin:10px 0 0;padding:0;border:0;border-radius:0;background:transparent;font-size:13px;line-height:22px;color:var(--text-secondary);overflow-wrap:anywhere; }
+ .detail:global(.work-drawer)[role="dialog"] .metadata { display:flex;flex-direction:column;gap:0; }
+ .detail:global(.work-drawer)[role="dialog"] .metadata > h4 { margin-bottom:8px; }
+ .detail:global(.work-drawer)[role="dialog"] .metadataItem { display:grid;grid-template-columns:76px minmax(0,1fr);align-items:baseline;gap:12px;padding:12px 0;border:0;border-bottom:1px solid var(--border-color);border-radius:0;overflow:visible; }
+ .detail:global(.work-drawer)[role="dialog"] .metadataItem:last-child { padding-bottom:0;border-bottom:0; }
+ .detail:global(.work-drawer)[role="dialog"] .metadataItem > span:first-child { margin:0;font-size:12px;line-height:20px;font-weight:400;text-transform:none;color:var(--text-secondary); }
+ .detail:global(.work-drawer)[role="dialog"] .metadataItem > span:last-child { font-size:13px;line-height:20px;font-weight:550;white-space:normal;overflow-wrap:anywhere;text-align:right;color:var(--text-primary); }
+ .detail:global(.work-drawer)[role="dialog"] .editFields { grid-template-columns:minmax(0,1fr);gap:12px; }
+ .detail:global(.work-drawer)[role="dialog"] .editFields > label { padding:16px;border-radius:var(--mobile-card-radius,10px); }
+ .detail:global(.work-drawer)[role="dialog"] .body :is(input:not([type="checkbox"]),select,textarea) { width:100%;min-width:0;min-height:var(--mobile-field-height,48px);padding:12px;border:1px solid var(--border-strong);border-radius:var(--mobile-control-radius,8px);background:var(--bg-surface);font-family:inherit;font-size:14px;color:var(--text-primary); }
+ .detail:global(.work-drawer)[role="dialog"] .body button { min-height:40px;font-size:12px;border-radius:var(--mobile-control-radius,8px);box-shadow:none; }
+ .detail:global(.work-drawer)[role="dialog"] .billLine { grid-template-columns:20px minmax(0,1fr) minmax(0,1fr) auto;gap:10px; }
+ .billLine > span:nth-child(2) { grid-column:2/-1;white-space:normal;overflow-wrap:anywhere; }
+ .billLine > input:nth-child(3) { grid-column:2; }
+ .detail:global(.work-drawer)[role="dialog"] .deliverableRow { width:100%;padding:12px 0;border:0;border-bottom:1px solid var(--border-color);border-radius:0;background:transparent;text-align:left;box-shadow:none; }
+ .deliverableRow:last-child { border-bottom:0; }
+ .detail:global(.work-drawer)[role="dialog"] .deliverableRow > div > span { white-space:normal;overflow-wrap:anywhere;font-size:13px;line-height:20px;font-weight:550; }
+ .detail:global(.work-drawer)[role="dialog"] .deliverableRow > div > span + span { margin-top:4px;font-size:12px;font-weight:400; }
+ .detail:global(.work-drawer)[role="dialog"] .footer { display:flex;flex-wrap:wrap;gap:10px;padding:12px var(--mobile-page-gutter,20px) max(12px,env(safe-area-inset-bottom));border-top:1px solid var(--border-color);background:var(--bg-surface); }
+ .detail:global(.work-drawer)[role="dialog"] .footer button { min-height:44px;padding:10px 14px;border-radius:var(--mobile-control-radius,8px);font-size:13px;line-height:20px;box-shadow:none; }
+ .detail:global(.work-drawer)[role="dialog"] :is(button,input,select,textarea,a):focus-visible { outline:2px solid var(--studio-navy);outline-offset:3px; }
+}

@@ -1,4 +1,5 @@
 'use client';
+import { useThemePreference } from '@/hooks/useThemePreference';
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -67,6 +68,7 @@ function readAuthPersist(): boolean {
 export function AppProvider({ children }: { children?: React.ReactNode }) {
   const router = useRouter();
   const [state, setState] = useState<AppState>(getDefaultState);
+  const { themeMode, toggleThemeMode } = useThemePreference(state.customOptions?.featureToggles?.themeMode);
   const [isLoaded, setIsLoaded] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -257,22 +259,6 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
     }
   }, [state, isLoaded]);
 
-  // Sync global theme class to document
-  useEffect(() => {
-    const isDark = state.customOptions?.featureToggles?.themeMode === 'dark';
-    if (typeof document !== 'undefined') {
-      if (isDark) {
-        document.documentElement.classList.add('dark');
-        document.documentElement.classList.remove('light');
-        document.documentElement.setAttribute('data-theme', 'dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-        document.documentElement.classList.add('light');
-        document.documentElement.setAttribute('data-theme', 'light');
-      }
-    }
-  }, [state.customOptions?.featureToggles?.themeMode]);
-
   // Focus timer countdown
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -430,6 +416,13 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
         }
       }
 
+      try {
+        const { isNativePlatform, unregisterNativePush } = await import('@/lib/native');
+        if (isNativePlatform()) await unregisterNativePush();
+      } catch {
+        // Native push plugin may be unavailable in web builds
+      }
+
       // Invalidate any in-flight sync before clearing credentials
       authEpochRef.current += 1;
       setInboxHydrated(false);
@@ -502,34 +495,6 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
     });
   };
 
-  const toggleThemeMode = () => {
-    setState((prev) => {
-      const currentMode = prev.customOptions?.featureToggles?.themeMode || 'light';
-      const nextMode = currentMode === 'dark' ? 'light' : 'dark';
-      if (typeof document !== 'undefined') {
-        if (nextMode === 'dark') {
-          document.documentElement.classList.add('dark');
-          document.documentElement.classList.remove('light');
-          document.documentElement.setAttribute('data-theme', 'dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-          document.documentElement.classList.add('light');
-          document.documentElement.setAttribute('data-theme', 'light');
-        }
-      }
-      return {
-        ...prev,
-        customOptions: {
-          ...prev.customOptions,
-          featureToggles: {
-            ...prev.customOptions.featureToggles,
-            themeMode: nextMode,
-          },
-        },
-      };
-    });
-  };
-
   const toggleTimer = () => {
     setTimerActive(!timerActive);
   };
@@ -566,7 +531,7 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
     resetTimer,
     setTimerSeconds,
     formatTimer,
-    themeMode: state.customOptions?.featureToggles?.themeMode || 'light',
+    themeMode,
     toggleThemeMode,
     commandPaletteOpen,
     setCommandPaletteOpen,
@@ -588,6 +553,8 @@ export function AppProvider({ children }: { children?: React.ReactNode }) {
     backendStatus,
     timerSeconds,
     timerActive,
+    themeMode,
+    toggleThemeMode,
     commandPaletteOpen,
     aiAssistantOpen,
     aiQuery,

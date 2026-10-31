@@ -9,6 +9,12 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useMobileViewport } from '@/hooks/useMobileViewport';
 import { MobileTeamAttendance } from '@/components/mobile/MobileTeamAttendance';
 import { MobileTimeOff } from '@/components/mobile/MobileTimeOff';
+import { MobileAttendanceHome } from '@/components/mobile/MobileAttendanceHome';
+import { MobilePageTitle } from '@/components/mobile/MobilePageTitle';
+import mobileAttendanceStyles from '@/components/mobile/mobile-attendance-home.module.css';
+import attendancePageStyles from '@/components/mobile/mobile-attendance-pages.module.css';
+import drawerStyles from '@/components/common/mobile-drawers.module.css';
+import { useDrawerFocus } from '@/hooks/useDrawerFocus';
 import { MobileRow, MobileSection } from '@/components/mobile/MobilePrimitives';
 import {
   Clock,
@@ -583,13 +589,20 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   const mobileViewport = useMobileViewport();
   const attendancePath = usePathname();
   const attendanceParams = useSearchParams();
-  const mobileAttendancePane = attendanceParams.get('view') === 'history' ? 'history' : 'overview';
-  const setMobileAttendancePane = (pane: 'overview' | 'history') => {
+  const mobileAttendancePane = attendanceParams.get('view') === 'history' ? 'history' : attendanceParams.get('view') === 'today' ? 'today' : 'overview';
+  const setMobileAttendancePane = (pane: 'overview' | 'history' | 'today') => {
     const query = new URLSearchParams(attendanceParams.toString());
-    if (pane === 'history') query.set('view', 'history'); else query.delete('view');
+    if (pane !== 'overview') query.set('view', pane); else query.delete('view');
     router.replace(attendancePath + (query.size ? '?' + query.toString() : ''), { scroll: false });
   };
   const [subTab, setSubTab] = useState<'my_attendance' | 'team_attendance' | 'leaves' | 'regularizations' | 'holidays' | 'settings'>(defaultSubTab);
+  const [mobileLeaveTab, setMobileLeaveTab] = useState<'Balances' | 'Requests'>('Balances');
+  const returnToAttendanceHome = () => {
+    setSubTab(isStudentMode && !isStudentLogin ? 'team_attendance' : 'my_attendance');
+    const query = new URLSearchParams(attendanceParams.toString());
+    query.delete('view'); query.delete('tab'); query.delete('subTab');
+    router.replace((isStudentMode ? '/student-attendance' : '/attendance') + (query.size ? '?' + query.toString() : ''), { scroll: false });
+  };
 
   useEffect(() => {
     if (initialSubTab) {
@@ -653,6 +666,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   // Leave Management State
   const [showApplyLeaveModal, setShowApplyLeaveModal] = useState(!!initialOpenApplyModal);
+  const leaveDrawerRef = useDrawerFocus(showApplyLeaveModal, () => setShowApplyLeaveModal(false));
   const [isSaving, setIsSaving] = useState(false);
   const [leaveType, setLeaveType] = useState<
     'Casual Leave' | 'Sick Leave' | 'Earned Leave' | 'Work From Home' | 'Unpaid Leave'
@@ -2554,6 +2568,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
   // Regularization Modal State
   const [showRegModal, setShowRegModal] = useState(false);
+  const regularizationDrawerRef = useDrawerFocus(showRegModal, () => setShowRegModal(false));
   const [regDate, setRegDate] = useState(() => toLocalISODate());
   const [regInTime, setRegInTime] = useState(configuredShiftStart);
   const [regOutTime, setRegOutTime] = useState(configuredShiftEnd);
@@ -4084,7 +4099,9 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   );
 
   const mainContent = (
-    <div className="work-page attendance-studio" data-mobile-attendance={mobileAttendancePane} data-mobile-subtab={subTab}>
+    <div className={`work-page attendance-studio ${mobileAttendanceStyles.shell} ${attendancePageStyles.workspace}`} data-mobile-attendance={mobileAttendancePane} data-mobile-subtab={subTab}>
+      {mobileViewport && mobileAttendancePane === 'today' && subTab === 'my_attendance' && <MobilePageTitle title="My workday" onBack={returnToAttendanceHome}/>}
+      {mobileViewport && subTab !== 'my_attendance' && subTab !== 'regularizations' && !(isStudentMode && subTab === 'team_attendance') && <button type="button" className={mobileAttendanceStyles.back} onClick={returnToAttendanceHome}><img src="/mobile-v2/auth-back.svg" width="16" height="16" alt=""/>Attendance</button>}
       {(state.currentPersona.role !== 'student' || mobileViewport) && (
         <>{mobileViewport && <nav className="work-tabs m2-attendance-nav" aria-label="Attendance views">
 <button type="button" className="work-tab" aria-selected={subTab === 'my_attendance' && mobileAttendancePane === 'overview'} onClick={() => { setSubTab('my_attendance'); setMobileAttendancePane('overview'); }}>Overview</button>
@@ -4164,7 +4181,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
 
       {/* VIEW 1: MY ATTENDANCE */}
       {(!isStudentMode || state.currentPersona.role === 'student') && (
-        <div className={`flex flex-col gap-5${subTab === 'my_attendance' ? '' : ' hidden'}`}>
+        <div data-attendance-detail="true" className={`flex flex-col gap-5${subTab === 'my_attendance' ? '' : ' hidden'}`}>
           {pingToast && (
             <div className="fixed top-5 right-5 z-50 flex items-center gap-2 bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-primary)] px-4 py-2.5 rounded-[var(--card-radius)] shadow-[0_9px_22px_rgba(26,58,84,.09)] text-[13px] font-semibold">
               <CheckCircle2 className="h-4 w-4 text-[#2f5d45]" />
@@ -4272,7 +4289,18 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             }
           />
 
-                      {mobileViewport && <div className="m2-attendance-overview">
+      {mobileViewport && subTab === 'my_attendance' && mobileAttendancePane === 'overview' && <MobileAttendanceHome
+        today={todayIsoStr}
+        holidays={state.customOptions?.holidays || []} student={isStudentMode || isStudentLogin}
+        onLogs={() => setMobileAttendancePane('history')}
+        onRequests={() => setSubTab('regularizations')}
+        onApplyLeave={() => { setSelectedLeaveEmpId(targetEmployeeObj.id); setShowApplyLeaveModal(true); }}
+        onBalances={() => { setMobileLeaveTab('Balances'); setLeaveView('mine'); setSubTab('leaves'); }}
+        onLeaveHistory={() => { setMobileLeaveTab('Requests'); setLeaveView('mine'); setSubTab('leaves'); }}
+        onTeam={state.currentPersona.role !== 'student' && (!isUserView || isStudentMode) ? () => setSubTab('team_attendance') : undefined}
+      />}
+
+                      {mobileViewport && mobileAttendancePane === 'today' && <div className={`m2-attendance-overview ${mobileAttendanceStyles.timeline}`}>
               <MobileSection title="Today’s timeline">
                 {todaySessions.map((session,index) => <React.Fragment key={index}>
                   <MobileRow title="Clocked in" detail={[parseTimeToTodayDate(session.checkIn, now)?.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}),session.locationName || myTodayRecord?.locationName || 'Office'].filter(Boolean).join(' · ')} onClick={() => setMobileAttendancePane('history')} />
@@ -4281,12 +4309,6 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
                 {!todaySessions.length && <p className="m2-empty">No punches recorded today.</p>}
               </MobileSection>
               <MobileSection title="This month"><MobileRow title={filteredHistory.length + ' attendance records'} detail="View your hours and attendance history" onClick={() => setMobileAttendancePane('history')} /></MobileSection>
-              <div>
-                <MobileRow title="Time off" detail="Balances and leave requests" href="/leaves" />
-                <MobileRow title="Regularizations" detail="Request or review an attendance correction" onClick={() => setSubTab('regularizations')} />
-                <MobileRow title="Holidays" detail="Your workplace holiday calendar" onClick={() => setSubTab('holidays')} />
-                <MobileRow title="Timesheets" detail="Your logged hours and schedules" href="/timesheets" />
-              </div>
             </div>}
 
             {mobileViewport && mobileAttendancePane === 'history' ? <MobileAttendanceHistory rows={attendanceHistory} today={todayIsoStr} onCorrection={!isStudentMode && state.currentPersona.role !== 'student' ? date => openRegModal({ date }) : undefined} /> : <section className="attendance-punch-panel" aria-label="Punch log">
@@ -5136,12 +5158,12 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
             { id: 'scope', label: 'People in this view', value: new Set(visibleRegularizations.map((request) => request.employeeId)).size, tone: 'neutral' },
           ]} />
 
-          <RegularizationRequestsView onApply={()=>openRegModal()} onRequestWFH={!isInstitution?()=>openRegModal({reason:'Work From Home',remarks:'Work from home request'}):undefined} requests={visibleRegularizations} currentEmployeeId={state.currentPersona.id} canReview={(request) => canApproveRegularization(state.currentPersona, request, state.employees)} onReview={handleApproveRegularization} />
+          <RegularizationRequestsView onApply={()=>openRegModal()} onRequestWFH={!isInstitution?()=>openRegModal({reason:'Work From Home',remarks:'Work from home request'}):undefined} onBack={mobileViewport?returnToAttendanceHome:undefined} requests={visibleRegularizations} currentEmployeeId={state.currentPersona.id} canReview={(request) => canApproveRegularization(state.currentPersona, request, state.employees)} onReview={handleApproveRegularization} />
         </div>
       )}
 
       {/* VIEW: LEAVES & TIME OFF */}
-      {!isStudentMode && subTab === 'leaves' && (mobileViewport && leaveView === 'mine' ? <MobileTimeOff balances={[
+      {!isStudentMode && subTab === 'leaves' && (mobileViewport && leaveView === 'mine' ? <MobileTimeOff initialTab={mobileLeaveTab} balances={[
         {label:'Casual leave',remaining:casualLeft,quota:personalQuota('casualLeave'),used:casualUsed,pending:casualPending,restricted:isTargetInProbation},
         {label:'Sick leave',remaining:sickLeft,quota:personalQuota('sickLeave'),used:sickUsed,pending:sickPending,restricted:isTargetInProbation},
         {label:'Earned leave',remaining:earnedLeft,quota:personalQuota('earnedLeave'),used:earnedUsed,pending:earnedPending,restricted:isTargetInProbation},
@@ -5484,7 +5506,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
       {/* APPLY REGULARIZATION SLIDE-OVER DRAWER (MATCHING ADD TASK UI) */}
       {showRegModal && (
         <div className="attendance-form-overlay studio-form-overlay fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-150">
-          <div role="dialog" aria-modal="true" aria-label="Apply for regularization" className="studio-form-drawer relative w-full sm:max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)] border-l border-[var(--border-color)] shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-[var(--text-primary)]">
+          <div ref={regularizationDrawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Apply for regularization" data-drawer-kind="form" className={`${attendancePageStyles.form} ${drawerStyles.panel} studio-form-drawer relative w-full sm:max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)] border-l border-[var(--border-color)] shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-[var(--text-primary)]`}>
             {/* Drawer Header */}
             <div className="p-4 sm:p-6 sm:px-8 border-b border-[var(--border-color)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
               <h3 className="text-xl sm:text-2xl font-bold text-[var(--text-primary)]">Apply for Regularization</h3>
@@ -6240,7 +6262,7 @@ export const KekaAttendanceModule: React.FC<KekaAttendanceModuleProps> = ({
   {/* APPLY LEAVE / LOG LEAVE MODAL (Simplified Modern Slide-over Drawer) */}
   const applyLeaveModal = showApplyLeaveModal && (
     <div className="attendance-form-overlay studio-form-overlay fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
-      <div role="dialog" aria-modal="true" aria-label="Apply for leave" className="studio-form-drawer relative w-full max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)]  border-l border-[var(--border-color)]  shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-[var(--text-primary)] dark:text-white">
+      <div ref={leaveDrawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Apply for leave" data-drawer-kind="form" className={`${attendancePageStyles.form} ${drawerStyles.panel} studio-form-drawer relative w-full max-w-lg md:max-w-xl h-full bg-[var(--bg-surface)]  border-l border-[var(--border-color)]  shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 text-[var(--text-primary)] dark:text-white`}>
         
         {/* Drawer Header */}
         <div className="p-4 sm:p-7 sm:px-8 border-b border-[var(--border-color)]  flex items-center justify-between bg-[var(--bg-surface)]  shrink-0">

@@ -3,10 +3,12 @@ import { ResponsiveFilters } from '@/components/common/ResponsiveFilters';
 import './workspaces.css';
 import { DateInput } from '@/components/common/DateInput';
 import { useMobileViewport } from '@/hooks/useMobileViewport';
-import { MobileRow } from '@/components/mobile/MobilePrimitives';
-import { MobileHeaderAction } from '@/components/mobile/MobileHeaderAction';
+import styles from './mobile-timesheets.module.css';
+import drawerStyles from '@/components/common/mobile-drawers.module.css';
+import { useDrawerFocus } from '@/hooks/useDrawerFocus';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   ChevronLeft,
   ChevronRight,
@@ -93,6 +95,7 @@ function formatHoursHM(hrs: number): string {
   const totalMinutes = Math.round((hrs || 0) * 60);
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
+  if (totalMinutes === 0) return '0h';
   if (h === 0) return `${m}m`;
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
@@ -190,6 +193,14 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   const [listDateScope, setListDateScope] = useState<'week' | 'all'>('week');
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month' | 'list'>('day');
   const [selectedDate, setSelectedDate] = useState<string>(TODAY_DATE);
+  const requestedDate = useSearchParams().get('date');
+  useEffect(() => {
+    if (!requestedDate || !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) return;
+    const parsed = new Date(requestedDate + 'T12:00:00');
+    if (Number.isNaN(parsed.getTime()) || localDateKey(parsed) !== requestedDate) return;
+    setSelectedDate(requestedDate);
+    setViewMode('day');
+  }, [requestedDate]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>(selectedProjectId);
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string>(
@@ -207,6 +218,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   const canReviewEntry = (entry: TimesheetEntry) =>
     canApproveTimesheet(state.currentPersona, entry, state.employees, state.projects);
   const [showLogModal, setShowLogModal] = useState(false);
+  const timeDrawerRef = useDrawerFocus(showLogModal, () => setShowLogModal(false));
   const [confirmRejectPeriod, setConfirmRejectPeriod] = useState(false);
   const [pendingDeleteEntry, setPendingDeleteEntry] = useState<TimesheetEntry | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -227,12 +239,6 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   const [formEmployeeId, setFormEmployeeId] = useState(state.currentPersona?.id || state.employees[0]?.id || '');
   const [formEmployeeIds, setFormEmployeeIds] = useState<string[]>([]);
 
-  useEffect(() => {
-    if (!showLogModal) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setShowLogModal(false); };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [showLogModal]);
 
   const timeGridScrollRef = useRef<HTMLDivElement>(null);
   const HOUR_HEIGHT = 44;
@@ -1376,6 +1382,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
     [todayDayEntries, state.currentPersona, state.employees, state.projects]
   );
   const todayDayTotalHours = useMemo(() => todayDayEntries.reduce((sum, e) => sum + getEntryLiveHours(e), 0), [todayDayEntries, now, state.tasks]);
+  const mobileEntryCount = filteredEntries.filter(entry => viewMode === 'list' || viewMode === 'week' || entry.date === selectedDate).length;
   const currentTimeMinutes = useMemo(() => {
     const clock = new Date(now);
     return clock.getHours() * 60 + clock.getMinutes();
@@ -1395,8 +1402,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
   };
 
   return (
-    <div className="work-page timesheets-page" data-mobile-filters={mobileFiltersOpen}>
-      {mobileViewport && <MobileHeaderAction><button type="button" className="m2-icon-button" aria-label="Timesheet filters" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen(open => !open)}><img src="/mobile-v2/home-icon-more.svg" width="22" height="22" alt="" /></button></MobileHeaderAction>}
+    <div className={`work-page timesheets-page ${styles.page}`} data-mobile-filters={mobileFiltersOpen}>
       {toastMessage && (
         <div className="fixed top-6 right-6 z-70 bg-[var(--bg-surface)] border border-[var(--border-color)] text-[var(--text-primary)] px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
           <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
@@ -1424,7 +1430,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
           <h2 className="work-period-title" title={headerDateTitle}>{headerDateTitle}</h2>
         </div>
         <div className="work-time-controls">
-          <ResponsiveFilters active={Boolean(searchQuery || selectedProjectFilter !== 'All' || statusFilter !== 'All')}>
+          <ResponsiveFilters expanded={mobileViewport ? mobileFiltersOpen : undefined} active={Boolean(searchQuery || selectedProjectFilter !== 'All' || statusFilter !== 'All')}>
             <label className="work-log-search">
               <Search size={14} aria-hidden="true" />
               <input type="search" placeholder="Search logs" aria-label="Search logs" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="work-field" />
@@ -1439,11 +1445,11 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
             {viewMode === 'list' && <select className="work-field work-time-range-filter" aria-label="List date range" value={listDateScope} onChange={(event) => setListDateScope(event.target.value as 'week' | 'all')}><option value="week">Selected week</option><option value="all">All dates</option></select>}
             <button type="button" className="mobile-filter-today" onClick={handleToday}>Go to today</button>
           </ResponsiveFilters>
-          <div className="work-seg work-time-views" role="group" aria-label="Timesheet view">
-            {(mobileViewport ? (['day','week','month'] as const) : (['day', 'week', 'month', 'list'] as const)).map((mode) => (
+          <div className={styles.viewRow}><div className="work-seg work-time-views" role="group" aria-label="Timesheet view">
+            {(['day', 'week', 'month', 'list'] as const).map((mode) => (
               <button key={mode} type="button" onClick={() => setViewMode(mode)} className={viewMode === mode ? 'is-on' : ''} aria-pressed={viewMode === mode}>{mode}</button>
             ))}
-          </div>
+          </div>{mobileViewport && <button type="button" className={styles.filterButton} aria-label="Timesheet filters" aria-expanded={mobileFiltersOpen} onClick={()=>setMobileFiltersOpen(open=>!open)}>Filters</button>}</div>
         </div>
       </div>
       {isAdmin && (
@@ -1514,25 +1520,37 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
           </div>
         )}
         {viewMode === 'week' && <div className="work-mobile-totals"><div><span>Week total</span><strong>{formatHoursHM(weekDays.reduce((total,day) => total + day.totalHours, 0))}</strong></div><div><span>Pending review</span><strong>{reviewablePeriodEntries.length} entries</strong></div></div>}
-        {viewMode === 'day' && <div className="m2-metric"><span>Logged {selectedDate === TODAY_DATE ? 'today' : 'on ' + selectedDate}</span><strong>{formatHoursHM(todayDayTotalHours)}</strong><small className="m2-success">{filteredEntries.filter(entry=>entry.date===selectedDate && isPendingStatus(entry.status)).length} entries pending review</small></div>}
-          <div className="m2-section-heading"><h2>Time entries</h2><span>{filteredEntries.filter(entry => viewMode === 'list' || entry.date === selectedDate).length} entries</span></div>
+        {viewMode === 'day' && (
+          <div className="work-mobile-totals" aria-label="Day summary">
+            <div>
+              <span>Logged {selectedDate === TODAY_DATE ? 'today' : new Date(`${selectedDate}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+              <strong>{formatHoursHM(todayDayTotalHours)}</strong>
+            </div>
+            <div>
+              <span>Pending review</span>
+              <strong>{todayDayEntries.filter((entry) => isPendingStatus(entry.status)).length} entries</strong>
+            </div>
+          </div>
+        )}
+        {viewMode === 'month' && <div className="m2-metric"><span>Month total</span><strong>{formatHoursHM(filteredEntries.reduce((total,entry)=>total+getEntryLiveHours(entry),0))}</strong><small>{filteredEntries.length} time entries</small></div>}
+          <div className="m2-section-heading"><h2>Time entries</h2><span>{mobileEntryCount} {mobileEntryCount === 1 ? 'entry' : 'entries'}</span></div>
+          {viewMode === 'week' && filteredEntries.length === 0 && <p className="work-mobile-empty">No time entries for this week.</p>}
           {viewMode === 'list' && <div className="work-mobile-list-actions"><span>{filteredEntries.length} entries · {formatHoursHM(filteredEntries.reduce((total,entry) => total + getEntryLiveHours(entry), 0))} logged</span><button type="button" className="work-btn-secondary" onClick={handleExportCSV}>Export CSV</button></div>}
         {(viewMode === 'week' ? weekDays : [{dateStr:selectedDate, dayName:'', dayNum:0, totalHours:todayDayTotalHours}]).map((day) => {
           const entries = viewMode === 'list' ? filteredEntries : filteredEntries.filter((entry) => entry.date === day.dateStr);
           return <section key={day.dateStr} className="work-mobile-agenda">
             {viewMode === 'week' && entries.length > 0 && <h2>{new Date(`${day.dateStr}T00:00:00`).toLocaleDateString('en-GB', {weekday:'short',day:'numeric',month:'short'})}</h2>}
             {entries.map((entry) => <button key={entry.id} type="button" className="work-mobile-entry" onClick={() => handleEditEntry(entry)}>
-              <strong>{entry.taskTitle || 'Time entry'}</strong>
+              <span className={styles.entryHeading}><strong>{entry.taskTitle || 'Time entry'}</strong><small data-status={entry.status}>{entry.status}</small></span>
               <span>{entry.projectName || 'General'} · {entry.startTime?to12HourStr(entry.startTime):'-'} – {entry.endTime?to12HourStr(entry.endTime):'Running'}</span>
-              <small className="m2-warning">{formatHoursHM(getEntryLiveHours(entry))}{viewMode==='list'?' · '+entry.status:''}</small>
+              <small className={styles.entryHours}>{formatHoursHM(getEntryLiveHours(entry))}{selectedEmployeeFilter === 'All' ? ' · '+entry.employeeName : ''}</small>
             </button>)}
             {entries.length === 0 && viewMode !== 'week' && <p className="work-mobile-empty">No time entries for this period.</p>}
           </section>;
         })}
       </div>
 
-      <div className="m2-timesheet-actions"><button type="button" className="m2-primary" onClick={() => handleOpenLogModal(selectedDate)}>Log time</button><button type="button" className="m2-secondary" onClick={()=>{setViewMode('list');setMobileFiltersOpen(true);}}>Review timesheet</button></div>
-      <div className="m2-timesheet-links"><MobileRow title="Month view" detail="Calendar of time entries" onClick={()=>setViewMode('month')}/><MobileRow title="Review time entries" detail="List and approval actions" onClick={()=>{setViewMode('list');setMobileFiltersOpen(true);}}/>{isAdmin&&<MobileRow title="Schedule people" detail="Assign a meeting to teammates" onClick={()=>handleOpenLogModal(selectedDate,undefined,'schedule')}/>}</div>
+      <div className="m2-timesheet-actions"><button type="button" className="m2-primary" onClick={() => handleOpenLogModal(selectedDate)}>Log time</button>{isAdmin && <button type="button" className="m2-secondary" onClick={()=>handleOpenLogModal(selectedDate,undefined,'schedule')}>Schedule people</button>}</div>
 
 {/* VIEW 1: DAY VIEW (Light Theme) */}
       {viewMode === 'day' && (
@@ -2088,10 +2106,10 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
       )}
 
       {showLogModal && (
-        <div className="work-time-modal-overlay fixed inset-0 z-60 flex items-center justify-center p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="work-time-dialog-title" className="work-time-modal">
+        <div className={`work-time-modal-overlay fixed inset-0 z-60 flex items-center justify-center p-4 ${drawerStyles.overlay}`}>
+          <div ref={timeDrawerRef} tabIndex={-1} role="dialog" aria-modal="true" data-drawer-kind="form" aria-labelledby="work-time-dialog-title" className={`work-time-modal ${drawerStyles.panel} ${styles.form}`}>
             <header className="work-time-modal-head">
-              <div><h2 id="work-time-dialog-title">{logModalTab === 'schedule' ? 'Assign meeting' : editingEntryId ? 'Edit time entry' : 'Log task'}</h2><p>{new Date(`${formDate}T00:00:00`).toLocaleDateString('en-GB', {weekday:'long',day:'numeric',month:'long'})}</p></div>
+              <div><h2 id="work-time-dialog-title">{logModalTab === 'schedule' ? editingEntryId ? 'Edit schedule' : 'Assign meeting' : editingEntryId ? 'Edit time entry' : 'Log task'}</h2><p>{new Date(`${formDate}T00:00:00`).toLocaleDateString('en-GB', {weekday:'long',day:'numeric',month:'long'})}</p></div>
               <button type="button" aria-label="Close time form" onClick={() => setShowLogModal(false)}><X size={18} /></button>
             </header>
             <div className="work-time-modal-tabs" role="tablist" aria-label="Time entry type">
@@ -2114,7 +2132,7 @@ export const TimesheetsModule: React.FC<TimesheetsModuleProps> = ({
                   <label htmlFor="time-category">Category *<select id="time-category" required value={formCategory} onChange={(event) => setLogCategory(event.target.value as TimesheetEntry['category'])}>{(['Development','Design','Testing','Code Review','Meeting','Documentation','Bug Fix'] as const).map((category) => <option key={category}>{category}</option>)}</select></label>
                 </>}
                 <label htmlFor="time-notes">{logModalTab === 'schedule' ? 'Agenda' : 'Notes'}<textarea id="time-notes" rows={3} value={formDescription} onChange={(event) => setFormDescription(event.target.value)} placeholder={logModalTab === 'schedule' ? 'What will you cover?' : 'What did you complete?'} /></label>
-                {isAdmin && logModalTab === 'schedule' && !editingEntryId ? <div className="work-time-meeting-people"><h3>People · {formEmployeeIds.length}</h3><div>{formEmployeeIds.map((id) => <span key={id}>{accessibleEmployees.find((employee) => employee.id === id)?.name || 'Team member'}<button type="button" aria-label={`Remove ${accessibleEmployees.find((employee) => employee.id === id)?.name || 'person'}`} onClick={() => setFormEmployeeIds((ids) => ids.filter((value) => value !== id))}><X size={12}/></button></span>)}</div><label htmlFor="time-add-person">Add person<select id="time-add-person" value="" onChange={(event) => { if(event.target.value) setFormEmployeeIds((ids) => [...ids,event.target.value]); }}><option value="">Choose a person</option>{accessibleEmployees.filter((employee) => !formEmployeeIds.includes(employee.id) && !isTestEntity(employee.name)).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label></div> : isAdmin ? <label htmlFor="time-person">Person<select id="time-person" value={formEmployeeId} onChange={(event) => setFormEmployeeId(event.target.value)}>{accessibleEmployees.filter((employee) => !isTestEntity(employee.name)).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label> : null}
+                {isAdmin && logModalTab === 'schedule' && !editingEntryId ? <div className="work-time-meeting-people"><h3>People · {formEmployeeIds.length}</h3><div>{formEmployeeIds.map((id) => <span key={id}>{accessibleEmployees.find((employee) => employee.id === id)?.name || 'Team member'}<button type="button" aria-label={`Remove ${accessibleEmployees.find((employee) => employee.id === id)?.name || 'person'}`} onClick={() => setFormEmployeeIds((ids) => ids.filter((value) => value !== id))}><X size={12}/></button></span>)}</div><label htmlFor="time-add-person">Add person<select id="time-add-person" aria-label="Add person" value="" onChange={(event) => { if(event.target.value) setFormEmployeeIds((ids) => [...ids,event.target.value]); }}><option value="">Choose a person</option>{accessibleEmployees.filter((employee) => !formEmployeeIds.includes(employee.id) && !isTestEntity(employee.name)).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label></div> : isAdmin ? <label htmlFor="time-person">Person<select id="time-person" value={formEmployeeId} onChange={(event) => setFormEmployeeId(event.target.value)}>{accessibleEmployees.filter((employee) => !isTestEntity(employee.name)).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label> : null}
                 {logModalTab === 'task' && <label className="work-time-billable" htmlFor="time-billable"><span>Billable work<small>Include these hours on the client invoice.</small></span><input id="time-billable" type="checkbox" role="switch" checked={formBillable} onChange={(event) => setFormBillable(event.target.checked)} /></label>}
               </div>
               <footer className="work-time-modal-footer">

@@ -4,6 +4,7 @@ import { DateInput } from '@/components/common/DateInput';
 import React, { useState, useMemo } from 'react';
 import { X, Printer } from 'lucide-react';
 import { AppState } from '@/services/store';
+import mobileStyles from '@/components/mobile/mobile-attendance-pages.module.css';
 
 interface AttendanceReportsModalProps {
   isOpen: boolean;
@@ -529,7 +530,7 @@ export const AttendanceReportsModal: React.FC<AttendanceReportsModalProps> = ({
 
   return (
     <div className="att-overlay" role="presentation" onClick={onClose}>
-      <div className="att-dialog max-w-xl overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label="Export attendance report" className={`att-dialog max-w-xl overflow-y-auto ${mobileStyles.report}`} onClick={(e) => e.stopPropagation()}>
         <div className="att-dialog-head">
           <h2>Export report</h2>
           <button type="button" onClick={onClose} className="att-dialog-close" aria-label="Close">
@@ -551,6 +552,7 @@ export const AttendanceReportsModal: React.FC<AttendanceReportsModalProps> = ({
                   key={t.id}
                   type="button"
                   onClick={() => setReportType(t.id)}
+                  aria-pressed={reportType === t.id}
                   className={`att-stat${reportType === t.id ? ' is-active' : ''}`}
                 >
                   <div className="text-[13px] font-semibold text-[var(--text-primary)]">{t.label}</div>

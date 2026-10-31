@@ -26,6 +26,7 @@ The UI runs locally on the device. Live data still comes from the backend.
 - Next.js proxy, API routes, and server actions stay in the web project and are excluded from the mobile export. Existing setup screens call the backend client directly.
 - Reset-password, invitation, and email-verification query parameters are read on the client, so those screens work without a Next.js server.
 - The optional AI assistant requires NEXT_PUBLIC_SERVER_API_ORIGIN pointing to an API service that provides /api/ai/assistant. If absent, the feature reports that its service is not configured; no server key is bundled.
+- Workplace picker and attendance maps need NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (Maps JavaScript API + Geocoding API). This value is inlined at `build:mobile` time; local `.env.local` does not reach GitHub-built APKs/IPAs.
 - Google/Firebase integrations still require their provider configuration to support native sign-in.
 
 ## GitHub Actions
@@ -36,7 +37,46 @@ Repository variables:
 - MOBILE_BACKEND_URL: optional backend origin (defaults to https://api.pixbe.in).
 - MOBILE_SERVER_API_ORIGIN: optional API origin for server-only assistant requests.
 
+Repository secrets:
+- MOBILE_GOOGLE_MAPS_API_KEY: Google Maps JavaScript API key baked into CI APK/IPA builds. Without it, maps show “API key is not set” on devices. Prefer Android package / iOS bundle restrictions (or none for WebView) over HTTP referrer restrictions — Capacitor does not use browser referrers.
+
 Existing signing secrets are still required for signed releases or TestFlight. Building the UI successfully does not replace real-device tests for login, camera, geolocation, notifications, and external authentication.
+
+## Push notifications (FCM / APNs)
+
+Background alerts use Capacitor Push Notifications + Firebase Cloud Messaging. The JS layer already registers the device token with the backend after login.
+
+### Shared (Android + iOS)
+
+1. Create a Firebase project (current: `hr-solutions-51cc2`) and register apps with id `in.pixbe.hrsolutions`.
+2. On the backend, set a Firebase **service account** in env:
+
+```
+FCM_PROJECT_ID=...
+FCM_CLIENT_EMAIL=...
+FCM_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+
+3. After plugin changes, run `npm run cap:sync:android` / `npm run cap:sync:ios`.
+
+### Android
+
+1. Download `google-services.json` into `hrsolutions/android/app/` (Google Services plugin applies when this file exists).
+
+### iOS
+
+1. Add an iOS app in Firebase with bundle id `in.pixbe.hrsolutions`.
+2. Download `GoogleService-Info.plist` into `hrsolutions/ios/App/App/` (see `GoogleService-Info.plist.example`). It must be a real member of the Xcode App target.
+3. Apple Developer → create an **APNs Auth Key** (`.p8`) → upload it in Firebase → Project settings → Cloud Messaging → Apple app config.
+4. Native project already wires:
+   - `App.entitlements` Push (`aps-environment`)
+   - `UIBackgroundModes` → `remote-notification`
+   - `AppDelegate` Firebase Messaging so Capacitor receives an **FCM** token (required by the backend)
+   - FirebaseMessaging SPM package on the App target
+5. On a Mac: open Xcode (`npm run cap:ios`), confirm Signing team + Push Notifications capability, resolve Swift packages, run on a **physical iPhone**.
+6. For local debug builds with a Development profile, set `aps-environment` to `development` in `App.entitlements`. App Store / TestFlight CI should use `production`.
+
+Geofence monitoring: while an office punch is open, the app watches GPS and posts `/attendance/presence`. Leaving the fence triggers a 15-minute clock-out warning (inbox + push); staying outside auto-punches out.
 
 ## Optional live reload
 

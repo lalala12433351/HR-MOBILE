@@ -14,7 +14,7 @@ import { CommandPalette } from '@/components/common/CommandPalette';
 import { AIAssistantModal } from '@/components/ai/AIAssistantModal';
 import { AttendanceSessionGuard } from '@/components/attendance/AttendanceSessionGuard';
 import { NativeShellBootstrap } from '@/components/native/NativeShellBootstrap';
-import { isNativePlatform } from '@/lib/native';
+import { isNativePlatform, registerNativePush } from '@/lib/native';
 import { AppToaster } from '@/components/ui/AppToaster';
 import { DesktopPushPrompt } from '@/components/common/DesktopPushPrompt';
 import { IMPERSONATION_TENANT_KEY, isMasterAdminHost } from '@/config/origins';
@@ -206,6 +206,11 @@ function AppShellContent({ children }: { children?: React.ReactNode }) {
     navigator.serviceWorker.addEventListener('message', onMessage);
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);
   }, [currentPersona, bypassTenantGates, state.isAuthenticated, router]);
+
+  useEffect(() => {
+    if (!currentPersona || bypassTenantGates || !state.isAuthenticated || !isNativePlatform()) return;
+    void registerNativePush();
+  }, [currentPersona, bypassTenantGates, state.isAuthenticated]);
 
   const handleSessionRecovery = () => {
     logout();

@@ -25,6 +25,7 @@ import { Holiday } from '@/types';
 import { holidayTemplates } from '@/data/holidayTemplates';
 import { useApp } from '@/context/AppContext';
 import { ATT_CARD } from './attendanceUi';
+import mobileStyles from '@/components/mobile/mobile-attendance-pages.module.css';
 
 interface HolidayCalendarViewProps {
   holidays?: Holiday[];
@@ -649,9 +650,9 @@ export const HolidayCalendarView: React.FC<HolidayCalendarViewProps> = ({
 
   const previewMultiTemplateCount = selectedTemplateItems.length;
 
-  if (mobile && !isHR) return <div className="m2-page m2-holidays"><label className="m2-form-field">Year<select value={activeYear} onChange={event=>setActiveYear(Number(event.target.value))}>{Array.from(new Set([new Date().getFullYear()-1,new Date().getFullYear(),new Date().getFullYear()+1,...allHolidays.map(h=>holidayYear(h))])).sort().map(year=><option key={year}>{year}</option>)}</select></label><small className="m2-caption">{yearHolidays.length} published holidays · Only approved dates appear</small><div>{yearHolidays.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(holiday=><MobileRow key={holiday.id} title={holiday.name} detail={new Date(holiday.date+'T12:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} arrow={false}/>)}</div>{!yearHolidays.length&&<p className="m2-empty">No published holidays for this year.</p>}<small className="m2-caption">No attendance is expected on a published holiday.</small></div>;
+  if (mobile && !isHR) return <div className={`m2-page m2-holidays ${mobileStyles.page}`}><label className="m2-form-field">Year<select value={activeYear} onChange={event=>setActiveYear(Number(event.target.value))}>{Array.from(new Set([new Date().getFullYear()-1,new Date().getFullYear(),new Date().getFullYear()+1,...allHolidays.map(h=>holidayYear(h))])).sort().map(year=><option key={year}>{year}</option>)}</select></label><small className="m2-caption">{yearHolidays.length} published holidays · Only approved dates appear</small><div className={mobileStyles.records}>{yearHolidays.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(holiday=><MobileRow key={holiday.id} title={holiday.name} detail={new Date(holiday.date+'T12:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} arrow={false}/>)}</div>{!yearHolidays.length&&<p className="m2-empty">No published holidays for this year.</p>}<small className="m2-caption">No attendance is expected on a published holiday.</small></div>;
   return (
-    <div className="space-y-4 w-full">
+    <div className={`space-y-4 w-full ${mobileStyles.holidayAdmin}`}>
       {/* Top Feedback Banner */}
       {feedbackBanner && (
         <div className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs font-semibold animate-in fade-in slide-in-from-top-2 duration-200 ${

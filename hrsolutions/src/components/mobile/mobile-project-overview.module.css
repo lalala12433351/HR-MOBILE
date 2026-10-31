@@ -1,0 +1,12 @@
+.card { display:flex;flex-direction:column;gap:10px;width:100%;min-width:0;padding:16px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-surface);color:var(--text-primary);text-align:left; }
+.heading { display:flex;align-items:flex-start;justify-content:space-between;gap:12px; }
+.heading > strong { font-size:15px;line-height:22px;font-weight:600;overflow-wrap:anywhere; }
+.heading > small { flex-shrink:0;max-width:90px;font-size:12px;line-height:20px;color:var(--accent-indigo-foreground); }
+.manager,.due { font-size:12px;line-height:18px;color:var(--text-secondary); }
+.progressCopy { display:flex;justify-content:space-between;gap:12px;margin-top:6px;font-size:12px;line-height:18px;color:var(--text-secondary); }
+.progressCopy > strong { color:var(--accent-teal-foreground);font-weight:600; }
+.progress { display:block;overflow:hidden;height:5px;border-radius:3px;background:var(--bg-surface-subtle); }
+.progress > span { display:block;height:100%;border-radius:inherit;background:var(--accent-teal-foreground); }
+.due { padding-top:10px;border-top:1px solid var(--border-color); }
+.card:active { background:var(--studio-selected); }
+.card:focus-visible { outline:2px solid var(--studio-navy);outline-offset:3px; }

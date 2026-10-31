@@ -2,7 +2,15 @@ import { Request, Response } from 'express';
 import { ensureChatTables } from '../../db/ensureChatTables.js';
 import { log } from '../../utils/logger.js';
 import { ChatError, resolveChatEmployee, TenantQuery } from '../chat/chat.service.js';
-import { deleteSubscription, pushConfigured, saveSubscription, vapidPublicKey } from './push.service.js';
+import {
+  deleteDeviceToken,
+  deleteSubscription,
+  nativePushConfigured,
+  pushConfigured,
+  saveDeviceToken,
+  saveSubscription,
+  vapidPublicKey,
+} from './push.service.js';
 
 async function employeeId(req: Request): Promise<{ q: TenantQuery; id: string }> {
   const schema = req.dbSchema!;
@@ -29,7 +37,11 @@ export async function getVapidPublicKey(req: Request, res: Response): Promise<vo
     await ensureChatTables(req.dbSchema!);
     res.json({
       success: true,
-      data: { publicKey: vapidPublicKey(), enabled: pushConfigured() },
+      data: {
+        publicKey: vapidPublicKey(),
+        enabled: pushConfigured(),
+        nativeEnabled: nativePushConfigured(),
+      },
     });
   } catch (err) {
     fail(res, err);
@@ -59,6 +71,37 @@ export async function removeSubscription(req: Request, res: Response): Promise<v
     const { q, id } = await employeeId(req);
     await deleteSubscription(q, id, req.body.endpoint);
     res.json({ success: true, data: { subscribed: false } });
+  } catch (err) {
+    fail(res, err);
+  }
+}
+
+export async function putDevice(req: Request, res: Response): Promise<void> {
+  try {
+    if (!nativePushConfigured()) {
+      res.status(503).json({
+        success: false,
+        error: {
+          code: 'NATIVE_PUSH_UNAVAILABLE',
+          message: 'Mobile push is unavailable until Firebase Cloud Messaging is configured on the server.',
+        },
+      });
+      return;
+    }
+    const { q, id } = await employeeId(req);
+    const agent = req.get('user-agent') || null;
+    await saveDeviceToken(q, id, req.body, agent ? agent.slice(0, 512) : null);
+    res.json({ success: true, data: { registered: true } });
+  } catch (err) {
+    fail(res, err);
+  }
+}
+
+export async function removeDevice(req: Request, res: Response): Promise<void> {
+  try {
+    const { q, id } = await employeeId(req);
+    await deleteDeviceToken(q, id, req.body.token);
+    res.json({ success: true, data: { registered: false } });
   } catch (err) {
     fail(res, err);
   }
