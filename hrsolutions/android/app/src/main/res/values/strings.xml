@@ -4,4 +4,6 @@
     <string name="title_activity_main">Pixbe HR</string>
     <string name="package_name">in.pixbe.hrsolutions</string>
     <string name="custom_url_scheme">in.pixbe.hrsolutions</string>
+    <string name="capacitor_background_geolocation_notification_channel_name">Attendance location</string>
+    <string name="capacitor_background_geolocation_notification_color">#2563eb</string>
 </resources>

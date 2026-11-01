@@ -8,11 +8,15 @@ import { persistClockOutTaskSessions } from '@/utils/taskBoard';
 import { applyRemoteCheckout } from '@/utils/attendancePunches';
 import { publishAttendanceCheckout } from '@/utils/attendanceSessionEvents';
 import {
-  ensureLocationPermission,
+  ensureAlwaysLocationPermission,
   getCurrentPosition,
   isNativePlatform,
+  openAlwaysLocationSettings,
   requestAppNotificationPermission,
+  startBackgroundAttendanceTracking,
+  stopBackgroundAttendanceTracking,
   watchPosition,
+  type BackgroundPresenceResult,
   type PositionWatchHandle,
 } from '@/lib/native';
 
@@ -54,6 +58,7 @@ export function AttendanceSessionGuard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const outsideToast = useRef('');
+  const alwaysPrompt = useRef(false);
   const tracking = useRef(false);
   const watchHandle = useRef<PositionWatchHandle | null>(null);
   const pingTimer = useRef<number | null>(null);
@@ -97,6 +102,52 @@ export function AttendanceSessionGuard() {
       ).catch(() => {});
     };
 
+    const applyPresence = (data: BackgroundPresenceResult) => {
+      if (stopped || !data) return;
+      if (data.status === 'outside' && data.outsideSince && outsideToast.current !== data.outsideSince) {
+        outsideToast.current = data.outsideSince;
+        const warning =
+          'You left the office geofence. You will be clocked out within 15 minutes.';
+        // Server notify + inbox bridge / FCM own the OS tray — in-app toast only here.
+        triggerToast({
+          title: 'Outside the office',
+          message: warning,
+          type: 'info',
+          suppressOsNotification: true,
+        });
+        if (isNativePlatform() && data.signsOutAt) {
+          const at = new Date(data.signsOutAt);
+          if (!Number.isNaN(at.getTime()) && at.getTime() > Date.now() + 5000) {
+            void LocalNotifications.schedule({
+              notifications: [
+                {
+                  id: GEOFENCE_WARN_NOTIF_ID,
+                  title: 'Clock-out soon',
+                  body: 'You are still outside the office. This shift will punch out now.',
+                  schedule: { at },
+                  extra: { linkUrl: '/attendance' },
+                },
+              ],
+            }).catch(() => {});
+          }
+        }
+      }
+      if (data.status === 'inside') {
+        outsideToast.current = '';
+        if (isNativePlatform()) {
+          void LocalNotifications.cancel({ notifications: [{ id: GEOFENCE_WARN_NOTIF_ID }] }).catch(() => {});
+        }
+      }
+      if (data.status === 'signed_out' && data.workDate && data.checkOutLabel) {
+        if (isNativePlatform()) {
+          void LocalNotifications.cancel({ notifications: [{ id: GEOFENCE_WARN_NOTIF_ID }] }).catch(() => {});
+        }
+        const at = data.outsideSince || new Date().toISOString();
+        noteSignOut({ workDate: data.workDate, checkOutLabel: data.checkOutLabel, at });
+        stopWatch();
+      }
+    };
+
     const sendFix = (latitude: number, longitude: number, accuracy?: number | null) => {
       const now = Date.now();
       if (now - lastPing.current < 15000) return;
@@ -105,48 +156,7 @@ export function AttendanceSessionGuard() {
         .postPresence({ latitude, longitude, accuracy: accuracy ?? null })
         .then((res) => {
           if (stopped || !res.success || !res.data) return;
-          if (res.data.status === 'outside' && res.data.outsideSince && outsideToast.current !== res.data.outsideSince) {
-            outsideToast.current = res.data.outsideSince;
-            const warning =
-              'You left the office geofence. You will be clocked out within 15 minutes.';
-            // Server notify + inbox bridge / FCM own the OS tray — in-app toast only here.
-            triggerToast({
-              title: 'Outside the office',
-              message: warning,
-              type: 'info',
-              suppressOsNotification: true,
-            });
-            if (isNativePlatform() && res.data.signsOutAt) {
-              const at = new Date(res.data.signsOutAt);
-              if (!Number.isNaN(at.getTime()) && at.getTime() > Date.now() + 5000) {
-                void LocalNotifications.schedule({
-                  notifications: [
-                    {
-                      id: GEOFENCE_WARN_NOTIF_ID,
-                      title: 'Clock-out soon',
-                      body: 'You are still outside the office. This shift will punch out now.',
-                      schedule: { at },
-                      extra: { linkUrl: '/attendance' },
-                    },
-                  ],
-                }).catch(() => {});
-              }
-            }
-          }
-          if (res.data.status === 'inside') {
-            outsideToast.current = '';
-            if (isNativePlatform()) {
-              void LocalNotifications.cancel({ notifications: [{ id: GEOFENCE_WARN_NOTIF_ID }] }).catch(() => {});
-            }
-          }
-          if (res.data.status === 'signed_out' && res.data.workDate && res.data.checkOutLabel) {
-            if (isNativePlatform()) {
-              void LocalNotifications.cancel({ notifications: [{ id: GEOFENCE_WARN_NOTIF_ID }] }).catch(() => {});
-            }
-            const at = res.data.outsideSince || new Date().toISOString();
-            noteSignOut({ workDate: res.data.workDate, checkOutLabel: res.data.checkOutLabel, at });
-            stopWatch();
-          }
+          applyPresence(res.data);
         })
         .catch(() => {});
     };
@@ -159,13 +169,58 @@ export function AttendanceSessionGuard() {
         window.clearInterval(pingTimer.current);
         pingTimer.current = null;
       }
+      void stopBackgroundAttendanceTracking();
+    };
+
+    const promptAlwaysRequired = () => {
+      if (alwaysPrompt.current || stopped) return;
+      alwaysPrompt.current = true;
+      triggerToast({
+        title: 'Allow all the time',
+        message:
+          'Attendance tracking needs location set to “Allow all the time”. Open settings, change it, then return to the app.',
+        type: 'info',
+      });
+      void openAlwaysLocationSettings().catch(() => {});
     };
 
     const startWatch = () => {
       if (tracking.current) return;
       tracking.current = true;
       void requestAppNotificationPermission();
-      void ensureLocationPermission({ always: true });
+
+      // Native: only track when OS location is “Allow all the time”.
+      if (isNativePlatform()) {
+        void (async () => {
+          const always = await ensureAlwaysLocationPermission();
+          if (!tracking.current || stopped) return;
+          if (!always) {
+            tracking.current = false;
+            promptAlwaysRequired();
+            return;
+          }
+          alwaysPrompt.current = false;
+          try {
+            await startBackgroundAttendanceTracking({
+              onPresence: (data) => {
+                if (!tracking.current || stopped) return;
+                applyPresence(data);
+              },
+              onError: () => {
+                if (!tracking.current || stopped) return;
+                void stopBackgroundAttendanceTracking();
+                tracking.current = false;
+                promptAlwaysRequired();
+              },
+            });
+          } catch {
+            tracking.current = false;
+            promptAlwaysRequired();
+          }
+        })();
+        return;
+      }
+
       const onCoords = (coords: { latitude: number; longitude: number; accuracy?: number }) => {
         sendFix(coords.latitude, coords.longitude, coords.accuracy);
       };

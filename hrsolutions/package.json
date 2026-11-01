@@ -24,6 +24,7 @@
     "build:mobile": "node scripts/build-mobile.mjs"
   },
   "dependencies": {
+    "@capacitor-community/background-geolocation": "^1.3.1",
     "@capacitor/app": "^8.1.1",
     "@capacitor/browser": "^8.0.4",
     "@capacitor/camera": "^8.2.4",

@@ -76,7 +76,7 @@ FCM_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 5. On a Mac: open Xcode (`npm run cap:ios`), confirm Signing team + Push Notifications capability, resolve Swift packages, run on a **physical iPhone**.
 6. For local debug builds with a Development profile, set `aps-environment` to `development` in `App.entitlements`. App Store / TestFlight CI should use `production`.
 
-Geofence monitoring: while an office punch is open, the app watches GPS and posts `/attendance/presence`. Leaving the fence triggers a 15-minute clock-out warning (inbox + push); staying outside auto-punches out.
+Geofence monitoring: while an office punch is open, the native app runs `@capacitor-community/background-geolocation` (Android foreground service + iOS `location` background mode) and posts `/attendance/presence` over Capacitor HTTP so pings continue while the app is backgrounded or swiped away. Attendance tracking and office punch-in require **Allow all the time** (Android background location / iOS Always); while-in-use alone is rejected and the app opens settings. A sticky “Attendance location active” notification appears on Android while tracking. Force-stop (Android) or force-quit (iOS) still ends tracking until the app is opened again with an open punch. Leaving the fence triggers a 15-minute clock-out warning (inbox + push); staying outside auto-punches out.
 
 ## Optional live reload
 

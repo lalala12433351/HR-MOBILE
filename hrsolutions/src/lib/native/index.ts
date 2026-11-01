@@ -14,6 +14,21 @@ export type {
   PositionWatchHandle,
 } from './geolocation';
 export {
+  startBackgroundAttendanceTracking,
+  stopBackgroundAttendanceTracking,
+  isBackgroundAttendanceTracking,
+  openBackgroundLocationSettings,
+} from './backgroundAttendance';
+export type {
+  BackgroundAttendanceHandlers,
+  BackgroundPresenceResult,
+} from './backgroundAttendance';
+export {
+  checkAlwaysLocationPermission,
+  ensureAlwaysLocationPermission,
+  openAlwaysLocationSettings,
+} from './alwaysLocation';
+export {
   getSelfieStream,
   captureSelfiePhoto,
   pickAvatarPhoto,

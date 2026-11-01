@@ -42,6 +42,8 @@ const config: CapacitorConfig = {
   },
   android: {
     allowMixedContent: Boolean(serverUrl?.startsWith('http://')),
+    // Keep JS bridge callbacks alive for background geolocation (community plugin).
+    useLegacyBridge: true,
   },
   ios: {
     contentInset: 'automatic',

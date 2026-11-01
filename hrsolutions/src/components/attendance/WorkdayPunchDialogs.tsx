@@ -6,7 +6,15 @@ import { X } from 'lucide-react';
 import { useMobileViewport } from '@/hooks/useMobileViewport';
 import { PunchLocationLeafletMap } from '@/components/common/PunchLocationLeafletMap';
 import { reverseGeocodeLatLng } from '@/lib/googleMaps';
-import { captureSelfiePhoto, getCurrentPosition, getSelfieStream, isNativePlatform } from '@/lib/native';
+import {
+  captureSelfiePhoto,
+  checkAlwaysLocationPermission,
+  ensureAlwaysLocationPermission,
+  getCurrentPosition,
+  getSelfieStream,
+  isNativePlatform,
+  openAlwaysLocationSettings,
+} from '@/lib/native';
 import { captureMirroredSelfie } from '@/utils/selfieCapture';
 
 function formatClock(date: Date) {
@@ -97,6 +105,7 @@ export function WorkdayPunchDialogs({
   const [isLocating, setIsLocating] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<'locating' | 'granted' | 'denied'>('locating');
   const [hasDeviceGps, setHasDeviceGps] = useState(false);
+  const [hasAlwaysLocation, setHasAlwaysLocation] = useState(!isNativePlatform());
   const [insideRadius, setInsideRadius] = useState(true);
   const [distance, setDistance] = useState(0);
   const [asRemote, setAsRemote] = useState(isWfh);
@@ -117,12 +126,34 @@ export function WorkdayPunchDialogs({
     streamRef.current = null;
   }, []);
 
+  const needsAlwaysForOffice =
+    isNativePlatform() && !isCheckedIn && !isWfh && !geofenceOptional && !hasWfhAuthorization;
+
   const fetchLocation = useCallback(() => {
     setIsLocating(true);
     setGpsStatus('locating');
 
     void (async () => {
       try {
+        if (needsAlwaysForOffice) {
+          const always = await ensureAlwaysLocationPermission();
+          setHasAlwaysLocation(always);
+          if (!always) {
+            setIsLocating(false);
+            setHasDeviceGps(false);
+            setGpsStatus('denied');
+            setPunchAddress(
+              'Set location to “Allow all the time” in system settings to punch in for office attendance.'
+            );
+            return;
+          }
+        } else if (isNativePlatform()) {
+          const status = await checkAlwaysLocationPermission();
+          setHasAlwaysLocation(status.always);
+        } else {
+          setHasAlwaysLocation(true);
+        }
+
         const coords = await getCurrentPosition({
           enableHighAccuracy: true,
           timeout: 15000,
@@ -163,11 +194,13 @@ export function WorkdayPunchDialogs({
         setGpsStatus(gpsOptional ? 'granted' : 'denied');
         if (gpsOptional) setInsideRadius(isWfh || geofenceOptional);
         const message = error instanceof Error ? error.message : '';
-        const denied = /denied|permission/i.test(message);
+        const denied = /denied|permission|all the time/i.test(message);
         setPunchAddress(
           denied
             ? isNativePlatform()
-              ? 'Location is blocked. Allow location for this app in system settings, then retry.'
+              ? needsAlwaysForOffice
+                ? 'Set location to “Allow all the time” in system settings, then retry.'
+                : 'Location is blocked. Allow location for this app in system settings, then retry.'
               : 'Location is blocked. Allow it in the address bar, then retry.'
             : message.includes('not supported')
               ? 'Geolocation is not supported by your browser.'
@@ -175,7 +208,17 @@ export function WorkdayPunchDialogs({
         );
       }
     })();
-  }, [geofenceOptional, hasOfficeCoords, hasWfhAuthorization, isCheckedIn, isWfh, officeLat, officeLng, radiusMeters]);
+  }, [
+    geofenceOptional,
+    hasOfficeCoords,
+    hasWfhAuthorization,
+    isCheckedIn,
+    isWfh,
+    needsAlwaysForOffice,
+    officeLat,
+    officeLng,
+    radiusMeters,
+  ]);
 
   useEffect(() => {
     if (!open) {
@@ -338,13 +381,14 @@ export function WorkdayPunchDialogs({
   if (!open) return null;
 
   const officeCoordsMissing = !geofenceOptional && !remoteAuthorized && !isCheckedIn && !hasOfficeCoords;
+  const alwaysRequiredMissing = needsAlwaysForOffice && !hasAlwaysLocation;
   const gpsRequiredMissing =
     requireGps &&
     !geofenceOptional &&
     !remoteAuthorized &&
     !isCheckedIn &&
     hasOfficeCoords &&
-    (!hasDeviceGps || gpsStatus !== 'granted');
+    (!hasDeviceGps || gpsStatus !== 'granted' || alwaysRequiredMissing);
   const isPunchDisabled =
     saving ||
     officeCoordsMissing ||
@@ -556,9 +600,20 @@ export function WorkdayPunchDialogs({
                       : punchAddress}
               </p>
               {gpsStatus === 'denied' && !isWfh && (
-                <button type="button" className="work-btn-secondary h-8 px-3 text-xs" onClick={fetchLocation}>
-                  Retry GPS
-                </button>
+                <div className="flex shrink-0 gap-2">
+                  {alwaysRequiredMissing ? (
+                    <button
+                      type="button"
+                      className="work-btn-secondary h-8 px-3 text-xs"
+                      onClick={() => void openAlwaysLocationSettings()}
+                    >
+                      Open settings
+                    </button>
+                  ) : null}
+                  <button type="button" className="work-btn-secondary h-8 px-3 text-xs" onClick={fetchLocation}>
+                    Retry GPS
+                  </button>
+                </div>
               )}
             </div>
 
@@ -588,7 +643,9 @@ export function WorkdayPunchDialogs({
                     ? 'Configure office latitude/longitude in Settings, or switch to WFH'
                     : isLocating
                       ? 'Acquiring device GPS location...'
-                      : gpsRequiredMissing
+                      : alwaysRequiredMissing
+                        ? 'Set location to Allow all the time to track office attendance'
+                        : gpsRequiredMissing
                         ? 'Location permission is required to verify office attendance'
                         : requireSelfie
                           ? 'Proceed to face verification'
