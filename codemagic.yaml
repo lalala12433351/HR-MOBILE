@@ -1,0 +1,108 @@
+workflows:
+  ios-workflow:
+    name: iOS Workflow
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: in.pixbe.hrsolutions
+      vars:
+        XCODE_PROJECT: hrsolutions/ios/App/App.xcodeproj
+        XCODE_SCHEME: App
+        BUNDLE_ID: in.pixbe.hrsolutions
+        NEXT_PUBLIC_BACKEND_URL: https://api.pixbe.in
+        # Set in Codemagic → Environment variables (group or workflow):
+        # MOBILE_GOOGLE_MAPS_API_KEY (required for maps)
+        # NEXT_PUBLIC_SERVER_API_ORIGIN (optional)
+      node: 22.14.0
+      xcode: latest
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          cd hrsolutions
+          npm ci
+      - name: Require Google Maps API key
+        script: |
+          if [ -z "$MOBILE_GOOGLE_MAPS_API_KEY" ]; then
+            echo "Add MOBILE_GOOGLE_MAPS_API_KEY in Codemagic environment variables."
+            exit 1
+          fi
+      - name: Build bundled mobile UI
+        script: |
+          cd hrsolutions
+          export NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="$MOBILE_GOOGLE_MAPS_API_KEY"
+          npm run build:mobile
+      - name: Sync Capacitor iOS
+        script: |
+          cd hrsolutions
+          export CAPACITOR_SERVER_URL=""
+          npm run cap:sync:ios
+      - name: Set up code signing
+        script: |
+          xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - hrsolutions/ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dsym
+    publishing:
+      email:
+        recipients:
+          - $CM_COMMIT_AUTHOR_EMAIL
+        notify:
+          success: false
+          failure: true
+
+  android-workflow:
+    name: Android Workflow
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      vars:
+        PACKAGE_NAME: in.pixbe.hrsolutions
+        NEXT_PUBLIC_BACKEND_URL: https://api.pixbe.in
+        # Set in Codemagic → Environment variables:
+        # MOBILE_GOOGLE_MAPS_API_KEY (required for maps)
+        # NEXT_PUBLIC_SERVER_API_ORIGIN (optional)
+      node: 22.14.0
+      java: 21
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          cd hrsolutions
+          npm ci
+      - name: Require Google Maps API key
+        script: |
+          if [ -z "$MOBILE_GOOGLE_MAPS_API_KEY" ]; then
+            echo "Add MOBILE_GOOGLE_MAPS_API_KEY in Codemagic environment variables."
+            exit 1
+          fi
+      - name: Build bundled mobile UI
+        script: |
+          cd hrsolutions
+          export NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="$MOBILE_GOOGLE_MAPS_API_KEY"
+          npm run build:mobile
+      - name: Sync Capacitor Android
+        script: |
+          cd hrsolutions
+          export CAPACITOR_SERVER_URL=""
+          npm run cap:sync:android
+      - name: Build Android debug APK
+        script: |
+          cd hrsolutions/android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+    artifacts:
+      - hrsolutions/android/app/build/outputs/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - $CM_COMMIT_AUTHOR_EMAIL
+        notify:
+          success: false
+          failure: true
