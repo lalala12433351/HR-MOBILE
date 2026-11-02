@@ -49,13 +49,6 @@ workflows:
       - hrsolutions/ios/App/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
       - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dsym
-    publishing:
-      email:
-        recipients:
-          - $CM_COMMIT_AUTHOR_EMAIL
-        notify:
-          success: false
-          failure: true
 
   android-workflow:
     name: Android Workflow
@@ -97,10 +90,3 @@ workflows:
           ./gradlew assembleDebug --no-daemon --stacktrace
     artifacts:
       - hrsolutions/android/app/build/outputs/**/*.apk
-    publishing:
-      email:
-        recipients:
-          - $CM_COMMIT_AUTHOR_EMAIL
-        notify:
-          success: false
-          failure: true
