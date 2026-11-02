@@ -4,6 +4,8 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m2
     environment:
+      groups:
+        - mobile_secrets
       ios_signing:
         distribution_type: app_store
         bundle_identifier: in.pixbe.hrsolutions
@@ -12,9 +14,6 @@ workflows:
         XCODE_SCHEME: App
         BUNDLE_ID: in.pixbe.hrsolutions
         NEXT_PUBLIC_BACKEND_URL: https://api.pixbe.in
-        # Set in Codemagic → Environment variables (group or workflow):
-        # MOBILE_GOOGLE_MAPS_API_KEY (required for maps)
-        # NEXT_PUBLIC_SERVER_API_ORIGIN (optional)
       node: 22.14.0
       xcode: latest
     scripts:
@@ -25,7 +24,7 @@ workflows:
       - name: Require Google Maps API key
         script: |
           if [ -z "$MOBILE_GOOGLE_MAPS_API_KEY" ]; then
-            echo "Add MOBILE_GOOGLE_MAPS_API_KEY in Codemagic environment variables."
+            echo "Add MOBILE_GOOGLE_MAPS_API_KEY to Codemagic variable group: mobile_secrets"
             exit 1
           fi
       - name: Build bundled mobile UI
@@ -63,12 +62,11 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m2
     environment:
+      groups:
+        - mobile_secrets
       vars:
         PACKAGE_NAME: in.pixbe.hrsolutions
         NEXT_PUBLIC_BACKEND_URL: https://api.pixbe.in
-        # Set in Codemagic → Environment variables:
-        # MOBILE_GOOGLE_MAPS_API_KEY (required for maps)
-        # NEXT_PUBLIC_SERVER_API_ORIGIN (optional)
       node: 22.14.0
       java: 21
     scripts:
@@ -79,7 +77,7 @@ workflows:
       - name: Require Google Maps API key
         script: |
           if [ -z "$MOBILE_GOOGLE_MAPS_API_KEY" ]; then
-            echo "Add MOBILE_GOOGLE_MAPS_API_KEY in Codemagic environment variables."
+            echo "Add MOBILE_GOOGLE_MAPS_API_KEY to Codemagic variable group: mobile_secrets"
             exit 1
           fi
       - name: Build bundled mobile UI
